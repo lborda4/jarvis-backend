@@ -1,0 +1,118 @@
+import {
+  BadGatewayException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
+import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
+import { mapElectronicDocumentToListItem } from '../../electronic-document/mappers/electronic-document-list-item.mapper';
+import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
+import { ResumeElectronicDocumentResponseDto } from '../../electronic-document/dto/resume-electronic-document.dto';
+import { SiigoDocumentPreparationService } from './siigo-document-preparation.service';
+import { SiigoDocumentCreationService } from './siigo-document-creation.service';
+
+@Injectable()
+export class SiigoDocumentResumeService {
+  private readonly logger = new Logger(SiigoDocumentResumeService.name);
+
+  constructor(
+    private readonly electronicDocumentService: ElectronicDocumentService,
+    private readonly siigoDocumentPreparationService: SiigoDocumentPreparationService,
+    private readonly siigoDocumentCreationService: SiigoDocumentCreationService,
+  ) {}
+
+  async resume(
+    documentId: string,
+    companyId: string,
+  ): Promise<ResumeElectronicDocumentResponseDto> {
+    const trimmedId = documentId?.trim();
+    const document = await this.electronicDocumentService.requireById(
+      trimmedId,
+      companyId,
+    );
+
+    if (document.status === ElectronicDocumentStatus.SUPPLIER_NOT_FOUND) {
+      return this.buildResponse('SUPPLIER_REQUIRED', document.id, companyId);
+    }
+
+    if (
+      (document.status === ElectronicDocumentStatus.ACCOUNT_REQUIRED ||
+        document.status === ElectronicDocumentStatus.ACCOUNT_MAPPING_REQUIRED) &&
+      document.supplierExistsInSiigo === true
+    ) {
+      return this.buildResponse('ACCOUNT_REQUIRED', document.id, companyId);
+    }
+
+    if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+      return this.buildResponse('COMPLETED', document.id, companyId);
+    }
+
+    try {
+      const preparationResult =
+        await this.siigoDocumentPreparationService.prepareSupplierAndAccounts(
+          trimmedId,
+          companyId,
+        );
+
+      if (preparationResult.nextStep === 'SUPPLIER_REQUIRED') {
+        return this.buildResponse('SUPPLIER_REQUIRED', document.id, companyId);
+      }
+
+      if (preparationResult.nextStep === 'ACCOUNT_REQUIRED') {
+        return this.buildResponse('ACCOUNT_REQUIRED', document.id, companyId);
+      }
+
+      await this.siigoDocumentCreationService.createInSiigo(
+        trimmedId,
+        companyId,
+      );
+
+      return this.buildResponse('COMPLETED', document.id, companyId);
+    } catch (error) {
+      this.logger.error(
+        `[documentId=${trimmedId}] Error al reanudar documento`,
+        error instanceof Error ? error.stack : String(error),
+      );
+
+      const message =
+        error instanceof BadGatewayException || error instanceof Error
+          ? error.message
+          : 'No se pudo reanudar el proceso del documento.';
+
+      const refreshed = await this.electronicDocumentService.requireById(
+        trimmedId,
+        companyId,
+      );
+
+      if (refreshed.status === ElectronicDocumentStatus.SUPPLIER_NOT_FOUND) {
+        return this.buildResponse('SUPPLIER_REQUIRED', document.id, companyId, message);
+      }
+
+      if (
+        refreshed.status === ElectronicDocumentStatus.ACCOUNT_REQUIRED ||
+        refreshed.status === ElectronicDocumentStatus.ACCOUNT_MAPPING_REQUIRED
+      ) {
+        return this.buildResponse('ACCOUNT_REQUIRED', document.id, companyId, message);
+      }
+
+      return this.buildResponse('FAILED', document.id, companyId, message);
+    }
+  }
+
+  private async buildResponse(
+    nextStep: ResumeElectronicDocumentResponseDto['nextStep'],
+    documentId: string,
+    companyId: string,
+    message?: string,
+  ): Promise<ResumeElectronicDocumentResponseDto> {
+    const document = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
+
+    return {
+      nextStep,
+      message,
+      document: mapElectronicDocumentToListItem(document),
+    };
+  }
+}

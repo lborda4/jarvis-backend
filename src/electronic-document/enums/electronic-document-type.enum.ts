@@ -1,0 +1,4 @@
+export enum ElectronicDocumentType {
+  PURCHASE_INVOICE = 'PURCHASE_INVOICE',
+  SUPPORT_DOCUMENT = 'SUPPORT_DOCUMENT',
+}

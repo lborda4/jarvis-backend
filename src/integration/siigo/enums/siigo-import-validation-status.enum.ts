@@ -1,0 +1,4 @@
+export enum SiigoImportValidationStatus {
+  THIRD_PARTY_REQUIRED = 'THIRD_PARTY_REQUIRED',
+  ACCOUNT_REQUIRED = 'ACCOUNT_REQUIRED',
+}
