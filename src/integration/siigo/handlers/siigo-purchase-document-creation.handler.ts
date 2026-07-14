@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ElectronicDocumentStatus } from '../../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../../electronic-document/enums/electronic-document-type.enum';
 import { mapElectronicDocumentToResponse } from '../../../electronic-document/mappers/electronic-document-response.mapper';
@@ -18,6 +19,7 @@ import { mapElectronicDocumentToSiigoPurchase } from '../mappers/electronic-docu
 import { SiigoAuthService } from '../siigo-auth.service';
 import { SiigoPurchaseService } from '../siigo-purchase.service';
 import { SiigoConfigurationCacheService } from '../siigo-configuration-cache.service';
+import { AppConfiguration } from '../../../config/configuration';
 
 const ALLOWED_STATUSES = new Set<ElectronicDocumentStatus>([
   ElectronicDocumentStatus.ACCOUNT_MAPPED,
@@ -38,6 +40,7 @@ export class SiigoPurchaseDocumentCreationHandler
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
+    private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
   async create(
@@ -73,6 +76,11 @@ export class SiigoPurchaseDocumentCreationHandler
     const purchasePayload = mapElectronicDocumentToSiigoPurchase(
       electronicDocument.payload,
       purchaseConfig,
+      {
+        defaultTaxRate: this.configService.get('siigo.defaultTaxRate', {
+          infer: true,
+        }),
+      },
     );
 
     try {

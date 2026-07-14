@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import dataSource from '../config/data-source';
 
 async function runMigrations(): Promise<void> {

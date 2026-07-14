@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Integration } from '../entities/integration.entity';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { SiigoCredentials } from '../interfaces/integration-credentials.interface';
@@ -11,12 +12,14 @@ import {
 import {
   normalizeSiigoCredentials,
   resolveSiigoCredentials,
+  SiigoEnvCredentials,
 } from './helpers/siigo-credentials.helper';
 import {
   formatAuthorizationHeader,
   stripBearerPrefix,
 } from './helpers/siigo-auth.helper';
 import { handleSiigoApiError } from './helpers/siigo-error.helper';
+import { AppConfiguration } from '../../config/configuration';
 
 import { SiigoAuthContext } from './interfaces/siigo-auth-context.interface';
 
@@ -27,6 +30,7 @@ export class SiigoAuthService {
   constructor(
     private readonly siigoHttpClient: SiigoHttpClient,
     private readonly integrationsRepository: IntegrationsRepository,
+    private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
   async getValidAccessToken(companyId: string): Promise<string> {
@@ -121,6 +125,7 @@ export class SiigoAuthService {
     const integration = await this.getSiigoIntegration(companyId);
     const credentials = resolveSiigoCredentials(
       normalizeSiigoCredentials(integration.credentials),
+      this.getSiigoEnvCredentials(),
     );
     await this.invalidateStoredToken(integration);
     const refreshedCredentials = await this.refreshAndPersistToken(
@@ -147,6 +152,7 @@ export class SiigoAuthService {
     const integration = await this.getSiigoIntegration(companyId);
     const credentials = resolveSiigoCredentials(
       normalizeSiigoCredentials(integration.credentials),
+      this.getSiigoEnvCredentials(),
     );
 
     if (this.isTokenValid(credentials)) {
@@ -255,5 +261,13 @@ export class SiigoAuthService {
     );
 
     return updatedCredentials;
+  }
+
+  private getSiigoEnvCredentials(): SiigoEnvCredentials {
+    return {
+      username: this.configService.get('siigo.username', { infer: true }),
+      accessKey: this.configService.get('siigo.accessKey', { infer: true }),
+      partnerId: this.configService.get('siigo.partnerId', { infer: true }),
+    };
   }
 }

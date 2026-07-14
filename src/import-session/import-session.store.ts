@@ -3,12 +3,13 @@ import {
   Logger,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import {
-  DEFAULT_IMPORT_SESSION_TTL_SECONDS,
   IMPORT_SESSION_KEY_PREFIX,
 } from './constants/import-session.constants';
 import { ImportSessionData } from './interfaces/import-session.interface';
+import { AppConfiguration } from '../config/configuration';
 
 interface MemorySessionEntry {
   data: string;
@@ -22,13 +23,14 @@ export class ImportSessionStore implements OnModuleDestroy {
   private readonly memoryStore = new Map<string, MemorySessionEntry>();
   private readonly ttlSeconds: number;
 
-  constructor() {
-    this.ttlSeconds = Number(
-      process.env.IMPORT_SESSION_TTL_SECONDS ??
-        DEFAULT_IMPORT_SESSION_TTL_SECONDS,
-    );
+  constructor(
+    private readonly configService: ConfigService<AppConfiguration, true>,
+  ) {
+    this.ttlSeconds = this.configService.get('redis.importSessionTtlSeconds', {
+      infer: true,
+    });
 
-    const redisUrl = process.env.REDIS_URL?.trim();
+    const redisUrl = this.configService.get('redis.url', { infer: true });
 
     if (redisUrl) {
       this.redis = new Redis(redisUrl);

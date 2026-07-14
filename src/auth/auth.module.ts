@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -11,14 +12,17 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { UserCompaniesRepository } from './repositories/user-companies.repository';
 import { UsersRepository } from './repositories/users.repository';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { getJwtAccessSecret } from './constants/auth.constants';
+import { AppConfiguration } from '../config/configuration';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, UserCompany]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.register({
-      secret: getJwtAccessSecret(),
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService<AppConfiguration, true>) => ({
+        secret: configService.get('jwt.accessSecret', { infer: true }),
+      }),
     }),
   ],
   controllers: [AuthController],

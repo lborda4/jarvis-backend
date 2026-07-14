@@ -4,11 +4,13 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { DataSource } from 'typeorm';
 import { Company } from '../company/entities/company.entity';
 import { ensureSiigoIntegration } from '../integration/helpers/integration-setup.helper';
+import { AppConfiguration } from '../config/configuration';
 import { UserCompany } from './entities/user-company.entity';
 import { User } from './entities/user.entity';
 import {
@@ -25,11 +27,6 @@ import {
 } from './mappers/auth-response.mapper';
 import { UsersRepository } from './repositories/users.repository';
 import { UserCompaniesRepository } from './repositories/user-companies.repository';
-import {
-  getJwtAccessExpiresIn,
-  getJwtRefreshExpiresIn,
-  getJwtRefreshSecret,
-} from './constants/auth.constants';
 import { AuthTokenPayload, AuthenticatedUser } from './interfaces/jwt-payload.interface';
 
 const BCRYPT_SALT_ROUNDS = 10;
@@ -39,6 +36,7 @@ export class AuthService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService<AppConfiguration, true>,
     private readonly usersRepository: UsersRepository,
     private readonly userCompaniesRepository: UserCompaniesRepository,
   ) {}
@@ -164,7 +162,7 @@ export class AuthService {
 
     try {
       payload = await this.jwtService.verifyAsync<AuthTokenPayload>(refreshToken, {
-        secret: getJwtRefreshSecret(),
+        secret: this.configService.get('jwt.refreshSecret', { infer: true }),
       });
     } catch {
       throw new UnauthorizedException('Refresh token inválido o expirado.');
@@ -255,11 +253,15 @@ export class AuthService {
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(accessPayload, {
-        expiresIn: getJwtAccessExpiresIn() as `${number}${'s' | 'm' | 'h' | 'd'}`,
+        expiresIn: this.configService.get('jwt.accessExpiresIn', {
+          infer: true,
+        }) as `${number}${'s' | 'm' | 'h' | 'd'}`,
       }),
       this.jwtService.signAsync(refreshPayload, {
-        secret: getJwtRefreshSecret(),
-        expiresIn: getJwtRefreshExpiresIn() as `${number}${'s' | 'm' | 'h' | 'd'}`,
+        secret: this.configService.get('jwt.refreshSecret', { infer: true }),
+        expiresIn: this.configService.get('jwt.refreshExpiresIn', {
+          infer: true,
+        }) as `${number}${'s' | 'm' | 'h' | 'd'}`,
       }),
     ]);
 

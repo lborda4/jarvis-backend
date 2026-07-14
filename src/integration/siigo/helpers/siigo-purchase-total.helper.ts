@@ -8,6 +8,7 @@ export interface CalculateSiigoPurchaseTotalOptions {
   taxAmount?: number;
   discount?: number;
   dueDate?: string;
+  envDefaultTaxRate?: number;
 }
 
 export type SiigoDiscountType = 'Value' | 'Percentage';
@@ -26,6 +27,7 @@ export interface CalculateSiigoDocumentTotalOptions {
   taxRate?: number;
   subtotal?: number;
   taxAmount?: number;
+  envDefaultTaxRate?: number;
   roundAmount?: (value: number) => number;
 }
 
@@ -44,7 +46,7 @@ export function roundSiigoAmount(value: number): number {
 export function resolveSiigoTaxRate(
   options: Pick<
     CalculateSiigoDocumentTotalOptions,
-    'taxRate' | 'subtotal' | 'taxAmount'
+    'taxRate' | 'subtotal' | 'taxAmount' | 'envDefaultTaxRate'
   >,
 ): number {
   if (options.taxRate !== undefined && options.taxRate >= 0) {
@@ -60,14 +62,8 @@ export function resolveSiigoTaxRate(
     return options.taxAmount / options.subtotal;
   }
 
-  const envRate = process.env.SIIGO_DEFAULT_TAX_RATE;
-
-  if (envRate !== undefined && envRate !== '') {
-    const parsed = Number(envRate);
-
-    if (!Number.isNaN(parsed) && parsed >= 0) {
-      return parsed;
-    }
+  if (options.envDefaultTaxRate !== undefined && options.envDefaultTaxRate >= 0) {
+    return options.envDefaultTaxRate;
   }
 
   return 0;
@@ -306,6 +302,7 @@ export function calculateSiigoPurchasePaymentValue(
     taxRate: resolveSiigoTaxRate(options),
     subtotal: options.subtotal,
     taxAmount: options.taxAmount,
+    envDefaultTaxRate: options.envDefaultTaxRate,
     globalDiscount: discount,
     roundAmount: roundSiigoAmount,
   });

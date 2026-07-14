@@ -6,9 +6,14 @@ import { SiigoPurchaseConfig } from '../helpers/siigo-purchase-config.helper';
 import { splitNitAndCheckDigit } from '../helpers/siigo-nit.helper';
 import { buildSiigoPurchasePayment } from '../helpers/siigo-purchase-total.helper';
 
+export interface SiigoPurchaseMappingOptions {
+  defaultTaxRate?: number;
+}
+
 export function mapElectronicDocumentToSiigoPurchase(
   payload: ElectronicDocumentPayload,
   config: SiigoPurchaseConfig,
+  options: SiigoPurchaseMappingOptions = {},
 ): SiigoPurchaseRequestDto {
   validatePayloadForPurchase(payload);
 
@@ -54,6 +59,7 @@ export function mapElectronicDocumentToSiigoPurchase(
         subtotal: payload.totals.subtotal,
         taxAmount: payload.totals.iva,
         dueDate: payload.invoice.dueDate,
+        envDefaultTaxRate: options.defaultTaxRate,
       }),
     ],
   };

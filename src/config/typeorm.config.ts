@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
 import { User } from '../auth/entities/user.entity';
@@ -5,19 +6,14 @@ import { Company } from '../company/entities/company.entity';
 import { ElectronicDocument } from '../electronic-document/entities/electronic-document.entity';
 import { Integration } from '../integration/entities/integration.entity';
 import { SupplierConfiguration } from '../integration/entities/supplier-configuration.entity';
+import { AppConfiguration } from './configuration';
 
-export function getTypeOrmConfig(): TypeOrmModuleOptions {
-  const databaseUrl = process.env.DATABASE_URL;
-
-  if (!databaseUrl) {
-    throw new Error(
-      'DATABASE_URL no está definida. Configúrala en tu archivo .env',
-    );
-  }
-
+export function buildTypeOrmConfig(
+  configService: ConfigService<AppConfiguration, true>,
+): TypeOrmModuleOptions {
   return {
     type: 'postgres',
-    url: databaseUrl,
+    url: configService.get('database.url', { infer: true }),
     ssl: { rejectUnauthorized: false },
     entities: [
       Integration,
@@ -28,7 +24,7 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       UserCompany,
     ],
     migrations: ['dist/migrations/*.js'],
-    migrationsRun: process.env.DB_MIGRATIONS_RUN === 'true',
-    synchronize: process.env.DB_SYNCHRONIZE === 'true',
+    migrationsRun: configService.get('database.migrationsRun', { infer: true }),
+    synchronize: configService.get('database.synchronize', { infer: true }),
   };
 }

@@ -29,13 +29,19 @@ export function normalizeSiigoCredentials(
   };
 }
 
+export interface SiigoEnvCredentials {
+  username?: string;
+  accessKey?: string;
+  partnerId?: string;
+}
+
 export function resolveSiigoCredentials(
   credentials: SiigoCredentials,
+  envDefaults: SiigoEnvCredentials = {},
 ): SiigoCredentials {
-  const username = credentials.username || process.env.SIIGO_USERNAME;
-  const access_key = credentials.access_key || process.env.SIIGO_ACCESS_KEY;
-  const partner_id =
-    credentials.partner_id || process.env.SIIGO_PARTNER_ID || undefined;
+  const username = credentials.username || envDefaults.username;
+  const access_key = credentials.access_key || envDefaults.accessKey;
+  const partner_id = credentials.partner_id || envDefaults.partnerId || undefined;
 
   if (!username || !access_key) {
     throw new Error(
