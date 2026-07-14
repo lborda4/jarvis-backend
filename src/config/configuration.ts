@@ -1,6 +1,7 @@
 export interface AppConfig {
   nodeEnv: string;
   port: number;
+  corsOrigins: string[];
 }
 
 export interface DatabaseConfig {
@@ -81,10 +82,22 @@ function trimOptional(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function parseCsvList(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default (): AppConfiguration => ({
   app: {
     nodeEnv: process.env.NODE_ENV?.trim() || 'local',
     port: parsePositiveInteger(process.env.PORT, 3000),
+    corsOrigins: parseCsvList(process.env.CORS_ORIGINS),
   },
   database: {
     url: process.env.DATABASE_URL?.trim() ?? '',

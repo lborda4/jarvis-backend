@@ -10,8 +10,11 @@ async function bootstrap() {
   const configService = app.get(ConfigService<AppConfiguration, true>);
   const port = configService.get('app.port', { infer: true });
 
+  const corsOrigins = configService.get('app.corsOrigins', { infer: true });
+  const defaultCorsOrigins = ['http://localhost:5173'];
+
   app.enableCors({
-    origin: 'http://localhost:5173',
+    origin: corsOrigins.length > 0 ? corsOrigins : defaultCorsOrigins,
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'rquid'],
   });
