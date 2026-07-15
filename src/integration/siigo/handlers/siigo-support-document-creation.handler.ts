@@ -94,6 +94,7 @@ export class SiigoSupportDocumentCreationHandler
           documentId,
           supportDocument.id,
           companyId,
+          supportDocument.number ?? null,
         );
 
       return {

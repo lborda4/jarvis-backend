@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import {
   isSiigoRateLimitError,
+  isSiigoSupportDocumentNumberAlreadyExistsError,
   isSiigoUnauthorizedError,
   sleep,
 } from './siigo-auth.helper';
@@ -9,6 +10,8 @@ import { SiigoAuthService } from '../siigo-auth.service';
 import { SiigoAuthContext } from '../interfaces/siigo-auth-context.interface';
 
 const MAX_UNAUTHORIZED_RETRIES = 2;
+const MAX_SUPPORT_DOCUMENT_NUMBER_RETRIES = 1;
+const SUPPORT_DOCUMENT_NUMBER_RETRY_DELAY_MS = 3000;
 
 export async function executeSiigoRequestWithRetries<T>(
   authService: SiigoAuthService,
@@ -49,6 +52,27 @@ export async function executeSiigoRequestWithRetries<T>(
 
     if (isSiigoRateLimitError(error) && attempt < 2) {
       await sleep(1500);
+
+      return executeSiigoRequestWithRetries(
+        authService,
+        companyId,
+        logger,
+        operationLabel,
+        request,
+        attempt + 1,
+        authContext,
+      );
+    }
+
+    if (
+      isSiigoSupportDocumentNumberAlreadyExistsError(error) &&
+      attempt < MAX_SUPPORT_DOCUMENT_NUMBER_RETRIES
+    ) {
+      logger.warn(
+        `[companyId=${companyId}] SIIGO reportó que el número del Documento Soporte ya existe al ${operationLabel}. Reenviando la misma solicitud en ${SUPPORT_DOCUMENT_NUMBER_RETRY_DELAY_MS}ms (intento ${attempt + 1}).`,
+      );
+
+      await sleep(SUPPORT_DOCUMENT_NUMBER_RETRY_DELAY_MS);
 
       return executeSiigoRequestWithRetries(
         authService,

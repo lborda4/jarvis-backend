@@ -23,9 +23,15 @@ import { AppConfiguration } from '../../config/configuration';
 
 import { SiigoAuthContext } from './interfaces/siigo-auth-context.interface';
 
+interface CachedAuthContext {
+  context: SiigoAuthContext;
+  expiresAtMs: number;
+}
+
 @Injectable()
 export class SiigoAuthService {
   private readonly logger = new Logger(SiigoAuthService.name);
+  private readonly authContextCache = new Map<string, CachedAuthContext>();
 
   constructor(
     private readonly siigoHttpClient: SiigoHttpClient,
@@ -122,6 +128,8 @@ export class SiigoAuthService {
   async forceRefreshAuthContext(companyId: string): Promise<SiigoAuthContext> {
     console.log('[SIIGO auth] forzando renovación de token...', { companyId });
 
+    this.authContextCache.delete(companyId.trim());
+
     const integration = await this.getSiigoIntegration(companyId);
     const credentials = resolveSiigoCredentials(
       normalizeSiigoCredentials(integration.credentials),
@@ -138,55 +146,90 @@ export class SiigoAuthService {
       expiresAt: refreshedCredentials.expires_at,
     });
 
-    return {
+    const context = {
       accessToken: formatAuthorizationHeader(refreshedCredentials.token as string),
       partnerId: refreshedCredentials.partner_id,
     };
+
+    this.cacheAuthContext(companyId.trim(), context, refreshedCredentials.expires_at);
+
+    return context;
   }
 
   async getValidAuthContext(companyId: string): Promise<SiigoAuthContext> {
+    const trimmedCompanyId = companyId.trim();
+    const cached = this.authContextCache.get(trimmedCompanyId);
+    const safetyWindowMs = 5 * 60 * 1000;
+
+    if (cached && cached.expiresAtMs - safetyWindowMs > Date.now()) {
+      return cached.context;
+    }
+
     console.log('[SIIGO auth] obteniendo contexto de autenticación...', {
-      companyId,
+      companyId: trimmedCompanyId,
     });
 
-    const integration = await this.getSiigoIntegration(companyId);
+    const integration = await this.getSiigoIntegration(trimmedCompanyId);
     const credentials = resolveSiigoCredentials(
       normalizeSiigoCredentials(integration.credentials),
       this.getSiigoEnvCredentials(),
     );
 
+    let context: SiigoAuthContext;
+    let expiresAt = credentials.expires_at;
+
     if (this.isTokenValid(credentials)) {
       console.log('[SIIGO auth] token en caché válido', {
-        companyId,
+        companyId: trimmedCompanyId,
         expiresAt: credentials.expires_at,
         hasPartnerId: Boolean(credentials.partner_id),
       });
 
-      return {
+      context = {
         accessToken: formatAuthorizationHeader(credentials.token as string),
         partnerId: credentials.partner_id,
       };
+    } else {
+      console.log('[SIIGO auth] token expirado o inexistente, renovando...', {
+        companyId: trimmedCompanyId,
+      });
+
+      const refreshedCredentials = await this.refreshAndPersistToken(
+        integration,
+        credentials,
+      );
+
+      console.log('[SIIGO auth] token renovado OK', {
+        companyId: trimmedCompanyId,
+        expiresAt: refreshedCredentials.expires_at,
+        hasPartnerId: Boolean(refreshedCredentials.partner_id),
+      });
+
+      expiresAt = refreshedCredentials.expires_at;
+      context = {
+        accessToken: formatAuthorizationHeader(refreshedCredentials.token as string),
+        partnerId: refreshedCredentials.partner_id,
+      };
     }
 
-    console.log('[SIIGO auth] token expirado o inexistente, renovando...', {
-      companyId,
+    this.cacheAuthContext(trimmedCompanyId, context, expiresAt);
+
+    return context;
+  }
+
+  private cacheAuthContext(
+    companyId: string,
+    context: SiigoAuthContext,
+    expiresAt?: string,
+  ): void {
+    const expiresAtMs = expiresAt
+      ? new Date(expiresAt).getTime()
+      : Date.now() + 60 * 60 * 1000;
+
+    this.authContextCache.set(companyId, {
+      context,
+      expiresAtMs,
     });
-
-    const refreshedCredentials = await this.refreshAndPersistToken(
-      integration,
-      credentials,
-    );
-
-    console.log('[SIIGO auth] token renovado OK', {
-      companyId,
-      expiresAt: refreshedCredentials.expires_at,
-      hasPartnerId: Boolean(refreshedCredentials.partner_id),
-    });
-
-    return {
-      accessToken: formatAuthorizationHeader(refreshedCredentials.token as string),
-      partnerId: refreshedCredentials.partner_id,
-    };
   }
 
   private async getSiigoIntegration(companyId: string): Promise<Integration> {

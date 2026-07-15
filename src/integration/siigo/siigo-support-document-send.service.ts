@@ -6,8 +6,6 @@ import {
 } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
-import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
-import { resolveSupplierDocumentFromPayload } from '../../electronic-document/helpers/electronic-document-supplier.helper';
 import { mapElectronicDocumentToResponse } from '../../electronic-document/mappers/electronic-document-response.mapper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
@@ -22,9 +20,9 @@ import { mapCreateSupportDocumentRequestToSiigo } from './mappers/create-siigo-s
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoDocumentTypesService } from './siigo-document-types.service';
 import { SiigoSupportDocumentService } from './siigo-support-document.service';
-import { SiigoSupplierService } from './siigo-supplier.service';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { validateSupportDocumentRetentions } from './helpers/siigo-support-document-retention.helper';
+import { buildSupplierPreferenceSnapshotFromSendRequest } from './helpers/siigo-support-document-preference.helper';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 
 @Injectable()
@@ -37,7 +35,6 @@ export class SiigoSupportDocumentSendService {
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
     private readonly siigoSupportDocumentService: SiigoSupportDocumentService,
-    private readonly siigoSupplierService: SiigoSupplierService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
   ) {}
@@ -76,15 +73,12 @@ export class SiigoSupportDocumentSendService {
       {},
       companyId,
     );
-    const validatedRetentions = validateSupportDocumentRetentions(
+    validateSupportDocumentRetentions(
       (request.retentions ?? []).map((retention) => retention.id),
       taxesCatalog,
     );
     const siigoPayload = mapCreateSupportDocumentRequestToSiigo(
-      {
-        ...request,
-        retentions: validatedRetentions,
-      },
+      request,
       0,
       taxesCatalog,
       sendStamp,
@@ -104,8 +98,6 @@ export class SiigoSupportDocumentSendService {
         `[documentId=${documentId}] payments.value recalculado para SIIGO (requested=${requestedPaymentValue}, calculated=${calculatedPaymentValue})`,
       );
     }
-
-    await this.ensureSupplierExistsInSiigo(electronicDocument, companyId);
 
     const siigoDocumentTypeId =
       await this.siigoDocumentTypesService.resolveSupportDocumentTypeId(
@@ -127,12 +119,36 @@ export class SiigoSupportDocumentSendService {
           ),
       );
 
+      const preferenceSnapshot = buildSupplierPreferenceSnapshotFromSendRequest(
+        request,
+        taxesCatalog,
+      );
+
       const updatedDocument =
         await this.electronicDocumentService.markPurchaseCreated(
           documentId,
           createdSupportDocument.id,
           companyId,
+          createdSupportDocument.number ?? null,
+          preferenceSnapshot
+            ? {
+                ...electronicDocument.payload,
+                siigoSendConfiguration: preferenceSnapshot,
+              }
+            : undefined,
         );
+
+      if (preferenceSnapshot) {
+        await this.siigoAccountMappingService.persistSupplierPreferenceSnapshot(
+          electronicDocument,
+          companyId,
+          preferenceSnapshot,
+        );
+
+        this.logger.log(
+          `[documentId=${documentId}] Preferencia de proveedor actualizada tras envío exitoso`,
+        );
+      }
 
       if (request.savePreferences) {
         await this.persistSupplierPreferencesFromRequest(
@@ -249,66 +265,5 @@ export class SiigoSupportDocumentSendService {
     this.logger.log(
       `[documentId=${request.documentId}] Preferencias de proveedor guardadas tras envío exitoso`,
     );
-  }
-
-  private async ensureSupplierExistsInSiigo(
-    electronicDocument: Awaited<
-      ReturnType<ElectronicDocumentService['requireById']>
-    >,
-    companyId: string,
-  ): Promise<void> {
-    const supplier = resolveSupplierDocumentFromPayload(
-      electronicDocument.payload,
-    );
-
-    if (!supplier.normalizedDocumentNumber) {
-      throw new BadRequestException(
-        'El documento no contiene un número de proveedor válido.',
-      );
-    }
-
-    const siigoSupplier = await executeSiigoRequestWithRetries(
-      this.siigoAuthService,
-      companyId,
-      this.logger,
-      'consultar proveedor para Documento Soporte',
-      (accessToken, partnerId) =>
-        this.siigoSupplierService.findSupplierByNit(
-          accessToken,
-          supplier.normalizedDocumentNumber,
-          0,
-          partnerId,
-        ),
-    );
-
-    if (!siigoSupplier) {
-      await this.electronicDocumentService.updateStatus(
-        electronicDocument.id,
-        ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
-        companyId,
-      );
-      await this.electronicDocumentService.updateProcessingMetadata(
-        electronicDocument.id,
-        {
-          supplierExistsInSiigo: false,
-          processingStatus: ElectronicDocumentProcessingStatus.SUPPLIER_REQUIRED,
-        },
-        companyId,
-      );
-
-      throw new BadRequestException(
-        `El proveedor con identificación ${supplier.normalizedDocumentNumber} no existe en SIIGO. Créelo antes de enviar el Documento Soporte.`,
-      );
-    }
-
-    if (electronicDocument.supplierExistsInSiigo !== true) {
-      await this.electronicDocumentService.updateProcessingMetadata(
-        electronicDocument.id,
-        {
-          supplierExistsInSiigo: true,
-        },
-        companyId,
-      );
-    }
   }
 }

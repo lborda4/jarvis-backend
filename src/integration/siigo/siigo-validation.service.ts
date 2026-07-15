@@ -24,6 +24,8 @@ import { getSiigoSupplierName } from './helpers/siigo-supplier.helper';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoSupplierService } from './siigo-supplier.service';
 import { SiigoCustomer } from './interfaces/siigo-api.interface';
+import { SiigoBatchContext } from './interfaces/siigo-batch-context.interface';
+import { SiigoAuthContext } from './interfaces/siigo-auth-context.interface';
 
 @Injectable()
 export class SiigoValidationService {
@@ -38,6 +40,7 @@ export class SiigoValidationService {
   async validateImport(
     request: ValidateSiigoImportRequestDto,
     companyId: string,
+    batchContext?: SiigoBatchContext,
   ): Promise<ValidateSiigoImportResponseDto> {
     const documentId = request?.documentId?.trim();
 
@@ -72,6 +75,7 @@ export class SiigoValidationService {
         supplier.normalizedDocumentNumber,
         branchOffice,
         companyId,
+        batchContext,
       );
 
       if (!siigoSupplier) {
@@ -154,33 +158,58 @@ export class SiigoValidationService {
     supplierDocument: string,
     branchOffice: number,
     companyId: string,
+    batchContext?: SiigoBatchContext,
   ): Promise<SiigoCustomer | null> {
-    console.log('[SIIGO import] obteniendo token SIIGO...', { documentId });
+    if (batchContext?.supplierByNit.has(supplierDocument)) {
+      return batchContext.supplierByNit.get(supplierDocument) ?? null;
+    }
 
-    const authContext = await this.siigoAuthService.getValidAuthContext(companyId);
+    const inFlightRequest =
+      batchContext?.supplierRequestsInFlight.get(supplierDocument);
+    if (inFlightRequest) {
+      return inFlightRequest;
+    }
 
-    console.log('[SIIGO import] token SIIGO OK', {
-      documentId,
-      hasPartnerId: Boolean(authContext.partnerId),
-      tokenPreview: authContext.accessToken.slice(0, 20) + '...',
-    });
+    const authContext =
+      batchContext?.authContext ??
+      (await this.siigoAuthService.getValidAuthContext(companyId));
 
-    return this.querySupplierWithRetries(
+    const supplierRequest = this.querySupplierWithRetries(
       documentId,
       authContext,
       supplierDocument,
       branchOffice,
       companyId,
-    );
+      0,
+      batchContext,
+    ).then((result) => {
+      batchContext?.supplierByNit.set(supplierDocument, result);
+      batchContext?.supplierRequestsInFlight.delete(supplierDocument);
+      return result;
+    });
+
+    batchContext?.supplierRequestsInFlight.set(supplierDocument, supplierRequest);
+
+    return supplierRequest;
+  }
+
+  private updateBatchAuthContext(
+    batchContext: SiigoBatchContext | undefined,
+    authContext: SiigoAuthContext,
+  ): void {
+    if (batchContext) {
+      batchContext.authContext = authContext;
+    }
   }
 
   private async querySupplierWithRetries(
     documentId: string,
-    authContext: { accessToken: string; partnerId?: string },
+    authContext: SiigoAuthContext,
     supplierDocument: string,
     branchOffice: number,
     companyId: string,
     attempt = 0,
+    batchContext?: SiigoBatchContext,
   ): Promise<SiigoCustomer | null> {
     console.log('[SIIGO import] ANTES consulta proveedor SIIGO', {
       documentId,
@@ -226,7 +255,7 @@ export class SiigoValidationService {
         const refreshedContext =
           await this.siigoAuthService.forceRefreshAuthContext(companyId);
 
-        console.log('[SIIGO import] token refrescado OK', { documentId });
+        this.updateBatchAuthContext(batchContext, refreshedContext);
 
         return this.querySupplierWithRetries(
           documentId,
@@ -235,6 +264,7 @@ export class SiigoValidationService {
           branchOffice,
           companyId,
           attempt + 1,
+          batchContext,
         );
       }
 
@@ -252,6 +282,7 @@ export class SiigoValidationService {
           branchOffice,
           companyId,
           attempt + 1,
+          batchContext,
         );
       }
 

@@ -7,7 +7,7 @@ export class CreateElectronicDocuments1740300000000
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "electronic_documents" (
+      CREATE TABLE IF NOT EXISTS "electronic_documents" (
         "id" uuid NOT NULL,
         "company_id" uuid NOT NULL,
         "cufe" character varying,
@@ -25,23 +25,23 @@ export class CreateElectronicDocuments1740300000000
     `);
 
     await queryRunner.query(`
-      CREATE INDEX "IDX_electronic_documents_company_id"
+      CREATE INDEX IF NOT EXISTS "IDX_electronic_documents_company_id"
       ON "electronic_documents" ("company_id")
     `);
 
     await queryRunner.query(`
-      CREATE INDEX "IDX_electronic_documents_cufe"
+      CREATE INDEX IF NOT EXISTS "IDX_electronic_documents_cufe"
       ON "electronic_documents" ("cufe")
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `DROP INDEX "public"."IDX_electronic_documents_cufe"`,
+      `DROP INDEX IF EXISTS "public"."IDX_electronic_documents_cufe"`,
     );
     await queryRunner.query(
-      `DROP INDEX "public"."IDX_electronic_documents_company_id"`,
+      `DROP INDEX IF EXISTS "public"."IDX_electronic_documents_company_id"`,
     );
-    await queryRunner.query(`DROP TABLE "electronic_documents"`);
+    await queryRunner.query(`DROP TABLE IF EXISTS "electronic_documents"`);
   }
 }

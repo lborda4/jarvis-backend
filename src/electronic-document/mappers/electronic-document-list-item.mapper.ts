@@ -28,6 +28,7 @@ export function mapElectronicDocumentToListItem(
     total: Number(document.payload?.totals?.total ?? 0),
     status: document.status,
     electronicDocumentType: document.electronicDocumentType,
+    siigoDocumentNumber: document.siigoDocumentNumber,
     supplierExistsInSiigo: document.supplierExistsInSiigo,
     suggestedAccount,
     suggestedPaymentMethod,

@@ -27,6 +27,10 @@ import {
   ValidateSiigoImportResponseDto,
 } from './dto/validate-siigo-import.dto';
 import { ResumeElectronicDocumentRequestDto } from '../../electronic-document/dto/resume-electronic-document.dto';
+import {
+  ResumeElectronicDocumentsBatchRequestDto,
+  ResumeElectronicDocumentsBatchResponseDto,
+} from '../../electronic-document/dto/resume-electronic-documents-batch.dto';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoDocumentPreparationService } from './siigo-document-preparation.service';
 import { SiigoDocumentResumeService } from './siigo-document-resume.service';
@@ -271,6 +275,23 @@ export class SiigoController {
     return this.siigoDocumentResumeService.resume(
       request.documentId,
       getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('documents/resume-batch')
+  @ApiOperation({
+    summary: 'Reanudar documentos en lote',
+    description:
+      'Valida proveedor y cuenta para varios documentos reutilizando el token SIIGO y cacheando proveedores por NIT.',
+  })
+  resumeDocumentsBatch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: ResumeElectronicDocumentsBatchRequestDto,
+  ): Promise<ResumeElectronicDocumentsBatchResponseDto> {
+    return this.siigoDocumentResumeService.resumeBatch(
+      request.documentIds ?? [],
+      getAuthenticatedCompanyId(user),
+      { prepareOnly: request.prepareOnly ?? true },
     );
   }
 }

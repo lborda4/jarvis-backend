@@ -8,6 +8,7 @@ export class ElectronicDocumentResponseDto {
   documentTypeThird: string | null;
   status: string;
   siigoPurchaseId: string | null;
+  siigoDocumentNumber: number | null;
   payload: ElectronicDocumentPayload;
   createdAt: string;
   updatedAt: string;

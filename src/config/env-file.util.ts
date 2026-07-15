@@ -17,7 +17,7 @@ export function resolveEnvFilePath(nodeEnv = process.env.NODE_ENV?.trim()): stri
 }
 
 export function buildEnvFilePaths(nodeEnv = process.env.NODE_ENV?.trim()): string[] {
-  const candidates = ['.env', resolveEnvFilePath(nodeEnv)];
+  const candidates = [resolveEnvFilePath(nodeEnv), '.env'];
 
   return candidates.filter((candidate, index) => {
     if (!existsSync(resolve(process.cwd(), candidate))) {
@@ -29,7 +29,7 @@ export function buildEnvFilePaths(nodeEnv = process.env.NODE_ENV?.trim()): strin
 }
 
 export function loadEnvironmentVariables(): string[] {
-  const loadedFiles = buildEnvFilePaths();
+  const loadedFiles = [...buildEnvFilePaths()].reverse();
 
   for (const candidate of loadedFiles) {
     loadDotenv({
@@ -38,5 +38,5 @@ export function loadEnvironmentVariables(): string[] {
     });
   }
 
-  return loadedFiles;
+  return buildEnvFilePaths();
 }

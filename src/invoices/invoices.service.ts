@@ -14,6 +14,7 @@ import {
 import { ElectronicDocumentType } from '../electronic-document/enums/electronic-document-type.enum';
 import { parseElectronicDocumentType } from '../electronic-document/helpers/electronic-document-type.helper';
 import { ElectronicDocumentService } from '../electronic-document/electronic-document.service';
+import { SiigoDocumentPreparationService } from '../integration/siigo/siigo-document-preparation.service';
 import { ImportSessionService } from '../import-session/import-session.service';
 import { ExcelService } from '../common/services/excel.service';
 import { ExtractInvoicesResponseDto } from './dto/extract-invoices-response.dto';
@@ -46,6 +47,7 @@ export class InvoicesService {
     private readonly dianParserService: DianParserService,
     private readonly importSessionService: ImportSessionService,
     private readonly electronicDocumentService: ElectronicDocumentService,
+    private readonly siigoDocumentPreparationService: SiigoDocumentPreparationService,
   ) {}
 
   async previewSupportDocumentsFromExcel(
@@ -154,6 +156,14 @@ export class InvoicesService {
     this.logger.log(
       `Documentos Soporte guardados: documentsCreated=${result.documentsCreated}, itemsTotal=${result.itemsTotal}`,
     );
+
+    const resolvedCompanyId = companyId?.trim();
+    if (resolvedCompanyId && result.documentIds.length > 0) {
+      this.siigoDocumentPreparationService.prepareDocumentsInBackground(
+        result.documentIds,
+        resolvedCompanyId,
+      );
+    }
 
     return {
       processedRows,

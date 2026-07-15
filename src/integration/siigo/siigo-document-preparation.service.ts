@@ -8,7 +8,9 @@ import {
   DocumentPreparationResult,
 } from './interfaces/document-preparation-result.interface';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
+import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoValidationService } from './siigo-validation.service';
+import { SiigoBatchContext } from './interfaces/siigo-batch-context.interface';
 
 const ACCOUNT_MAPPING_REQUIRED_STATUS = 'ACCOUNT_MAPPING_REQUIRED';
 
@@ -20,6 +22,7 @@ export class SiigoDocumentPreparationService {
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoValidationService: SiigoValidationService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
+    private readonly siigoAuthService: SiigoAuthService,
   ) {}
 
   prepareDocumentsInBackground(
@@ -33,29 +36,38 @@ export class SiigoDocumentPreparationService {
     documentIds: string[],
     companyId: string,
   ): Promise<void> {
-    for (const documentId of documentIds) {
-      try {
-        await this.prepareSupplierAndAccounts(documentId, companyId);
-      } catch (error) {
-        this.logger.error(
-          `[documentId=${documentId}] Error en preparación en segundo plano`,
-          error instanceof Error ? error.stack : String(error),
-        );
+    const batchContext = await this.createBatchContext(companyId);
 
-        await this.electronicDocumentService.updateProcessingMetadata(
-          documentId,
-          {
-            processingStatus: ElectronicDocumentProcessingStatus.FAILED,
-          },
-          companyId,
-        );
-      }
-    }
+    await Promise.all(
+      documentIds.map(async (documentId) => {
+        try {
+          await this.prepareSupplierAndAccounts(
+            documentId,
+            companyId,
+            batchContext,
+          );
+        } catch (error) {
+          this.logger.error(
+            `[documentId=${documentId}] Error en preparación en segundo plano`,
+            error instanceof Error ? error.stack : String(error),
+          );
+
+          await this.electronicDocumentService.updateProcessingMetadata(
+            documentId,
+            {
+              processingStatus: ElectronicDocumentProcessingStatus.FAILED,
+            },
+            companyId,
+          );
+        }
+      }),
+    );
   }
 
   async prepareSupplierAndAccounts(
     documentId: string,
     companyId: string,
+    batchContext?: SiigoBatchContext,
   ): Promise<DocumentPreparationResult> {
     const trimmedId = documentId.trim();
     let document = await this.electronicDocumentService.requireById(
@@ -77,6 +89,7 @@ export class SiigoDocumentPreparationService {
           documentId: trimmedId,
         },
         companyId,
+        batchContext,
       );
 
       document = await this.electronicDocumentService.requireById(
@@ -157,6 +170,14 @@ export class SiigoDocumentPreparationService {
     return {
       documentId: trimmedId,
       nextStep: 'READY',
+    };
+  }
+
+  private async createBatchContext(companyId: string): Promise<SiigoBatchContext> {
+    return {
+      authContext: await this.siigoAuthService.getValidAuthContext(companyId),
+      supplierByNit: new Map(),
+      supplierRequestsInFlight: new Map(),
     };
   }
 

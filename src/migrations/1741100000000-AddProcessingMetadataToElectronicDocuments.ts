@@ -8,9 +8,17 @@ export class AddProcessingMetadataToElectronicDocuments1741100000000
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE "electronic_documents"
-      ADD COLUMN "supplier_exists_in_siigo" boolean,
-      ADD COLUMN "recommended_account" jsonb,
-      ADD COLUMN "processing_status" character varying(50) NOT NULL DEFAULT 'PENDING'
+      ADD COLUMN IF NOT EXISTS "supplier_exists_in_siigo" boolean
+    `);
+
+    await queryRunner.query(`
+      ALTER TABLE "electronic_documents"
+      ADD COLUMN IF NOT EXISTS "recommended_account" jsonb
+    `);
+
+    await queryRunner.query(`
+      ALTER TABLE "electronic_documents"
+      ADD COLUMN IF NOT EXISTS "processing_status" character varying(50) NOT NULL DEFAULT 'PENDING'
     `);
   }
 

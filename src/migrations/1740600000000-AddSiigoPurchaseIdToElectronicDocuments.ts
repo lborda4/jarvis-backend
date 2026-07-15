@@ -8,7 +8,7 @@ export class AddSiigoPurchaseIdToElectronicDocuments1740600000000
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE "electronic_documents"
-      ADD COLUMN "siigo_purchase_id" character varying
+      ADD COLUMN IF NOT EXISTS "siigo_purchase_id" character varying
     `);
   }
 

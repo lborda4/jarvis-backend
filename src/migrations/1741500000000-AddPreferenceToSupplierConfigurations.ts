@@ -1,21 +1,21 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddConfigurationToIntegrations1740700000000
+export class AddPreferenceToSupplierConfigurations1741500000000
   implements MigrationInterface
 {
-  name = 'AddConfigurationToIntegrations1740700000000';
+  name = 'AddPreferenceToSupplierConfigurations1741500000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "integrations"
-      ADD COLUMN IF NOT EXISTS "configuration" jsonb NOT NULL DEFAULT '{}'
+      ALTER TABLE "supplier_configurations"
+      ADD COLUMN IF NOT EXISTS "preference" jsonb
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "integrations"
-      DROP COLUMN "configuration"
+      ALTER TABLE "supplier_configurations"
+      DROP COLUMN IF EXISTS "preference"
     `);
   }
 }

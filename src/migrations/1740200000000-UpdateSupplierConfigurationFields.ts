@@ -8,7 +8,7 @@ export class UpdateSupplierConfigurationFields1740200000000
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE "supplier_configurations"
-      ADD COLUMN "supplier_name" character varying
+      ADD COLUMN IF NOT EXISTS "supplier_name" character varying
     `);
 
     await queryRunner.query(`

@@ -1,4 +1,5 @@
 import type { DianInvoiceTotals } from '../../dian/interfaces/dian-invoice-result.interface';
+import type { SupplierPreferenceSnapshot } from '../../integration/interfaces/supplier-preference.interface';
 import type { ElectronicDocumentItem } from './electronic-document-item.interface';
 
 export interface ElectronicDocumentSupplier {
@@ -37,4 +38,5 @@ export interface ElectronicDocumentPayload {
   items: ElectronicDocumentItem[];
   taxes: ElectronicDocumentTax[];
   totals: DianInvoiceTotals;
+  siigoSendConfiguration?: SupplierPreferenceSnapshot | null;
 }

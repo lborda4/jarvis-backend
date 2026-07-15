@@ -8,11 +8,11 @@ export class AddSupplierDocumentTypeToSupplierConfiguration1740500000000
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE "supplier_configurations"
-      ADD COLUMN "supplier_document_type" character varying NOT NULL DEFAULT 'NIT'
+      ADD COLUMN IF NOT EXISTS "supplier_document_type" character varying NOT NULL DEFAULT 'NIT'
     `);
 
     await queryRunner.query(`
-      CREATE INDEX "IDX_supplier_configurations_company_supplier_identity"
+      CREATE INDEX IF NOT EXISTS "IDX_supplier_configurations_company_supplier_identity"
       ON "supplier_configurations" (
         "company_id",
         "integration_id",
@@ -24,7 +24,7 @@ export class AddSupplierDocumentTypeToSupplierConfiguration1740500000000
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `DROP INDEX "public"."IDX_supplier_configurations_company_supplier_identity"`,
+      `DROP INDEX IF EXISTS "public"."IDX_supplier_configurations_company_supplier_identity"`,
     );
     await queryRunner.query(`
       ALTER TABLE "supplier_configurations"

@@ -168,15 +168,23 @@ export class ElectronicDocumentService {
     documentId: string,
     siigoPurchaseId: string,
     companyId?: string,
+    siigoDocumentNumber?: number | null,
+    payload?: ElectronicDocument['payload'],
   ): Promise<ElectronicDocument> {
     const document = await this.requireById(documentId, companyId);
     document.status = ElectronicDocumentStatus.PURCHASE_CREATED;
     document.siigoPurchaseId = siigoPurchaseId;
+    document.siigoDocumentNumber =
+      siigoDocumentNumber === undefined ? document.siigoDocumentNumber : siigoDocumentNumber;
+
+    if (payload !== undefined) {
+      document.payload = payload;
+    }
 
     const updated = await this.electronicDocumentsRepository.save(document);
 
     this.logger.log(
-      `Factura de compra registrada (id=${updated.id}, siigoPurchaseId=${updated.siigoPurchaseId})`,
+      `Factura de compra registrada (id=${updated.id}, siigoPurchaseId=${updated.siigoPurchaseId}, siigoDocumentNumber=${updated.siigoDocumentNumber ?? 'null'})`,
     );
 
     return updated;
@@ -377,7 +385,7 @@ export class ElectronicDocumentService {
   ): Promise<ElectronicDocumentListResponseDto> {
     const page = Math.max(Number.parseInt(query.page ?? '1', 10) || 1, 1);
     const limit = Math.min(
-      Math.max(Number.parseInt(query.limit ?? '50', 10) || 50, 1),
+      Math.max(Number.parseInt(query.limit ?? '10', 10) || 10, 1),
       200,
     );
 
@@ -391,6 +399,10 @@ export class ElectronicDocumentService {
     const electronicDocumentType = parseOptionalElectronicDocumentTypeFilter(
       query.electronicDocumentType,
     );
+    const supplierNits = query.supplierNits
+      ?.split(',')
+      .map((nit) => nit.trim())
+      .filter(Boolean);
 
     const { items, total } = await this.electronicDocumentsRepository.findAll({
       electronicDocumentType,
@@ -399,6 +411,7 @@ export class ElectronicDocumentService {
       dateFrom,
       dateTo,
       search: query.search,
+      supplierNits,
       page,
       limit,
     });

@@ -1,3 +1,6 @@
+import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
+import { resolveSendConfigurationFromPayload } from '../../electronic-document/helpers/electronic-document-send-configuration.helper';
+import { ElectronicDocumentPayload } from '../../electronic-document/interfaces/electronic-document-payload.interface';
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
 import {
   SupplierPaymentMethodPreference,
@@ -9,16 +12,17 @@ import {
   SuggestedAccount,
 } from './supplier-accounts-catalog.helper';
 import { normalizeSupplierMappingValue } from './supplier-mapping-value.helper';
+import {
+  resolveSuggestedAccountFromPreference,
+  resolveSuggestedPaymentMethodFromPreference,
+  resolveSuggestedRetentionsFromPreference,
+} from './supplier-preference.helper';
 
 export interface SupplierDocumentIdentity {
   companyId: string;
+  status?: string;
   documentNumberThird: string | null;
-  payload: {
-    supplier: {
-      documentNumber?: string;
-      documentType?: string;
-    };
-  };
+  payload: Pick<ElectronicDocumentPayload, 'supplier' | 'siigoSendConfiguration'>;
 }
 
 export function resolveSupplierConfigurationForDocument(
@@ -55,11 +59,31 @@ export function resolveSuggestedAccountForDocument(
   configurationIndex: Map<string, SupplierConfiguration>,
   integrationId: string,
 ): SuggestedAccount | null {
+  if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    const sendConfiguration = resolveSendConfigurationFromPayload(document.payload);
+
+    if (sendConfiguration) {
+      return {
+        code: sendConfiguration.account.code,
+        name: sendConfiguration.account.name,
+        uses: 1,
+      };
+    }
+
+    return null;
+  }
+
   const configuration = resolveSupplierConfigurationForDocument(
     document,
     configurationIndex,
     integrationId,
   );
+
+  const preferenceAccount = resolveSuggestedAccountFromPreference(configuration);
+
+  if (preferenceAccount) {
+    return preferenceAccount;
+  }
 
   if (!configuration?.autoApply) {
     return null;
@@ -73,11 +97,22 @@ export function resolveSuggestedPaymentMethodForDocument(
   configurationIndex: Map<string, SupplierConfiguration>,
   integrationId: string,
 ): SupplierPaymentMethodPreference | null {
+  if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    return resolveSendConfigurationFromPayload(document.payload)?.paymentMethod ?? null;
+  }
+
   const configuration = resolveSupplierConfigurationForDocument(
     document,
     configurationIndex,
     integrationId,
   );
+
+  const preferencePaymentMethod =
+    resolveSuggestedPaymentMethodFromPreference(configuration);
+
+  if (preferencePaymentMethod) {
+    return preferencePaymentMethod;
+  }
 
   if (!configuration?.autoApply) {
     return null;
@@ -93,11 +128,22 @@ export function resolveSuggestedRetentionsForDocument(
   configurationIndex: Map<string, SupplierConfiguration>,
   integrationId: string,
 ): SupplierRetentionPreference[] {
+  if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    return resolveSendConfigurationFromPayload(document.payload)?.retentions ?? [];
+  }
+
   const configuration = resolveSupplierConfigurationForDocument(
     document,
     configurationIndex,
     integrationId,
   );
+
+  const preferenceRetentions =
+    resolveSuggestedRetentionsFromPreference(configuration);
+
+  if (preferenceRetentions !== null) {
+    return preferenceRetentions;
+  }
 
   if (!configuration?.autoApply) {
     return [];

@@ -35,6 +35,12 @@ export class ElectronicDocumentListQueryDto {
   @ApiPropertyOptional({ description: 'Número de página', example: '1' })
   page?: string;
 
-  @ApiPropertyOptional({ description: 'Cantidad de registros por página', example: '50' })
+  @ApiPropertyOptional({ description: 'Cantidad de registros por página', example: '10' })
   limit?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filtra por NIT de proveedor (separados por coma)',
+    example: '900123456,800654321',
+  })
+  supplierNits?: string;
 }

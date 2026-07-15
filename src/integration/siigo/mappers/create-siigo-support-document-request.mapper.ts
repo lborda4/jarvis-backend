@@ -6,9 +6,7 @@ import {
 } from '../dto/create-siigo-support-document.dto';
 import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import { SiigoSupportDocumentRequestDto } from '../dto/siigo-support-document-request.dto';
-import {
-  isAllowedSupportDocumentRetentionType,
-} from '../helpers/siigo-support-document-retention.helper';
+import { resolveSupportDocumentRetentionPlacement } from '../helpers/siigo-support-document-retention.helper';
 import { calculateSiigoSupportDocumentPaymentValue, roundMoney } from '../helpers/siigo-purchase-total.helper';
 
 export function mapCreateSupportDocumentRequestToSiigo(
@@ -19,14 +17,26 @@ export function mapCreateSupportDocumentRequestToSiigo(
 ): SiigoSupportDocumentRequestDto {
   validateCreateSupportDocumentRequest(request);
 
-  const items = request.items.map((item) => mapItem(item));
-  const retentions = mapRetentions(request.retentions);
+  const retentionPlacement = resolveSupportDocumentRetentionPlacement(
+    (request.retentions ?? []).map((retention) => retention.id),
+    taxesCatalog,
+  );
+  const items = request.items.map((item) =>
+    mapItem(item, retentionPlacement.itemRetentionIds),
+  );
+  const retentions = retentionPlacement.documentRetentions.length
+    ? retentionPlacement.documentRetentions
+    : undefined;
   const sendStamp = request.stamp?.send ?? defaultSendStamp;
+  const allRetentionIds = [
+    ...retentionPlacement.documentRetentions.map((retention) => retention.id),
+    ...retentionPlacement.itemRetentionIds,
+  ];
   const calculatedPaymentValue = calculateSiigoSupportDocumentPaymentValue(
     items,
     taxesCatalog,
     {
-      retentionIds: (retentions ?? []).map((retention) => retention.id),
+      retentionIds: allRetentionIds,
     },
   );
 
@@ -94,12 +104,20 @@ function mapPayments(
   });
 }
 
-function mapItem(item: CreateSiigoSupportDocumentItemDto) {
+function mapItem(
+  item: CreateSiigoSupportDocumentItemDto,
+  itemRetentionIds: number[],
+) {
   const taxes = item.taxes?.filter((tax) => Number.isFinite(tax.id) && tax.id > 0);
   const discount =
     item.discount !== undefined && Number.isFinite(item.discount) && item.discount > 0
       ? item.discount
       : undefined;
+  const existingTaxIds = new Set((taxes ?? []).map((tax) => tax.id));
+  const itemRetentions = itemRetentionIds
+    .filter((retentionId) => !existingTaxIds.has(retentionId))
+    .map((retentionId) => ({ id: retentionId }));
+  const mergedTaxes = [...(taxes ?? []), ...itemRetentions];
 
   return {
     type: item.type?.trim() || SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT,
@@ -108,46 +126,8 @@ function mapItem(item: CreateSiigoSupportDocumentItemDto) {
     quantity: item.quantity > 0 ? item.quantity : 1,
     price: item.price,
     ...(discount !== undefined ? { discount } : {}),
-    ...(taxes?.length ? { taxes } : {}),
+    ...(mergedTaxes.length ? { taxes: mergedTaxes } : {}),
   };
-}
-
-function mapRetentions(
-  retentions?: CreateSiigoSupportDocumentRequestDto['retentions'],
-): Array<{ id: number }> | undefined {
-  if (!retentions?.length) {
-    return undefined;
-  }
-
-  const mapped: Array<{ id: number }> = [];
-  const rejectedTypes = new Set<string>();
-
-  for (const retention of retentions) {
-    if (!Number.isFinite(retention.id) || retention.id <= 0) {
-      continue;
-    }
-
-    if (retention.type && !isAllowedSupportDocumentRetentionType(retention.type)) {
-      rejectedTypes.add(retention.type.trim());
-      continue;
-    }
-
-    mapped.push({ id: retention.id });
-  }
-
-  if (rejectedTypes.size > 0) {
-    throw new BadRequestException(
-      `Las retenciones de tipo ${[...rejectedTypes].join(', ')} no son válidas en Documento Soporte. Solo se permiten ReteICA y Retefuente.`,
-    );
-  }
-
-  if (retentions.length > 0 && mapped.length === 0) {
-    throw new BadRequestException(
-      'Las retenciones enviadas no son válidas para Documento Soporte. Solo se permiten ReteICA y Retefuente.',
-    );
-  }
-
-  return mapped.length ? mapped : undefined;
 }
 
 function validateCreateSupportDocumentRequest(

@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { Company } from '../../company/entities/company.entity';
 import type { SupplierMappingValue } from '../interfaces/supplier-mapping-value.interface';
+import type { SupplierPreferenceSnapshot } from '../interfaces/supplier-preference.interface';
 import { Integration } from './integration.entity';
 
 @Entity('supplier_configurations')
@@ -36,6 +37,9 @@ export class SupplierConfiguration {
 
   @Column({ name: 'mapping_value', type: 'jsonb', nullable: true })
   mappingValue: SupplierMappingValue | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  preference: SupplierPreferenceSnapshot | null;
 
   @Column({ name: 'auto_apply', default: false })
   autoApply: boolean;

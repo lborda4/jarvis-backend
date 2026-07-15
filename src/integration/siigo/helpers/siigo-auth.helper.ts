@@ -45,6 +45,31 @@ export function isSiigoRateLimitError(error: unknown): boolean {
   );
 }
 
+export function isSiigoSupportDocumentNumberAlreadyExistsError(
+  error: unknown,
+): boolean {
+  const message = extractErrorMessage(error);
+
+  if (
+    !message.includes('estado 400') &&
+    !message.includes('"Status":400') &&
+    !message.includes('"status":400')
+  ) {
+    return false;
+  }
+
+  const hasAlreadyExistsCode =
+    message.includes('"Code":"already_exists"') ||
+    message.includes('"code":"already_exists"');
+
+  const referencesDocumentNumber =
+    message.includes('"Params":["number"]') ||
+    message.includes('"params":["number"]') ||
+    message.includes('The number already exists');
+
+  return hasAlreadyExistsCode && referencesDocumentNumber;
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -11,6 +11,7 @@ export interface FindElectronicDocumentsFilters {
   dateFrom?: Date;
   dateTo?: Date;
   search?: string;
+  supplierNits?: string[];
   page: number;
   limit: number;
 }
@@ -107,6 +108,12 @@ export class ElectronicDocumentsRepository {
             );
         }),
       );
+    }
+
+    if (filters.supplierNits?.length) {
+      query.andWhere('document.documentNumberThird IN (:...supplierNits)', {
+        supplierNits: filters.supplierNits,
+      });
     }
 
     const total = await query.getCount();

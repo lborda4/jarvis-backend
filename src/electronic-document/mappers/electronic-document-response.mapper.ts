@@ -12,6 +12,7 @@ export function mapElectronicDocumentToResponse(
     documentTypeThird: document.documentTypeThird,
     status: document.status,
     siigoPurchaseId: document.siigoPurchaseId,
+    siigoDocumentNumber: document.siigoDocumentNumber,
     payload: document.payload,
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),

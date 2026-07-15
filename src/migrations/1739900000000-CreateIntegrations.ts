@@ -5,7 +5,7 @@ export class CreateIntegrations1739900000000 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "integrations" (
+      CREATE TABLE IF NOT EXISTS "integrations" (
         "id" uuid NOT NULL,
         "provider" character varying(50) NOT NULL,
         "credentials" jsonb NOT NULL DEFAULT '{}',
@@ -25,7 +25,7 @@ export class CreateIntegrations1739900000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      DROP TABLE "integrations"
+      DROP TABLE IF EXISTS "integrations"
     `);
   }
 }

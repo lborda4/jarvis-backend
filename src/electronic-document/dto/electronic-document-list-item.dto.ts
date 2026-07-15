@@ -18,6 +18,7 @@ export class ElectronicDocumentListItemDto {
   total: number;
   status: string;
   electronicDocumentType: string | null;
+  siigoDocumentNumber: number | null;
   supplierExistsInSiigo: boolean | null;
   suggestedAccount: SuggestedAccount | null;
   suggestedPaymentMethod: SupplierPaymentMethodPreference | null;

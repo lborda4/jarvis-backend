@@ -10,6 +10,7 @@ import { mapElectronicDocumentToResponse } from '../../electronic-document/mappe
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { ElectronicDocument } from '../../electronic-document/entities/electronic-document.entity';
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
+import { SupplierPreferenceSnapshot } from '../interfaces/supplier-preference.interface';
 import {
   applySupplierPreferencesToMappingValue,
   normalizeSupplierMappingValue,
@@ -155,6 +156,60 @@ export class SiigoAccountMappingService {
       success: true,
       document: mapElectronicDocumentToResponse(updatedDocument),
     };
+  }
+
+  async persistSupplierPreferenceSnapshot(
+    electronicDocument: ElectronicDocument,
+    companyId: string,
+    preference: SupplierPreferenceSnapshot,
+  ): Promise<SupplierConfiguration> {
+    const supplier = resolveSupplierDocumentFromPayload(
+      electronicDocument.payload,
+    );
+
+    if (!supplier.normalizedDocumentNumber) {
+      throw new BadRequestException(
+        'El documento electrónico no contiene un número de proveedor válido en el payload.',
+      );
+    }
+
+    const documentType =
+      electronicDocument.payload.supplier.documentType?.trim() || 'NIT';
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+
+    let configuration =
+      await this.supplierConfigurationsRepository.findByCompanyIntegrationAndNormalizedSupplierDocument(
+        electronicDocument.companyId,
+        integration.id,
+        supplier.normalizedDocumentNumber,
+      );
+
+    if (!configuration) {
+      configuration = this.supplierConfigurationsRepository.create({
+        companyId: electronicDocument.companyId,
+        integrationId: integration.id,
+        supplierDocument: supplier.normalizedDocumentNumber,
+        supplierDocumentType: documentType,
+        supplierName: electronicDocument.payload.supplier.name || null,
+        itemType: SIIGO_DEFAULT_ITEM_TYPE,
+        mappingValue: null,
+        autoApply: false,
+      });
+    } else {
+      configuration.supplierDocumentType = documentType;
+
+      if (!configuration.supplierName) {
+        configuration.supplierName =
+          electronicDocument.payload.supplier.name || null;
+      }
+    }
+
+    configuration.preference = preference;
+
+    return this.supplierConfigurationsRepository.save(configuration);
   }
 
   async persistSupplierPreferencesForDocument(

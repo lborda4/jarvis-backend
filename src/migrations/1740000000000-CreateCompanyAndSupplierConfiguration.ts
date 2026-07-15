@@ -7,7 +7,7 @@ export class CreateCompanyAndSupplierConfiguration1740000000000
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "companies" (
+      CREATE TABLE IF NOT EXISTS "companies" (
         "id" uuid NOT NULL,
         "nit" character varying NOT NULL,
         "name" character varying NOT NULL,
@@ -19,7 +19,7 @@ export class CreateCompanyAndSupplierConfiguration1740000000000
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "supplier_configurations" (
+      CREATE TABLE IF NOT EXISTS "supplier_configurations" (
         "id" uuid NOT NULL,
         "company_id" uuid NOT NULL,
         "integration_id" uuid NOT NULL,
@@ -40,24 +40,24 @@ export class CreateCompanyAndSupplierConfiguration1740000000000
     `);
 
     await queryRunner.query(`
-      CREATE INDEX "IDX_supplier_configurations_company_integration"
+      CREATE INDEX IF NOT EXISTS "IDX_supplier_configurations_company_integration"
       ON "supplier_configurations" ("company_id", "integration_id")
     `);
 
     await queryRunner.query(`
-      CREATE INDEX "IDX_supplier_configurations_supplier_document"
+      CREATE INDEX IF NOT EXISTS "IDX_supplier_configurations_supplier_document"
       ON "supplier_configurations" ("supplier_document")
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      DROP INDEX IF EXISTS "public"."IDX_supplier_configurations_supplier_document"
+    `);
     await queryRunner.query(
-      `DROP INDEX "public"."IDX_supplier_configurations_supplier_document"`,
+      `DROP INDEX IF EXISTS "public"."IDX_supplier_configurations_company_integration"`,
     );
-    await queryRunner.query(
-      `DROP INDEX "public"."IDX_supplier_configurations_company_integration"`,
-    );
-    await queryRunner.query(`DROP TABLE "supplier_configurations"`);
-    await queryRunner.query(`DROP TABLE "companies"`);
+    await queryRunner.query(`DROP TABLE IF EXISTS "supplier_configurations"`);
+    await queryRunner.query(`DROP TABLE IF EXISTS "companies"`);
   }
 }

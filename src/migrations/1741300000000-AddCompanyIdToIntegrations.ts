@@ -41,14 +41,23 @@ export class AddCompanyIdToIntegrations1741300000000
     `);
 
     await queryRunner.query(`
-      ALTER TABLE "integrations"
-      ADD CONSTRAINT "FK_integrations_company"
-      FOREIGN KEY ("company_id") REFERENCES "companies"("id")
-      ON DELETE CASCADE ON UPDATE NO ACTION
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'FK_integrations_company'
+        ) THEN
+          ALTER TABLE "integrations"
+          ADD CONSTRAINT "FK_integrations_company"
+          FOREIGN KEY ("company_id") REFERENCES "companies"("id")
+          ON DELETE CASCADE ON UPDATE NO ACTION;
+        END IF;
+      END $$;
     `);
 
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_integrations_company_provider"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_integrations_company_provider"
       ON "integrations" ("company_id", "provider")
     `);
   }

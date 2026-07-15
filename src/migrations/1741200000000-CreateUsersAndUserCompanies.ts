@@ -7,7 +7,7 @@ export class CreateUsersAndUserCompanies1741200000000
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "users" (
+      CREATE TABLE IF NOT EXISTS "users" (
         "id" uuid NOT NULL,
         "name" character varying NOT NULL,
         "email" character varying NOT NULL,
@@ -21,7 +21,7 @@ export class CreateUsersAndUserCompanies1741200000000
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "user_companies" (
+      CREATE TABLE IF NOT EXISTS "user_companies" (
         "id" uuid NOT NULL,
         "user_id" uuid NOT NULL,
         "company_id" uuid NOT NULL,
@@ -39,20 +39,20 @@ export class CreateUsersAndUserCompanies1741200000000
     `);
 
     await queryRunner.query(`
-      CREATE INDEX "IDX_user_companies_user_id"
+      CREATE INDEX IF NOT EXISTS "IDX_user_companies_user_id"
       ON "user_companies" ("user_id")
     `);
 
     await queryRunner.query(`
-      CREATE INDEX "IDX_user_companies_company_id"
+      CREATE INDEX IF NOT EXISTS "IDX_user_companies_company_id"
       ON "user_companies" ("company_id")
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX "public"."IDX_user_companies_company_id"`);
-    await queryRunner.query(`DROP INDEX "public"."IDX_user_companies_user_id"`);
-    await queryRunner.query(`DROP TABLE "user_companies"`);
-    await queryRunner.query(`DROP TABLE "users"`);
+    await queryRunner.query(`DROP INDEX IF EXISTS "public"."IDX_user_companies_company_id"`);
+    await queryRunner.query(`DROP INDEX IF EXISTS "public"."IDX_user_companies_user_id"`);
+    await queryRunner.query(`DROP TABLE IF EXISTS "user_companies"`);
+    await queryRunner.query(`DROP TABLE IF EXISTS "users"`);
   }
 }
