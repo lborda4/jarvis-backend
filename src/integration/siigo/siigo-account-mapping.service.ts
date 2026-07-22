@@ -12,17 +12,18 @@ import { ElectronicDocument } from '../../electronic-document/entities/electroni
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
 import { SupplierPreferenceSnapshot } from '../interfaces/supplier-preference.interface';
 import {
-  applySupplierPreferencesToMappingValue,
-  normalizeSupplierMappingValue,
+  normalizeSupplierCostCenterPreference,
   normalizeSupplierPaymentMethodPreference,
   normalizeSupplierRetentionPreferences,
 } from '../helpers/supplier-mapping-value.helper';
+import { normalizeSupplierPreferenceSnapshot } from '../helpers/supplier-preference.helper';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
 import { SIIGO_DEFAULT_ITEM_TYPE } from './constants/supplier-configuration.constants';
 import {
   SaveAccountMappingRequestDto,
   SaveAccountMappingResponseDto,
+  SaveSupplierCostCenterPreferenceDto,
   SaveSupplierPaymentMethodPreferenceDto,
   SaveSupplierRetentionPreferenceDto,
 } from './dto/save-account-mapping.dto';
@@ -31,7 +32,6 @@ import {
   ValidateAccountMappingResponseDto,
 } from './dto/validate-account-mapping.dto';
 import { getSiigoIntegration } from './helpers/siigo-context.helper';
-import { getPrimarySupplierAccountCode } from '../helpers/supplier-mapping-value.helper';
 
 const ACCOUNT_MAPPING_REQUIRED_STATUS = 'ACCOUNT_MAPPING_REQUIRED';
 const ACCOUNT_MAPPED_STATUS = 'ACCOUNT_MAPPED';
@@ -77,11 +77,13 @@ export class SiigoAccountMappingService {
         supplier.normalizedDocumentNumber,
       );
 
-    const accountCode = getPrimarySupplierAccountCode(configuration?.mappingValue);
+    const accountCode =
+      normalizeSupplierPreferenceSnapshot(configuration?.preference)?.account
+        .code ?? null;
 
-    if (!accountCode || !configuration?.autoApply) {
+    if (!accountCode?.trim()) {
       this.logger.log(
-        `[documentId=${documentId}] Proveedor sin cuenta contable auto-aplicable (autoApply=${configuration?.autoApply ?? false})`,
+        `[documentId=${documentId}] Proveedor sin cuenta contable configurada`,
       );
 
       return {
@@ -120,7 +122,6 @@ export class SiigoAccountMappingService {
     const documentId = request.documentId.trim();
     const accountCode = request.accountCode.trim();
     const accountDescription = request.accountDescription.trim();
-    const autoApply = request.autoApply;
     const electronicDocument =
       await this.electronicDocumentService.requireById(documentId, companyId);
 
@@ -128,11 +129,11 @@ export class SiigoAccountMappingService {
       electronicDocument,
       companyId,
       {
-        autoApply,
         accountCode,
         accountDescription,
         paymentMethod: request.paymentMethod,
         retentions: request.retentions,
+        costCenter: request.costCenter,
       },
     );
 
@@ -149,7 +150,7 @@ export class SiigoAccountMappingService {
     );
 
     this.logger.log(
-      `[documentId=${documentId}] Preferencias de proveedor guardadas (cuenta=${accountCode}, autoApply=${autoApply}, paymentMethod=${request.paymentMethod?.id ?? 'n/a'}, retentions=${request.retentions?.length ?? 0})`,
+      `[documentId=${documentId}] Preferencias de proveedor guardadas (cuenta=${accountCode}, paymentMethod=${request.paymentMethod?.id ?? 'n/a'}, retentions=${request.retentions?.length ?? 0})`,
     );
 
     return {
@@ -195,8 +196,6 @@ export class SiigoAccountMappingService {
         supplierDocumentType: documentType,
         supplierName: electronicDocument.payload.supplier.name || null,
         itemType: SIIGO_DEFAULT_ITEM_TYPE,
-        mappingValue: null,
-        autoApply: false,
       });
     } else {
       configuration.supplierDocumentType = documentType;
@@ -216,11 +215,11 @@ export class SiigoAccountMappingService {
     electronicDocument: ElectronicDocument,
     companyId: string,
     preferences: {
-      autoApply: boolean;
       accountCode?: string;
       accountDescription?: string;
       paymentMethod?: SaveSupplierPaymentMethodPreferenceDto | null;
       retentions?: SaveSupplierRetentionPreferenceDto[] | null;
+      costCenter?: SaveSupplierCostCenterPreferenceDto | null;
     },
   ): Promise<SupplierConfiguration> {
     const supplier = resolveSupplierDocumentFromPayload(
@@ -247,34 +246,54 @@ export class SiigoAccountMappingService {
         supplier.normalizedDocumentNumber,
       );
 
-    const normalizedPaymentMethod = preferences.paymentMethod
-      ? normalizeSupplierPaymentMethodPreference(preferences.paymentMethod)
-      : undefined;
+    const existingSnapshot = normalizeSupplierPreferenceSnapshot(
+      configuration?.preference,
+    );
+    const normalizedPaymentMethod =
+      preferences.paymentMethod !== undefined
+        ? normalizeSupplierPaymentMethodPreference(preferences.paymentMethod)
+        : undefined;
     const normalizedRetentions =
       preferences.retentions !== undefined
         ? normalizeSupplierRetentionPreferences(preferences.retentions)
         : undefined;
-    const nextMappingValue = applySupplierPreferencesToMappingValue(
-      normalizeSupplierMappingValue(configuration?.mappingValue),
-      {
-        ...(preferences.accountCode?.trim()
-          ? {
-              account: {
-                code: preferences.accountCode.trim(),
-                name:
-                  preferences.accountDescription?.trim() ||
-                  preferences.accountCode.trim(),
-              },
-            }
-          : {}),
-        ...(normalizedPaymentMethod !== undefined
-          ? { paymentMethod: normalizedPaymentMethod }
-          : {}),
-        ...(normalizedRetentions !== undefined
-          ? { retentions: normalizedRetentions }
-          : {}),
+    const normalizedCostCenter =
+      preferences.costCenter !== undefined
+        ? normalizeSupplierCostCenterPreference(preferences.costCenter)
+        : undefined;
+
+    const accountCode =
+      preferences.accountCode?.trim() ?? existingSnapshot?.account.code;
+
+    if (!accountCode) {
+      throw new BadRequestException(
+        'No se pudo determinar la cuenta contable del proveedor.',
+      );
+    }
+
+    const nextPreference: SupplierPreferenceSnapshot = {
+      account: {
+        code: accountCode,
+        name:
+          preferences.accountDescription?.trim() ||
+          existingSnapshot?.account.name ||
+          accountCode,
       },
-    );
+      retentions:
+        normalizedRetentions !== undefined
+          ? normalizedRetentions
+          : (existingSnapshot?.retentions ?? []),
+      ...(normalizedPaymentMethod !== undefined
+        ? { paymentMethod: normalizedPaymentMethod }
+        : existingSnapshot?.paymentMethod !== undefined
+          ? { paymentMethod: existingSnapshot.paymentMethod }
+          : {}),
+      ...(normalizedCostCenter !== undefined
+        ? { costCenter: normalizedCostCenter }
+        : existingSnapshot?.costCenter !== undefined
+          ? { costCenter: existingSnapshot.costCenter }
+          : {}),
+    };
 
     if (!configuration) {
       configuration = this.supplierConfigurationsRepository.create({
@@ -284,18 +303,17 @@ export class SiigoAccountMappingService {
         supplierDocumentType: documentType,
         supplierName: electronicDocument.payload.supplier.name || null,
         itemType: SIIGO_DEFAULT_ITEM_TYPE,
-        mappingValue: nextMappingValue,
-        autoApply: preferences.autoApply,
       });
     } else {
-      configuration.mappingValue = nextMappingValue;
-      configuration.autoApply = preferences.autoApply;
       configuration.supplierDocumentType = documentType;
+
       if (!configuration.supplierName) {
         configuration.supplierName =
           electronicDocument.payload.supplier.name || null;
       }
     }
+
+    configuration.preference = nextPreference;
 
     return this.supplierConfigurationsRepository.save(configuration);
   }
@@ -323,10 +341,6 @@ export class SiigoAccountMappingService {
       throw new BadRequestException(
         'El campo accountDescription es obligatorio.',
       );
-    }
-
-    if (request.autoApply === undefined || request.autoApply === null) {
-      throw new BadRequestException('El campo autoApply es obligatorio.');
     }
   }
 }

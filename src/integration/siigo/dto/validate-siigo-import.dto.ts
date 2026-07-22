@@ -9,7 +9,6 @@ export class ValidateSiigoImportResponseDto {
   supplierConfigurationId: string | null;
   supplierDocument: string;
   supplierName: string | null;
-  autoApply: boolean;
   accountCode: string | null;
   message?: string;
 }

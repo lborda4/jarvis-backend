@@ -236,6 +236,14 @@ export class InvoicesService {
         `[rquid=${rquid}] XML procesado (buyerNit=${parsedData.receptor.nit}, vendorNit=${parsedData.emisor.nit})`,
       );
 
+      const resolvedCompanyId = companyId?.trim();
+      if (resolvedCompanyId) {
+        this.siigoDocumentPreparationService.prepareDocumentsInBackground(
+          [electronicDocument.id],
+          resolvedCompanyId,
+        );
+      }
+
       return {
         success: true,
         id: electronicDocument.id,

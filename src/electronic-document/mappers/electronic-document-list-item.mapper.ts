@@ -1,8 +1,8 @@
 import { ElectronicDocument } from '../entities/electronic-document.entity';
-import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 import { ElectronicDocumentListItemDto } from '../dto/electronic-document-list-item.dto';
 import { SuggestedAccount } from '../../integration/helpers/supplier-accounts-catalog.helper';
 import {
+  SupplierCostCenterPreference,
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from '../../integration/interfaces/supplier-mapping-value.interface';
@@ -12,6 +12,7 @@ export function mapElectronicDocumentToListItem(
   suggestedAccount: SuggestedAccount | null = null,
   suggestedPaymentMethod: SupplierPaymentMethodPreference | null = null,
   suggestedRetentions: SupplierRetentionPreference[] = [],
+  suggestedCostCenter: SupplierCostCenterPreference | null = null,
 ): ElectronicDocumentListItemDto {
   return {
     id: document.id,
@@ -33,20 +34,18 @@ export function mapElectronicDocumentToListItem(
     suggestedAccount,
     suggestedPaymentMethod,
     suggestedRetentions,
+    suggestedCostCenter,
     processingStatus: document.processingStatus,
-    items: mapSupportDocumentItems(document),
+    observations: document.payload?.observations?.trim() || null,
+    items: mapDocumentItems(document),
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
   };
 }
 
-function mapSupportDocumentItems(
+function mapDocumentItems(
   document: ElectronicDocument,
 ): ElectronicDocumentListItemDto['items'] {
-  if (document.electronicDocumentType !== ElectronicDocumentType.SUPPORT_DOCUMENT) {
-    return undefined;
-  }
-
   const items = document.payload?.items;
 
   if (!Array.isArray(items) || items.length === 0) {

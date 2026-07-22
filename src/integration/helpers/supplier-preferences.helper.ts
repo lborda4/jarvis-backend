@@ -3,17 +3,17 @@ import { resolveSendConfigurationFromPayload } from '../../electronic-document/h
 import { ElectronicDocumentPayload } from '../../electronic-document/interfaces/electronic-document-payload.interface';
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
 import {
+  SupplierCostCenterPreference,
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from '../interfaces/supplier-mapping-value.interface';
 import {
   buildSupplierConfigurationKey,
-  resolveSuggestedAccountFromConfiguration,
   SuggestedAccount,
 } from './supplier-accounts-catalog.helper';
-import { normalizeSupplierMappingValue } from './supplier-mapping-value.helper';
 import {
   resolveSuggestedAccountFromPreference,
+  resolveSuggestedCostCenterFromPreference,
   resolveSuggestedPaymentMethodFromPreference,
   resolveSuggestedRetentionsFromPreference,
 } from './supplier-preference.helper';
@@ -79,17 +79,7 @@ export function resolveSuggestedAccountForDocument(
     integrationId,
   );
 
-  const preferenceAccount = resolveSuggestedAccountFromPreference(configuration);
-
-  if (preferenceAccount) {
-    return preferenceAccount;
-  }
-
-  if (!configuration?.autoApply) {
-    return null;
-  }
-
-  return resolveSuggestedAccountFromConfiguration(configuration);
+  return resolveSuggestedAccountFromPreference(configuration);
 }
 
 export function resolveSuggestedPaymentMethodForDocument(
@@ -107,20 +97,7 @@ export function resolveSuggestedPaymentMethodForDocument(
     integrationId,
   );
 
-  const preferencePaymentMethod =
-    resolveSuggestedPaymentMethodFromPreference(configuration);
-
-  if (preferencePaymentMethod) {
-    return preferencePaymentMethod;
-  }
-
-  if (!configuration?.autoApply) {
-    return null;
-  }
-
-  const mappingValue = normalizeSupplierMappingValue(configuration.mappingValue);
-
-  return mappingValue.paymentMethod ?? null;
+  return resolveSuggestedPaymentMethodFromPreference(configuration);
 }
 
 export function resolveSuggestedRetentionsForDocument(
@@ -138,18 +115,23 @@ export function resolveSuggestedRetentionsForDocument(
     integrationId,
   );
 
-  const preferenceRetentions =
-    resolveSuggestedRetentionsFromPreference(configuration);
+  return resolveSuggestedRetentionsFromPreference(configuration) ?? [];
+}
 
-  if (preferenceRetentions !== null) {
-    return preferenceRetentions;
+export function resolveSuggestedCostCenterForDocument(
+  document: SupplierDocumentIdentity,
+  configurationIndex: Map<string, SupplierConfiguration>,
+  integrationId: string,
+): SupplierCostCenterPreference | null {
+  if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    return resolveSendConfigurationFromPayload(document.payload)?.costCenter ?? null;
   }
 
-  if (!configuration?.autoApply) {
-    return [];
-  }
+  const configuration = resolveSupplierConfigurationForDocument(
+    document,
+    configurationIndex,
+    integrationId,
+  );
 
-  const mappingValue = normalizeSupplierMappingValue(configuration.mappingValue);
-
-  return mappingValue.retentions ?? [];
+  return resolveSuggestedCostCenterFromPreference(configuration);
 }

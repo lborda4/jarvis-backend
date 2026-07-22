@@ -9,10 +9,7 @@ import { ElectronicDocumentStatus } from '../../../electronic-document/enums/ele
 import { ElectronicDocumentType } from '../../../electronic-document/enums/electronic-document-type.enum';
 import { mapElectronicDocumentToResponse } from '../../../electronic-document/mappers/electronic-document-response.mapper';
 import { ElectronicDocumentService } from '../../../electronic-document/electronic-document.service';
-import { IntegrationsRepository } from '../../repositories/integrations.repository';
 import { CreateSiigoDocumentResponseDto } from '../dto/create-siigo-document.dto';
-import { getSiigoIntegration } from '../helpers/siigo-context.helper';
-import { resolveSiigoPurchaseConfig } from '../helpers/siigo-purchase-config.helper';
 import { executeSiigoRequestWithRetries } from '../helpers/siigo-request-retry.helper';
 import { SiigoDocumentCreationHandler } from '../interfaces/siigo-document-creation.handler';
 import { mapElectronicDocumentToSiigoPurchase } from '../mappers/electronic-document-to-siigo-purchase.mapper';
@@ -38,7 +35,6 @@ export class SiigoPurchaseDocumentCreationHandler
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoPurchaseService: SiigoPurchaseService,
     private readonly electronicDocumentService: ElectronicDocumentService,
-    private readonly integrationsRepository: IntegrationsRepository,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
@@ -65,14 +61,8 @@ export class SiigoPurchaseDocumentCreationHandler
     await this.siigoConfigurationCacheService.getPurchaseDocumentTypeId(
       companyId,
     );
-    const integration = await getSiigoIntegration(
-      this.integrationsRepository,
-      companyId,
-    );
-    const purchaseConfig = resolveSiigoPurchaseConfig(
-      integration,
-      electronicDocument.companyId,
-    );
+    const purchaseConfig =
+      await this.siigoConfigurationCacheService.getPurchaseConfig(companyId);
     const purchasePayload = mapElectronicDocumentToSiigoPurchase(
       electronicDocument.payload,
       purchaseConfig,

@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { ElectronicDocumentPayload } from '../../../electronic-document/interfaces/electronic-document-payload.interface';
 import { SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT } from '../constants/siigo.constants';
 import { SiigoSupportDocumentRequestDto } from '../dto/siigo-support-document-request.dto';
-import { SiigoSupportDocumentConfig } from '../helpers/siigo-support-document-config.helper';
+import { SiigoSupportDocumentConfig } from '../helpers/siigo-runtime-config.helper';
 import { splitNitAndCheckDigit } from '../helpers/siigo-nit.helper';
 import { buildSiigoSupportDocumentPayment } from '../helpers/siigo-purchase-total.helper';
 
@@ -38,9 +38,11 @@ export function mapElectronicDocumentToSiigoSupportDocument(
     };
   });
 
-  const observations = payload.invoice.cufe?.trim()
-    ? `CUFE: ${payload.invoice.cufe.trim()}`
-    : `Documento Soporte ${supplierReceiptNumber.prefix}-${supplierReceiptNumber.number}`;
+  const observations =
+    payload.observations?.trim() ||
+    (payload.invoice.cufe?.trim()
+      ? `CUFE: ${payload.invoice.cufe.trim()}`
+      : `Documento Soporte ${supplierReceiptNumber.prefix}-${supplierReceiptNumber.number}`);
 
   const request: SiigoSupportDocumentRequestDto = {
     document: { id: config.documentId },

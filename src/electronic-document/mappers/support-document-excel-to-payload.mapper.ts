@@ -40,6 +40,9 @@ export function mapGroupedSupportDocumentToPayload(
       iva,
       total,
     },
+    ...(group.observations?.trim()
+      ? { observations: group.observations.trim() }
+      : {}),
   };
 }
 

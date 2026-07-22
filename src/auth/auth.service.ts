@@ -20,6 +20,7 @@ import {
   RefreshTokenRequestDto,
   RefreshTokenResponseDto,
   RegisterRequestDto,
+  SwitchCompanyRequestDto,
 } from './dto/auth.dto';
 import {
   buildAuthMeResponse,
@@ -28,6 +29,10 @@ import {
 import { UsersRepository } from './repositories/users.repository';
 import { UserCompaniesRepository } from './repositories/user-companies.repository';
 import { AuthTokenPayload, AuthenticatedUser } from './interfaces/jwt-payload.interface';
+import {
+  AUTH_ERROR_CODE,
+  AUTH_ERROR_MESSAGE,
+} from './constants/auth-error.constants';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -53,10 +58,19 @@ export class AuthService {
     const existingUser = await this.usersRepository.findByEmail(email);
 
     if (existingUser) {
-      throw new ConflictException('Ya existe un usuario con ese email.');
+      const passwordMatches = await bcrypt.compare(
+        password,
+        existingUser.password,
+      );
+
+      if (!passwordMatches) {
+        throw new ConflictException('Ya existe un usuario con ese email.');
+      }
     }
 
-    const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+    const passwordHash = existingUser
+      ? existingUser.password
+      : await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
     const { user, company } = await this.dataSource.transaction(
       async (manager) => {
@@ -64,52 +78,64 @@ export class AuthService {
         const companiesRepository = manager.getRepository(Company);
         const userCompaniesRepository = manager.getRepository(UserCompany);
 
-        const existingCompany = await companiesRepository.findOne({
+        const user =
+          existingUser ??
+          (await usersRepository.save(
+            usersRepository.create({
+              name,
+              email,
+              password: passwordHash,
+              active: true,
+            }),
+          ));
+
+        let company = await companiesRepository.findOne({
           where: { nit: companyNit },
         });
 
-        if (existingCompany) {
-          throw new ConflictException(
-            `Ya existe una empresa registrada con el NIT ${companyNit}.`,
+        if (!company) {
+          company = await companiesRepository.save(
+            companiesRepository.create({
+              name: companyName,
+              nit: companyNit,
+            }),
           );
+
+          try {
+            await ensureSiigoIntegration(manager, company.id);
+          } catch (error) {
+            throw new BadRequestException(
+              error instanceof Error
+                ? error.message
+                : 'No se pudo configurar la integración SIIGO.',
+            );
+          }
         }
 
-        const createdUser = await usersRepository.save(
-          usersRepository.create({
-            name,
-            email,
-            password: passwordHash,
-            active: true,
-          }),
-        );
+        const existingLink = await userCompaniesRepository.findOne({
+          where: {
+            userId: user.id,
+            companyId: company.id,
+          },
+        });
 
-        const createdCompany = await companiesRepository.save(
-          companiesRepository.create({
-            name: companyName,
-            nit: companyNit,
-          }),
-        );
+        if (existingLink) {
+          throw new ConflictException({
+            message: AUTH_ERROR_MESSAGE.USER_ALREADY_LINKED_TO_COMPANY,
+            code: AUTH_ERROR_CODE.USER_ALREADY_LINKED_TO_COMPANY,
+          });
+        }
 
         await userCompaniesRepository.save(
           userCompaniesRepository.create({
-            userId: createdUser.id,
-            companyId: createdCompany.id,
+            userId: user.id,
+            companyId: company.id,
           }),
         );
 
-        try {
-          await ensureSiigoIntegration(manager, createdCompany.id);
-        } catch (error) {
-          throw new BadRequestException(
-            error instanceof Error
-              ? error.message
-              : 'No se pudo configurar la integración SIIGO.',
-          );
-        }
-
         return {
-          user: createdUser,
-          company: createdCompany,
+          user,
+          company,
         };
       },
     );
@@ -127,23 +153,61 @@ export class AuthService {
 
     const user = await this.usersRepository.findByEmail(email);
 
-    if (!user?.active) {
-      throw new UnauthorizedException('Credenciales inválidas.');
+    if (!user) {
+      throw new UnauthorizedException({
+        message: AUTH_ERROR_MESSAGE.ACCOUNT_NOT_FOUND,
+        code: AUTH_ERROR_CODE.ACCOUNT_NOT_FOUND,
+      });
+    }
+
+    if (!user.active) {
+      throw new UnauthorizedException({
+        message: AUTH_ERROR_MESSAGE.ACCOUNT_INACTIVE,
+        code: AUTH_ERROR_CODE.ACCOUNT_INACTIVE,
+      });
     }
 
     const passwordMatches = await bcrypt.compare(password, user.password);
 
     if (!passwordMatches) {
-      throw new UnauthorizedException('Credenciales inválidas.');
+      throw new UnauthorizedException({
+        message: AUTH_ERROR_MESSAGE.INVALID_PASSWORD,
+        code: AUTH_ERROR_CODE.INVALID_PASSWORD,
+      });
+    }
+
+    const company = await this.resolveActiveCompanyForUser(user.id);
+
+    return this.buildAuthResponse(user, company);
+  }
+
+  async switchCompany(
+    currentUser: AuthenticatedUser,
+    request: SwitchCompanyRequestDto,
+  ): Promise<AuthTokensResponseDto> {
+    const companyId = request?.companyId?.trim();
+
+    if (!companyId) {
+      throw new BadRequestException('El companyId es obligatorio.');
+    }
+
+    const user = await this.usersRepository.findById(currentUser.userId);
+
+    if (!user?.active) {
+      throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
     const userCompany =
-      await this.userCompaniesRepository.findActiveCompanyByUserId(user.id);
+      await this.userCompaniesRepository.findByUserIdAndCompanyId(
+        user.id,
+        companyId,
+      );
 
     if (!userCompany?.company) {
-      throw new UnauthorizedException(
-        'El usuario no tiene una empresa activa asociada.',
-      );
+      throw new UnauthorizedException({
+        message: AUTH_ERROR_MESSAGE.COMPANY_NOT_LINKED,
+        code: AUTH_ERROR_CODE.COMPANY_NOT_LINKED,
+      });
     }
 
     return this.buildAuthResponse(user, userCompany.company);
@@ -217,7 +281,11 @@ export class AuthService {
       );
     }
 
-    return buildAuthMeResponse(user, userCompany.company);
+    return buildAuthMeResponse(
+      user,
+      userCompany.company,
+      await this.listCompaniesForUser(user.id),
+    );
   }
 
   private async buildAuthResponse(
@@ -225,13 +293,36 @@ export class AuthService {
     company: Company,
   ): Promise<AuthTokensResponseDto> {
     const tokens = await this.generateTokens(user, company.id);
+    const companies = await this.listCompaniesForUser(user.id);
 
     return buildAuthTokensResponse(
       tokens.accessToken,
       tokens.refreshToken,
       user,
       company,
+      companies,
     );
+  }
+
+  private async listCompaniesForUser(userId: string): Promise<Company[]> {
+    const links = await this.userCompaniesRepository.findAllByUserId(userId);
+
+    return links
+      .map((link) => link.company)
+      .filter((company): company is Company => Boolean(company));
+  }
+
+  private async resolveActiveCompanyForUser(userId: string): Promise<Company> {
+    const companies = await this.listCompaniesForUser(userId);
+
+    if (companies.length === 0) {
+      throw new UnauthorizedException({
+        message: AUTH_ERROR_MESSAGE.NO_ACTIVE_COMPANY,
+        code: AUTH_ERROR_CODE.NO_ACTIVE_COMPANY,
+      });
+    }
+
+    return companies[0];
   }
 
   private async generateTokens(

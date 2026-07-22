@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import {
+  isSiigoDuplicatedDocumentError,
   isSiigoRateLimitError,
   isSiigoSupportDocumentNumberAlreadyExistsError,
   isSiigoUnauthorizedError,
@@ -13,6 +14,11 @@ const MAX_UNAUTHORIZED_RETRIES = 2;
 const MAX_SUPPORT_DOCUMENT_NUMBER_RETRIES = 1;
 const SUPPORT_DOCUMENT_NUMBER_RETRY_DELAY_MS = 3000;
 
+export interface ExecuteSiigoRequestRetryOptions {
+  maxGenericRetries?: number;
+  genericRetryDelayMs?: number;
+}
+
 export async function executeSiigoRequestWithRetries<T>(
   authService: SiigoAuthService,
   companyId: string,
@@ -22,9 +28,12 @@ export async function executeSiigoRequestWithRetries<T>(
     accessToken: string,
     partnerId: string | undefined,
   ) => Promise<T>,
+  options: ExecuteSiigoRequestRetryOptions = {},
   attempt = 0,
   authContextOverride?: SiigoAuthContext,
 ): Promise<T> {
+  const maxGenericRetries = options.maxGenericRetries ?? 0;
+  const genericRetryDelayMs = options.genericRetryDelayMs ?? 1000;
   const authContext =
     authContextOverride ?? (await authService.getValidAuthContext(companyId));
 
@@ -45,6 +54,7 @@ export async function executeSiigoRequestWithRetries<T>(
         logger,
         operationLabel,
         request,
+        options,
         attempt + 1,
         refreshedContext,
       );
@@ -59,6 +69,7 @@ export async function executeSiigoRequestWithRetries<T>(
         logger,
         operationLabel,
         request,
+        options,
         attempt + 1,
         authContext,
       );
@@ -80,6 +91,30 @@ export async function executeSiigoRequestWithRetries<T>(
         logger,
         operationLabel,
         request,
+        options,
+        attempt + 1,
+        authContext,
+      );
+    }
+
+    if (isSiigoDuplicatedDocumentError(error)) {
+      handleSiigoApiError(logger, error, operationLabel);
+    }
+
+    if (attempt < maxGenericRetries) {
+      logger.warn(
+        `[companyId=${companyId}] Error al ${operationLabel}. Reintentando en ${genericRetryDelayMs}ms (${attempt + 1}/${maxGenericRetries}).`,
+      );
+
+      await sleep(genericRetryDelayMs);
+
+      return executeSiigoRequestWithRetries(
+        authService,
+        companyId,
+        logger,
+        operationLabel,
+        request,
+        options,
         attempt + 1,
         authContext,
       );

@@ -18,6 +18,14 @@ export class UserCompaniesRepository {
     });
   }
 
+  findAllByUserId(userId: string): Promise<UserCompany[]> {
+    return this.repository.find({
+      where: { userId },
+      relations: { company: true },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
   findByUserIdAndCompanyId(
     userId: string,
     companyId: string,

@@ -6,7 +6,9 @@ import { getAuthenticatedCompanyId } from '../auth/helpers/authenticated-company
 import { ElectronicDocumentService } from './electronic-document.service';
 import { ElectronicDocumentListQueryDto } from './dto/electronic-document-list-query.dto';
 import { ElectronicDocumentListResponseDto } from './dto/electronic-document-list-response.dto';
+import { ElectronicDocumentFilterOptionsDto } from './dto/electronic-document-filter-options.dto';
 import { ElectronicDocumentCompanyOptionDto } from './dto/electronic-document-company-option.dto';
+import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
 
 @ApiTags('electronic-documents')
 @Controller('electronic-documents')
@@ -28,6 +30,22 @@ export class ElectronicDocumentController {
     return this.electronicDocumentService.listDocuments(
       query,
       getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('filter-options')
+  @ApiOperation({
+    summary: 'Opciones de filtro para documentos electrónicos',
+    description:
+      'Devuelve valores disponibles para filtrar el historial de la empresa activa.',
+  })
+  getFilterOptions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('electronicDocumentType') electronicDocumentType?: ElectronicDocumentType,
+  ): Promise<ElectronicDocumentFilterOptionsDto> {
+    return this.electronicDocumentService.getFilterOptions(
+      getAuthenticatedCompanyId(user),
+      electronicDocumentType,
     );
   }
 

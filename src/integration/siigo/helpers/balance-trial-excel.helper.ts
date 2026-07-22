@@ -4,18 +4,64 @@ import { InvalidExcelFormatException } from '../../../common/exceptions/excel.ex
 export interface BalanceTrialExcelRow {
   accountCode: string;
   accountName: string;
-  identification: string;
-  supplierName: string;
+  isTransactional: boolean;
 }
 
-const COLUMN_ALIASES = {
+const REQUIRED_COLUMN_ALIASES = {
   accountCode: ['codigo cuenta contable', 'código cuenta contable'],
   accountName: ['nombre cuenta contable'],
-  identification: ['identificacion', 'identificación'],
-  supplierName: ['nombre tercero'],
 } as const;
 
-type BalanceTrialColumnKey = keyof typeof COLUMN_ALIASES;
+const OPTIONAL_COLUMN_ALIASES = {
+  transactional: ['transaccional'],
+} as const;
+
+type RequiredBalanceTrialColumnKey = keyof typeof REQUIRED_COLUMN_ALIASES;
+type OptionalBalanceTrialColumnKey = keyof typeof OPTIONAL_COLUMN_ALIASES;
+
+interface BalanceTrialColumnIndexes {
+  accountCode: number;
+  accountName: number;
+  transactional?: number;
+}
+
+const TRANSACTIONAL_TRUE_VALUES = new Set([
+  'si',
+  's',
+  'yes',
+  'y',
+  'true',
+  'verdadero',
+  '1',
+  'x',
+]);
+const TRANSACTIONAL_FALSE_VALUES = new Set(['no', 'n', 'false', 'falso', '0']);
+
+export function parseTransactionalFlag(value: string | undefined): boolean {
+  if (value === undefined) {
+    return true;
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (TRANSACTIONAL_TRUE_VALUES.has(normalized)) {
+    return true;
+  }
+
+  if (TRANSACTIONAL_FALSE_VALUES.has(normalized)) {
+    return false;
+  }
+
+  return false;
+}
 
 export function parseBalanceTrialExcel(buffer: Buffer): BalanceTrialExcelRow[] {
   let workbook: XLSX.WorkBook;
@@ -44,7 +90,7 @@ export function parseBalanceTrialExcel(buffer: Buffer): BalanceTrialExcelRow[] {
 
   if (headerRowIndex === -1) {
     throw new InvalidExcelFormatException(
-      'No se encontraron las columnas requeridas del Balance de Prueba por Terceros (Código cuenta contable, Nombre Cuenta contable, Identificación, Nombre tercero).',
+      'No se encontraron las columnas requeridas del Balance de Prueba (Código cuenta contable, Nombre Cuenta contable).',
     );
   }
 
@@ -52,7 +98,7 @@ export function parseBalanceTrialExcel(buffer: Buffer): BalanceTrialExcelRow[] {
 
   if (!columnIndexes) {
     throw new InvalidExcelFormatException(
-      'No se encontraron las columnas requeridas del Balance de Prueba por Terceros (Código cuenta contable, Nombre Cuenta contable, Identificación, Nombre tercero).',
+      'No se encontraron las columnas requeridas del Balance de Prueba (Código cuenta contable, Nombre Cuenta contable).',
     );
   }
 
@@ -90,12 +136,12 @@ function findHeaderRowIndex(matrix: Array<Array<string | number>>): number {
 
 function mapColumnIndexes(
   headerRow: Array<string | number>,
-): Record<BalanceTrialColumnKey, number> | null {
+): BalanceTrialColumnIndexes | null {
   const normalizedHeaders = headerRow.map((cell) => normalizeHeader(cell));
-  const indexes = {} as Record<BalanceTrialColumnKey, number>;
+  const indexes = {} as BalanceTrialColumnIndexes;
 
-  for (const [columnKey, aliases] of Object.entries(COLUMN_ALIASES) as Array<
-    [BalanceTrialColumnKey, readonly string[]]
+  for (const [columnKey, aliases] of Object.entries(REQUIRED_COLUMN_ALIASES) as Array<
+    [RequiredBalanceTrialColumnKey, readonly string[]]
   >) {
     const columnIndex = normalizedHeaders.findIndex((header) =>
       aliases.includes(header),
@@ -108,31 +154,41 @@ function mapColumnIndexes(
     indexes[columnKey] = columnIndex;
   }
 
+  for (const [columnKey, aliases] of Object.entries(OPTIONAL_COLUMN_ALIASES) as Array<
+    [OptionalBalanceTrialColumnKey, readonly string[]]
+  >) {
+    const columnIndex = normalizedHeaders.findIndex((header) =>
+      aliases.includes(header),
+    );
+
+    if (columnIndex !== -1) {
+      indexes[columnKey] = columnIndex;
+    }
+  }
+
   return indexes;
 }
 
 function mapBalanceTrialRow(
   row: Array<string | number>,
-  columnIndexes: Record<BalanceTrialColumnKey, number>,
+  columnIndexes: BalanceTrialColumnIndexes,
 ): BalanceTrialExcelRow | null {
   const accountCode = getCellValue(row, columnIndexes.accountCode);
   const accountName = getCellValue(row, columnIndexes.accountName);
-  const identification = getCellValue(row, columnIndexes.identification);
-  const supplierName = getCellValue(row, columnIndexes.supplierName);
 
-  if (!accountCode && !identification && !supplierName) {
+  if (!accountCode) {
     return null;
   }
 
-  if (!accountCode || !identification) {
-    return null;
-  }
+  const transactionalValue =
+    columnIndexes.transactional === undefined
+      ? undefined
+      : getCellValue(row, columnIndexes.transactional);
 
   return {
     accountCode,
     accountName: accountName || accountCode,
-    identification,
-    supplierName: supplierName || `Proveedor ${identification}`,
+    isTransactional: parseTransactionalFlag(transactionalValue),
   };
 }
 
@@ -157,38 +213,33 @@ function normalizeHeader(value: string | number): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-export function limitBalanceTrialRows(
+export function dedupeBalanceTrialRows(
   rows: BalanceTrialExcelRow[],
-  maxSuppliers: number,
-): {
-  rows: BalanceTrialExcelRow[];
-  skippedRows: number;
-} {
-  const allowedSuppliers = new Set<string>();
-  const limitedRows: BalanceTrialExcelRow[] = [];
-  let skippedRows = 0;
+): BalanceTrialExcelRow[] {
+  const accountsByCode = new Map<string, BalanceTrialExcelRow>();
 
   for (const row of rows) {
-    const supplierDocument = row.identification.replace(/[^\d]/g, '');
+    const code = row.accountCode.trim();
 
-    if (!supplierDocument) {
+    if (!code) {
       continue;
     }
 
-    if (!allowedSuppliers.has(supplierDocument)) {
-      if (allowedSuppliers.size >= maxSuppliers) {
-        skippedRows += 1;
-        continue;
-      }
+    const normalizedRow: BalanceTrialExcelRow = {
+      accountCode: code,
+      accountName: row.accountName.trim() || code,
+      isTransactional: row.isTransactional,
+    };
 
-      allowedSuppliers.add(supplierDocument);
+    const existingRow = accountsByCode.get(code);
+
+    if (
+      !existingRow ||
+      (!existingRow.isTransactional && normalizedRow.isTransactional)
+    ) {
+      accountsByCode.set(code, normalizedRow);
     }
-
-    limitedRows.push(row);
   }
 
-  return {
-    rows: limitedRows,
-    skippedRows,
-  };
+  return [...accountsByCode.values()];
 }

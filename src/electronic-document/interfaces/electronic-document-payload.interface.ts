@@ -38,5 +38,6 @@ export interface ElectronicDocumentPayload {
   items: ElectronicDocumentItem[];
   taxes: ElectronicDocumentTax[];
   totals: DianInvoiceTotals;
+  observations?: string;
   siigoSendConfiguration?: SupplierPreferenceSnapshot | null;
 }

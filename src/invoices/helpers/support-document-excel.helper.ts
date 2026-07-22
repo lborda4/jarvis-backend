@@ -46,6 +46,7 @@ const COLUMN_ALIASES = {
   currency: ['moneda'],
   lineTotal: ['total', 'valor total', 'vr total', 'total linea'],
   taxAmount: ['iva', 'valor iva', 'impuesto', 'valor impuesto'],
+  observations: ['observaciones', 'comentarios', 'observacion', 'comentario'],
 } as const;
 
 const REQUIRED_COLUMN_KEYS = [
@@ -219,6 +220,11 @@ export function groupSupportDocumentRows(
 
     if (existingGroup) {
       existingGroup.rows.push(row);
+
+      if (!existingGroup.observations && row.observations?.trim()) {
+        existingGroup.observations = row.observations.trim();
+      }
+
       continue;
     }
 
@@ -234,6 +240,7 @@ export function groupSupportDocumentRows(
       cufe: row.cufe,
       receiverIdentification: row.receiverIdentification,
       currency: row.currency?.trim() || 'COP',
+      observations: row.observations?.trim() || undefined,
       rows: [row],
     });
   }
@@ -420,6 +427,7 @@ function mapSupportDocumentRow(
     unitValue,
     lineTotal,
     taxAmount: getNumberValue(row, columnIndexes.taxAmount, 0),
+    observations: getCellValue(row, columnIndexes.observations) || undefined,
   };
 }
 

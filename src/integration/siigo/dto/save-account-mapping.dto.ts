@@ -14,13 +14,19 @@ export class SaveSupplierRetentionPreferenceDto {
   percentage: number;
 }
 
+export class SaveSupplierCostCenterPreferenceDto {
+  id: number;
+  code: string;
+  name: string;
+}
+
 export class SaveAccountMappingRequestDto {
   documentId: string;
   accountCode: string;
   accountDescription: string;
-  autoApply: boolean;
   paymentMethod?: SaveSupplierPaymentMethodPreferenceDto;
   retentions?: SaveSupplierRetentionPreferenceDto[];
+  costCenter?: SaveSupplierCostCenterPreferenceDto;
 }
 
 export class SaveAccountMappingResponseDto {

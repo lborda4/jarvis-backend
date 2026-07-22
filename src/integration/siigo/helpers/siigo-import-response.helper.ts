@@ -6,7 +6,6 @@ export function buildSiigoImportResponse(params: {
   supplierConfigurationId?: string | null;
   supplierDocument?: string;
   supplierName: string | null;
-  autoApply?: boolean;
   accountCode?: string | null;
   message?: string;
 }): ValidateSiigoImportResponseDto {
@@ -15,7 +14,6 @@ export function buildSiigoImportResponse(params: {
     supplierConfigurationId: params.supplierConfigurationId ?? null,
     supplierDocument: params.supplierDocument ?? '',
     supplierName: params.supplierName,
-    autoApply: params.autoApply ?? false,
     accountCode: params.accountCode ?? null,
     ...(params.message ? { message: params.message } : {}),
   };

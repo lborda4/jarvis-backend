@@ -1,10 +1,12 @@
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
-import { SuggestedAccount } from './supplier-accounts-catalog.helper';
+import { isAllowedAccountCode, SuggestedAccount } from './supplier-accounts-catalog.helper';
 import {
+  SupplierCostCenterPreference,
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from '../interfaces/supplier-mapping-value.interface';
 import { SupplierPreferenceSnapshot } from '../interfaces/supplier-preference.interface';
+import { normalizeSupplierCostCenterPreference } from './supplier-mapping-value.helper';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -31,25 +33,31 @@ export function normalizeSupplierPreferenceSnapshot(
   }
 
   const paymentMethod = value.paymentMethod;
+  let normalizedPaymentMethod: SupplierPaymentMethodPreference | null | undefined;
 
-  if (!isRecord(paymentMethod)) {
+  if (paymentMethod === undefined) {
+    normalizedPaymentMethod = undefined;
+  } else if (paymentMethod === null) {
+    normalizedPaymentMethod = null;
+  } else if (isRecord(paymentMethod)) {
+    const paymentMethodId = Number(paymentMethod.id);
+
+    if (!Number.isFinite(paymentMethodId) || paymentMethodId <= 0) {
+      normalizedPaymentMethod = null;
+    } else {
+      normalizedPaymentMethod = {
+        id: paymentMethodId,
+        name:
+          String(paymentMethod.name ?? '').trim() || `Medio ${paymentMethodId}`,
+        type: String(paymentMethod.type ?? '').trim(),
+        ...(paymentMethod.dueDate === undefined
+          ? {}
+          : { dueDate: Boolean(paymentMethod.dueDate) }),
+      };
+    }
+  } else {
     return null;
   }
-
-  const paymentMethodId = Number(paymentMethod.id);
-
-  if (!Number.isFinite(paymentMethodId) || paymentMethodId <= 0) {
-    return null;
-  }
-
-  const normalizedPaymentMethod: SupplierPaymentMethodPreference = {
-    id: paymentMethodId,
-    name: String(paymentMethod.name ?? '').trim() || `Medio ${paymentMethodId}`,
-    type: String(paymentMethod.type ?? '').trim(),
-    ...(paymentMethod.dueDate === undefined
-      ? {}
-      : { dueDate: Boolean(paymentMethod.dueDate) }),
-  };
 
   const rawRetentions = Array.isArray(value.retentions) ? value.retentions : [];
   const retentions = rawRetentions
@@ -78,8 +86,15 @@ export function normalizeSupplierPreferenceSnapshot(
       code: accountCode,
       name: accountName || accountCode,
     },
-    paymentMethod: normalizedPaymentMethod,
+    ...(normalizedPaymentMethod !== undefined
+      ? { paymentMethod: normalizedPaymentMethod }
+      : {}),
     retentions,
+    ...(value.costCenter !== undefined
+      ? {
+          costCenter: normalizeSupplierCostCenterPreference(value.costCenter),
+        }
+      : {}),
   };
 }
 
@@ -88,7 +103,7 @@ export function resolveSuggestedAccountFromPreference(
 ): SuggestedAccount | null {
   const snapshot = normalizeSupplierPreferenceSnapshot(configuration?.preference);
 
-  if (!snapshot) {
+  if (!snapshot || !isAllowedAccountCode(snapshot.account.code)) {
     return null;
   }
 
@@ -117,4 +132,12 @@ export function resolveSuggestedRetentionsFromPreference(
   }
 
   return snapshot.retentions;
+}
+
+export function resolveSuggestedCostCenterFromPreference(
+  configuration: Pick<SupplierConfiguration, 'preference'> | null | undefined,
+): SupplierCostCenterPreference | null {
+  const snapshot = normalizeSupplierPreferenceSnapshot(configuration?.preference);
+
+  return snapshot?.costCenter ?? null;
 }

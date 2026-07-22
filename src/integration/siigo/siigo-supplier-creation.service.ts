@@ -286,8 +286,6 @@ export class SiigoSupplierCreationService {
       supplierDocumentType,
       supplierName,
       itemType: SIIGO_DEFAULT_ITEM_TYPE,
-      mappingValue: null,
-      autoApply: false,
     });
 
     return this.supplierConfigurationsRepository.save(configuration);

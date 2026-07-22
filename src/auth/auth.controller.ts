@@ -10,6 +10,7 @@ import {
   RefreshTokenRequestDto,
   RefreshTokenResponseDto,
   RegisterRequestDto,
+  SwitchCompanyRequestDto,
 } from './dto/auth.dto';
 import type { AuthenticatedUser } from './interfaces/jwt-payload.interface';
 
@@ -47,5 +48,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Obtener usuario y empresa activa desde el JWT' })
   getMe(@CurrentUser() currentUser: AuthenticatedUser): Promise<AuthMeResponseDto> {
     return this.authService.getMe(currentUser);
+  }
+
+  @Post('switch-company')
+  @ApiOperation({ summary: 'Cambiar la empresa activa del usuario autenticado' })
+  switchCompany(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Body() request: SwitchCompanyRequestDto,
+  ): Promise<AuthTokensResponseDto> {
+    return this.authService.switchCompany(currentUser, request);
   }
 }

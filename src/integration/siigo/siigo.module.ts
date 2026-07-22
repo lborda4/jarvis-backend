@@ -15,17 +15,22 @@ import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
 import { SiigoDocumentPreparationService } from './siigo-document-preparation.service';
 import { SiigoDocumentResumeService } from './siigo-document-resume.service';
 import { SiigoBalanceTrialImportService } from './siigo-balance-trial-import.service';
+import { SiigoAccountsBalanceSyncService } from './siigo-accounts-balance-sync.service';
 import { SiigoValidationService } from './siigo-validation.service';
 import { SiigoSupportDocumentService } from './siigo-support-document.service';
 import { SiigoSupportDocumentSendService } from './siigo-support-document-send.service';
+import { SiigoPurchaseSendService } from './siigo-purchase-send.service';
 import { SiigoDocumentTypesService } from './siigo-document-types.service';
 import { SiigoDocumentCreationService } from './siigo-document-creation.service';
 import { SiigoDocumentCreationRegistry } from './siigo-document-creation.registry';
 import { SiigoPurchaseDocumentCreationHandler } from './handlers/siigo-purchase-document-creation.handler';
 import { SiigoSupportDocumentCreationHandler } from './handlers/siigo-support-document-creation.handler';
 import { SiigoPaymentTypesCatalogService } from './siigo-payment-types-catalog.service';
+import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoConfigurationCacheService } from './siigo-configuration-cache.service';
+import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
+import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
 
 @Module({
   imports: [HttpModule, IntegrationModule, CompanyModule, ElectronicDocumentModule],
@@ -37,6 +42,7 @@ import { SiigoConfigurationCacheService } from './siigo-configuration-cache.serv
     SiigoPurchaseService,
     SiigoSupportDocumentService,
     SiigoSupportDocumentSendService,
+    SiigoPurchaseSendService,
     SiigoDocumentTypesService,
     SiigoValidationService,
     SiigoSupplierCreationService,
@@ -60,10 +66,14 @@ import { SiigoConfigurationCacheService } from './siigo-configuration-cache.serv
     SiigoDocumentResumeService,
     SiigoDocumentPreparationService,
     SiigoAccountsCatalogService,
+    SiigoCatalogSyncService,
     SiigoConfigurationCacheService,
+    SiigoDocumentSendThrottleService,
     SiigoPaymentTypesCatalogService,
+    SiigoCostCentersCatalogService,
     SiigoTaxesCatalogService,
     SiigoBalanceTrialImportService,
+    SiigoAccountsBalanceSyncService,
   ],
   exports: [
     SiigoValidationService,

@@ -8,10 +8,7 @@ import { ElectronicDocumentStatus } from '../../../electronic-document/enums/ele
 import { ElectronicDocumentType } from '../../../electronic-document/enums/electronic-document-type.enum';
 import { mapElectronicDocumentToResponse } from '../../../electronic-document/mappers/electronic-document-response.mapper';
 import { ElectronicDocumentService } from '../../../electronic-document/electronic-document.service';
-import { IntegrationsRepository } from '../../repositories/integrations.repository';
 import { CreateSiigoDocumentResponseDto } from '../dto/create-siigo-document.dto';
-import { getSiigoIntegration } from '../helpers/siigo-context.helper';
-import { resolveSiigoSupportDocumentConfig } from '../helpers/siigo-support-document-config.helper';
 import { executeSiigoRequestWithRetries } from '../helpers/siigo-request-retry.helper';
 import { SiigoDocumentCreationHandler } from '../interfaces/siigo-document-creation.handler';
 import { mapElectronicDocumentToSiigoSupportDocument } from '../mappers/electronic-document-to-siigo-support-document.mapper';
@@ -36,7 +33,6 @@ export class SiigoSupportDocumentCreationHandler
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoSupportDocumentService: SiigoSupportDocumentService,
     private readonly electronicDocumentService: ElectronicDocumentService,
-    private readonly integrationsRepository: IntegrationsRepository,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
   ) {}
 
@@ -62,14 +58,10 @@ export class SiigoSupportDocumentCreationHandler
     await this.siigoConfigurationCacheService.getSupportDocumentTypeId(
       companyId,
     );
-    const integration = await getSiigoIntegration(
-      this.integrationsRepository,
-      companyId,
-    );
-    const supportDocumentConfig = resolveSiigoSupportDocumentConfig(
-      integration,
-      electronicDocument.companyId,
-    );
+    const supportDocumentConfig =
+      await this.siigoConfigurationCacheService.getSupportDocumentConfig(
+        companyId,
+      );
     const supportDocumentPayload = mapElectronicDocumentToSiigoSupportDocument(
       electronicDocument.payload,
       supportDocumentConfig,

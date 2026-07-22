@@ -1,14 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
-import { IntegrationConfiguration } from '../interfaces/integration-configuration.interface';
 import {
   SiigoCachedAccountCatalogItem,
   SiigoCachedPaymentTypeCatalogItem,
   SiigoCachedTaxCatalogItem,
   SiigoCatalogCache,
 } from '../interfaces/siigo-catalog-cache.interface';
+import { SiigoCompanyMemoryCache } from '../interfaces/siigo-company-memory-cache.interface';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
-import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
+import { SiigoAccountsRepository } from '../repositories/siigo-accounts.repository';
 import { collectUniqueAccountsCatalog } from '../helpers/supplier-accounts-catalog.helper';
 import { SiigoHttpClient } from './clients/siigo-http.client';
 import {
@@ -17,22 +17,29 @@ import {
   SIIGO_PURCHASE_DOCUMENT_TYPE_QUERY,
   SIIGO_SUPPORT_DOCUMENT_TYPE_QUERY,
 } from './constants/siigo.constants';
-import {
-  SIIGO_CONFIGURATION_CACHE_LOG,
-} from './constants/siigo-configuration-cache.constants';
+import { SIIGO_CONFIGURATION_CACHE_LOG } from './constants/siigo-configuration-cache.constants';
 import { SiigoAccountCatalogItemDto } from './dto/list-siigo-accounts.dto';
 import { SiigoPaymentTypeCatalogItemDto } from './dto/list-siigo-payment-types.dto';
 import { SiigoTaxCatalogItemDto } from './dto/list-siigo-taxes.dto';
 import {
   buildSiigoCatalogCacheTimestamp,
-  isSiigoConfigurationFresh,
+  hasUsableSiigoCatalogCache,
+  isSiigoMemoryCacheFresh,
 } from './helpers/siigo-configuration-cache.helper';
+import {
+  buildSiigoPurchaseConfig,
+  buildSiigoSupportDocumentConfig,
+  SiigoPurchaseConfig,
+  SiigoSupportDocumentConfig,
+} from './helpers/siigo-runtime-config.helper';
 import { getSiigoIntegration, resolveSiigoCompany } from './helpers/siigo-context.helper';
 import {
   isValidSiigoConfigurationId,
   pickSiigoDocumentTypeId,
 } from './helpers/siigo-document-type.helper';
+import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
 import { SiigoAuthService } from './siigo-auth.service';
+import { SiigoAccountsBalanceSyncService } from './siigo-accounts-balance-sync.service';
 
 const PAYMENT_DOCUMENT_TYPES_TO_SYNC = [
   SIIGO_PAYMENT_DOCUMENT_TYPE_PURCHASE,
@@ -42,20 +49,24 @@ const PAYMENT_DOCUMENT_TYPES_TO_SYNC = [
 @Injectable()
 export class SiigoConfigurationCacheService {
   private readonly logger = new Logger(SiigoConfigurationCacheService.name);
-  private readonly syncInProgressByCompany = new Map<string, Promise<void>>();
+  private readonly memoryCacheByCompany = new Map<string, SiigoCompanyMemoryCache>();
+  private readonly syncInProgressByCompany = new Map<string, Promise<SiigoCompanyMemoryCache>>();
 
   constructor(
     private readonly companiesRepository: CompaniesRepository,
     private readonly integrationsRepository: IntegrationsRepository,
-    private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
+    private readonly siigoAccountsRepository: SiigoAccountsRepository,
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoHttpClient: SiigoHttpClient,
+    private readonly siigoAccountsBalanceSyncService: SiigoAccountsBalanceSyncService,
   ) {}
 
   async getAccounts(companyId: string): Promise<SiigoAccountCatalogItemDto[]> {
-    const cache = await this.ensureCatalogCache(companyId);
+    return this.loadAccountsFromDatabase(companyId);
+  }
 
-    return cache.accounts ?? [];
+  async syncCatalogs(companyId: string): Promise<void> {
+    await this.syncCompanyCache(companyId);
   }
 
   async getPaymentTypes(
@@ -63,17 +74,17 @@ export class SiigoConfigurationCacheService {
     companyId: string,
   ): Promise<SiigoPaymentTypeCatalogItemDto[]> {
     const normalizedDocumentType = documentType.trim().toUpperCase();
-    const cache = await this.ensureCatalogCache(companyId);
+    const cached = this.memoryCacheByCompany.get(companyId);
 
-    return cache.paymentTypes?.[normalizedDocumentType] ?? [];
+    return cached?.catalog.paymentTypes?.[normalizedDocumentType] ?? [];
   }
 
   async getTaxes(
     typeFilter: string | undefined,
     companyId: string,
   ): Promise<SiigoTaxCatalogItemDto[]> {
-    const cache = await this.ensureCatalogCache(companyId);
-    const taxes = cache.taxes ?? [];
+    const cached = this.memoryCacheByCompany.get(companyId);
+    const taxes = cached?.catalog.taxes ?? [];
     const normalizedFilter = typeFilter?.trim().toLowerCase();
 
     if (!normalizedFilter) {
@@ -86,10 +97,9 @@ export class SiigoConfigurationCacheService {
   }
 
   async getSupportDocumentTypeId(companyId: string): Promise<number> {
-    const integration = await this.ensureConfigurationSynced(companyId);
-    const documentTypeId = integration.configuration?.supportDocumentId;
+    const cache = await this.ensureCompanyCache(companyId);
 
-    if (!isValidSiigoConfigurationId(documentTypeId)) {
+    if (!isValidSiigoConfigurationId(cache.supportDocumentId)) {
       throw new Error(
         `No se pudo resolver el id de Documento Soporte para la empresa ${companyId}.`,
       );
@@ -97,17 +107,16 @@ export class SiigoConfigurationCacheService {
 
     console.log(SIIGO_CONFIGURATION_CACHE_LOG.USING_STORED_SUPPORT_DOCUMENT_TYPE);
     this.logger.log(
-      `[companyId=${companyId}] Tipo de documento DS servido desde configuración almacenada (id=${documentTypeId})`,
+      `[companyId=${companyId}] Tipo de documento DS servido desde caché en memoria (id=${cache.supportDocumentId})`,
     );
 
-    return documentTypeId;
+    return cache.supportDocumentId;
   }
 
   async getPurchaseDocumentTypeId(companyId: string): Promise<number> {
-    const integration = await this.ensureConfigurationSynced(companyId);
-    const documentTypeId = integration.configuration?.purchaseDocumentId;
+    const cache = await this.ensureCompanyCache(companyId);
 
-    if (!isValidSiigoConfigurationId(documentTypeId)) {
+    if (!isValidSiigoConfigurationId(cache.purchaseDocumentId)) {
       throw new Error(
         `No se pudo resolver el id de factura de compra para la empresa ${companyId}.`,
       );
@@ -115,63 +124,80 @@ export class SiigoConfigurationCacheService {
 
     console.log(SIIGO_CONFIGURATION_CACHE_LOG.USING_STORED_PURCHASE_DOCUMENT_TYPE);
     this.logger.log(
-      `[companyId=${companyId}] Tipo de documento FC servido desde configuración almacenada (id=${documentTypeId})`,
+      `[companyId=${companyId}] Tipo de documento FC servido desde caché en memoria (id=${cache.purchaseDocumentId})`,
     );
 
-    return documentTypeId;
+    return cache.purchaseDocumentId;
   }
 
-  private async ensureConfigurationSynced(companyId: string) {
-    await this.ensureCatalogCache(companyId);
+  async getSupportDocumentConfig(
+    companyId: string,
+  ): Promise<SiigoSupportDocumentConfig> {
+    const cache = await this.ensureCompanyCache(companyId);
 
-    return getSiigoIntegration(this.integrationsRepository, companyId);
-  }
-
-  private async ensureCatalogCache(companyId: string): Promise<SiigoCatalogCache> {
-    const integration = await getSiigoIntegration(
-      this.integrationsRepository,
+    return buildSiigoSupportDocumentConfig(
+      cache.catalog,
+      cache.supportDocumentId,
       companyId,
     );
+  }
 
-    if (isSiigoConfigurationFresh(integration.configuration)) {
+  async getPurchaseConfig(companyId: string): Promise<SiigoPurchaseConfig> {
+    const cache = await this.ensureCompanyCache(companyId);
+
+    return buildSiigoPurchaseConfig(
+      cache.catalog,
+      cache.purchaseDocumentId,
+      companyId,
+    );
+  }
+
+  invalidateCompanyCache(companyId: string): void {
+    this.memoryCacheByCompany.delete(companyId);
+  }
+
+  private async ensureCompanyCache(companyId: string): Promise<SiigoCompanyMemoryCache> {
+    const cached = this.memoryCacheByCompany.get(companyId);
+
+    if (
+      cached &&
+      isSiigoMemoryCacheFresh(cached.fetchedAt) &&
+      hasUsableSiigoCatalogCache(cached.catalog) &&
+      isValidSiigoConfigurationId(cached.supportDocumentId) &&
+      isValidSiigoConfigurationId(cached.purchaseDocumentId)
+    ) {
       console.log(SIIGO_CONFIGURATION_CACHE_LOG.USING_STORED);
       this.logger.log(
-        `[companyId=${companyId}] Configuración SIIGO servida desde almacenamiento (lastSync=${integration.configuration?.catalogCache?.lastSync})`,
+        `[companyId=${companyId}] Catálogo SIIGO servido desde caché en memoria (lastSync=${cached.catalog.lastSync})`,
       );
 
-      return integration.configuration?.catalogCache as SiigoCatalogCache;
+      return cached;
     }
 
-    await this.syncCatalogCacheForCompany(companyId);
-
-    const refreshedIntegration = await getSiigoIntegration(
-      this.integrationsRepository,
-      companyId,
-    );
-
-    return refreshedIntegration.configuration?.catalogCache ?? {};
+    return this.syncCompanyCache(companyId);
   }
 
-  private async syncCatalogCacheForCompany(companyId: string): Promise<void> {
+  private async syncCompanyCache(companyId: string): Promise<SiigoCompanyMemoryCache> {
     const existingSync = this.syncInProgressByCompany.get(companyId);
 
     if (existingSync) {
-      await existingSync;
-      return;
+      return existingSync;
     }
 
-    const syncPromise = this.performCatalogSync(companyId).finally(() => {
+    const syncPromise = this.performCompanyCacheSync(companyId).finally(() => {
       this.syncInProgressByCompany.delete(companyId);
     });
 
     this.syncInProgressByCompany.set(companyId, syncPromise);
-    await syncPromise;
+    return syncPromise;
   }
 
-  private async performCatalogSync(companyId: string): Promise<void> {
+  private async performCompanyCacheSync(
+    companyId: string,
+  ): Promise<SiigoCompanyMemoryCache> {
     console.log(SIIGO_CONFIGURATION_CACHE_LOG.EXPIRED_SYNCING);
     this.logger.log(
-      `[companyId=${companyId}] Configuración de catálogo SIIGO expirada o inexistente. Sincronizando...`,
+      `[companyId=${companyId}] Caché SIIGO expirada o inexistente. Consultando SIIGO...`,
     );
 
     const integration = await getSiigoIntegration(
@@ -182,54 +208,79 @@ export class SiigoConfigurationCacheService {
       this.companiesRepository,
       companyId,
     );
-    const authContext = await this.siigoAuthService.getValidAuthContext(companyId);
 
-    const [accounts, paymentTypes, taxes, supportDocumentId, purchaseDocumentId] =
-      await Promise.all([
-      this.syncAccountsCatalog(company.id, integration.id),
-      this.syncPaymentTypesCatalog(authContext.accessToken, authContext.partnerId),
-      this.syncTaxesCatalog(authContext.accessToken, authContext.partnerId),
-      this.syncSupportDocumentTypeId(
-        authContext.accessToken,
-        authContext.partnerId,
-      ),
-      this.syncPurchaseDocumentTypeId(
-        authContext.accessToken,
-        authContext.partnerId,
-      ),
-    ]);
-
-    const nextConfiguration: IntegrationConfiguration = {
-      ...integration.configuration,
+    const [
+      ,
+      paymentTypes,
+      taxes,
       supportDocumentId,
       purchaseDocumentId,
-      catalogCache: {
-        lastSync: buildSiigoCatalogCacheTimestamp(),
-        accounts,
-        paymentTypes,
-        taxes,
-      },
+    ] = await Promise.all([
+      this.syncRecentAccountsFromBalanceTrial(company.id),
+      this.syncPaymentTypesCatalog(companyId),
+      this.syncTaxesCatalog(companyId),
+      this.syncSupportDocumentTypeId(companyId),
+      this.syncPurchaseDocumentTypeId(companyId),
+    ]);
+
+    const accounts = await this.syncAccountsCatalog(company.id, integration.id);
+
+    const catalog: SiigoCatalogCache = {
+      lastSync: buildSiigoCatalogCacheTimestamp(),
+      accounts,
+      paymentTypes,
+      taxes,
     };
 
-    await this.integrationsRepository.updateConfiguration(
-      integration,
-      nextConfiguration,
-    );
+    const memoryCache: SiigoCompanyMemoryCache = {
+      fetchedAt: Date.now(),
+      catalog,
+      supportDocumentId,
+      purchaseDocumentId,
+    };
+
+    this.memoryCacheByCompany.set(companyId, memoryCache);
 
     console.log(SIIGO_CONFIGURATION_CACHE_LOG.UPDATED);
     this.logger.log(
-      `[companyId=${companyId}] Configuración SIIGO actualizada (accounts=${accounts.length}, taxes=${taxes.length}, paymentTypes=${Object.keys(paymentTypes).join(', ')}, supportDocumentId=${supportDocumentId}, purchaseDocumentId=${purchaseDocumentId})`,
+      `[companyId=${companyId}] Caché SIIGO actualizada en memoria (accounts=${accounts.length}, taxes=${taxes.length}, paymentTypes=${Object.keys(paymentTypes).join(', ')}, supportDocumentId=${supportDocumentId}, purchaseDocumentId=${purchaseDocumentId})`,
     );
+
+    return memoryCache;
   }
 
-  private async syncSupportDocumentTypeId(
-    accessToken: string,
-    partnerId?: string,
-  ): Promise<number> {
-    const documentTypes = await this.siigoHttpClient.listDocumentTypes(
-      accessToken,
-      SIIGO_SUPPORT_DOCUMENT_TYPE_QUERY,
-      partnerId,
+  private async syncRecentAccountsFromBalanceTrial(
+    companyId: string,
+  ): Promise<void> {
+    try {
+      const summary =
+        await this.siigoAccountsBalanceSyncService.syncAccountsFromRecentMonths(
+          companyId,
+        );
+
+      this.logger.log(
+        `[companyId=${companyId}] Cuentas actualizadas desde balance de prueba (created=${summary.accountsCreated}, processedRows=${summary.processedRows})`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[companyId=${companyId}] No se pudo sincronizar cuentas desde balance de prueba. Se usará el catálogo local.`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  private async syncSupportDocumentTypeId(companyId: string): Promise<number> {
+    const documentTypes = await executeSiigoRequestWithRetries(
+      this.siigoAuthService,
+      companyId,
+      this.logger,
+      'consultar tipos de documento soporte',
+      (accessToken, partnerId) =>
+        this.siigoHttpClient.listDocumentTypes(
+          accessToken,
+          SIIGO_SUPPORT_DOCUMENT_TYPE_QUERY,
+          partnerId,
+        ),
     );
 
     return pickSiigoDocumentTypeId(
@@ -239,14 +290,18 @@ export class SiigoConfigurationCacheService {
     );
   }
 
-  private async syncPurchaseDocumentTypeId(
-    accessToken: string,
-    partnerId?: string,
-  ): Promise<number> {
-    const documentTypes = await this.siigoHttpClient.listDocumentTypes(
-      accessToken,
-      SIIGO_PURCHASE_DOCUMENT_TYPE_QUERY,
-      partnerId,
+  private async syncPurchaseDocumentTypeId(companyId: string): Promise<number> {
+    const documentTypes = await executeSiigoRequestWithRetries(
+      this.siigoAuthService,
+      companyId,
+      this.logger,
+      'consultar tipos de factura de compra',
+      (accessToken, partnerId) =>
+        this.siigoHttpClient.listDocumentTypes(
+          accessToken,
+          SIIGO_PURCHASE_DOCUMENT_TYPE_QUERY,
+          partnerId,
+        ),
     );
 
     return pickSiigoDocumentTypeId(
@@ -260,25 +315,42 @@ export class SiigoConfigurationCacheService {
     companyId: string,
     integrationId: string,
   ): Promise<SiigoCachedAccountCatalogItem[]> {
-    const configurations =
-      await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
+    return this.loadAccountsFromDatabase(companyId, integrationId);
+  }
+
+  private async loadAccountsFromDatabase(
+    companyId: string,
+    integrationId?: string,
+  ): Promise<SiigoCachedAccountCatalogItem[]> {
+    const resolvedIntegrationId =
+      integrationId ??
+      (await getSiigoIntegration(this.integrationsRepository, companyId)).id;
+
+    const accounts =
+      await this.siigoAccountsRepository.findByCompanyAndIntegration(
         companyId,
-        integrationId,
+        resolvedIntegrationId,
       );
 
-    return collectUniqueAccountsCatalog(configurations);
+    return collectUniqueAccountsCatalog(accounts);
   }
 
   private async syncPaymentTypesCatalog(
-    accessToken: string,
-    partnerId?: string,
+    companyId: string,
   ): Promise<Record<string, SiigoCachedPaymentTypeCatalogItem[]>> {
     const entries = await Promise.all(
       PAYMENT_DOCUMENT_TYPES_TO_SYNC.map(async (documentType) => {
-        const paymentTypes = await this.siigoHttpClient.listPaymentTypes(
-          accessToken,
-          documentType,
-          partnerId,
+        const paymentTypes = await executeSiigoRequestWithRetries(
+          this.siigoAuthService,
+          companyId,
+          this.logger,
+          `consultar medios de pago (${documentType})`,
+          (accessToken, partnerId) =>
+            this.siigoHttpClient.listPaymentTypes(
+              accessToken,
+              documentType,
+              partnerId,
+            ),
         );
 
         const mapped = paymentTypes
@@ -300,10 +372,16 @@ export class SiigoConfigurationCacheService {
   }
 
   private async syncTaxesCatalog(
-    accessToken: string,
-    partnerId?: string,
+    companyId: string,
   ): Promise<SiigoCachedTaxCatalogItem[]> {
-    const taxes = await this.siigoHttpClient.listTaxes(accessToken, partnerId);
+    const taxes = await executeSiigoRequestWithRetries(
+      this.siigoAuthService,
+      companyId,
+      this.logger,
+      'consultar impuestos',
+      (accessToken, partnerId) =>
+        this.siigoHttpClient.listTaxes(accessToken, partnerId),
+    );
 
     return taxes
       .filter((tax) => tax.active !== false)

@@ -14,6 +14,9 @@ interface ErrorResponse {
   path: string;
   message: string | string[];
   error?: string;
+  code?: string;
+  detail?: string;
+  siigo?: unknown;
 }
 
 @Catch()
@@ -48,6 +51,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const res = exception.getResponse();
       if (typeof res === 'object' && res !== null && 'error' in res) {
         body.error = String((res as Record<string, unknown>).error);
+      }
+      if (typeof res === 'object' && res !== null && 'code' in res) {
+        body.code = String((res as Record<string, unknown>).code);
+      }
+      if (typeof res === 'object' && res !== null && 'detail' in res) {
+        const detail = (res as Record<string, unknown>).detail;
+        if (typeof detail === 'string') {
+          body.detail = detail;
+        }
+      }
+      if (typeof res === 'object' && res !== null && 'siigo' in res) {
+        body.siigo = (res as Record<string, unknown>).siigo;
       }
     } else {
       body.error = 'Internal Server Error';

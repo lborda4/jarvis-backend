@@ -70,6 +70,17 @@ export function isSiigoSupportDocumentNumberAlreadyExistsError(
   return hasAlreadyExistsCode && referencesDocumentNumber;
 }
 
+export function isSiigoDuplicatedDocumentError(error: unknown): boolean {
+  const message = extractErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('duplicated_document') ||
+    message.includes('duplicate requests') ||
+    message.includes('duplicate request') ||
+    message.includes('the document already exists')
+  );
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -1,4 +1,5 @@
 import {
+  SupplierCostCenterPreference,
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from './supplier-mapping-value.interface';
@@ -10,6 +11,7 @@ export interface SupplierPreferenceAccount {
 
 export interface SupplierPreferenceSnapshot {
   account: SupplierPreferenceAccount;
-  paymentMethod: SupplierPaymentMethodPreference;
+  paymentMethod?: SupplierPaymentMethodPreference | null;
   retentions: SupplierRetentionPreference[];
+  costCenter?: SupplierCostCenterPreference | null;
 }

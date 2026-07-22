@@ -2,6 +2,8 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
@@ -9,6 +11,8 @@ import {
 import { SupplierConfiguration } from '../../integration/entities/supplier-configuration.entity';
 import { UserCompany } from '../../auth/entities/user-company.entity';
 import { Integration } from '../../integration/entities/integration.entity';
+import { Plan } from '../../plan/entities/plan.entity';
+import type { CompanyResponsible } from '../interfaces/company-responsible.interface';
 
 @Entity('companies')
 export class Company {
@@ -21,8 +25,11 @@ export class Company {
   @Column()
   name: string;
 
-  @Column({ name: 'dian_cookie', type: 'text', nullable: true })
-  dianCookie: string | null;
+  @Column({ type: 'jsonb', nullable: true })
+  responsible: CompanyResponsible | null;
+
+  @Column({ name: 'company_plan_id', type: 'uuid', nullable: true })
+  companyPlanId: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
@@ -38,6 +45,12 @@ export class Company {
 
   @OneToMany(() => UserCompany, (userCompany) => userCompany.company)
   userCompanies: UserCompany[];
+
+  @ManyToOne(() => Plan, (plan) => plan.companies, {
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'company_plan_id' })
+  companyPlan: Plan | null;
 
   @OneToMany(() => Integration, (integration) => integration.company)
   integrations: Integration[];

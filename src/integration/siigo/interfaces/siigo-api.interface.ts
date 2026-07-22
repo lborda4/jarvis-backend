@@ -82,6 +82,13 @@ export interface SiigoTax {
   active: boolean;
 }
 
+export interface SiigoCostCenter {
+  id: number;
+  code: string;
+  name: string;
+  active: boolean;
+}
+
 export interface SiigoPurchaseResponse {
   id: string;
   document: { id: number };
@@ -116,14 +123,13 @@ export interface SiigoSupportDocumentResponse {
   };
 }
 
-export interface SiigoTestBalanceByThirdPartyRequest {
+export interface SiigoTestBalanceReportRequest {
   account_start?: string;
   account_end?: string;
   year: number;
   month_start: number;
   month_end: number;
   includes_tax_difference: boolean;
-  customer?: string;
 }
 
 export interface SiigoTestBalanceReportResponse {

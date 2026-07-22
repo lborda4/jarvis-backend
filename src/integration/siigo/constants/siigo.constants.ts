@@ -7,8 +7,8 @@ export const SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH =
   '/v1/purchase-support-documents';
 export const SIIGO_PAYMENT_TYPES_PATH = '/v1/payment-types';
 export const SIIGO_TAXES_PATH = '/v1/taxes';
-export const SIIGO_TEST_BALANCE_BY_THIRDPARTY_PATH =
-  '/v1/test-balance-report-by-thirdparty';
+export const SIIGO_COST_CENTERS_PATH = '/v1/cost-centers';
+export const SIIGO_TEST_BALANCE_PATH = '/v1/test-balance-report';
 
 export const SIIGO_PAYMENT_DOCUMENT_TYPE_PURCHASE = 'FC';
 export const SIIGO_PAYMENT_DOCUMENT_TYPE_SUPPORT = 'DS';
@@ -22,3 +22,12 @@ export const SIIGO_PERSON_PERSON_TYPE = 'Person';
 export const SIIGO_NIT_ID_TYPE = '31';
 export const SIIGO_CEDULA_ID_TYPE = '13';
 export const SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT = 'Account';
+
+export const SIIGO_DOCUMENT_SEND_INTERVAL_MS = 1000;
+export const SIIGO_DOCUMENT_SEND_MAX_RETRIES = 3;
+export const SIIGO_DOCUMENT_SEND_RETRY_DELAY_MS = 1000;
+
+export const SIIGO_DOCUMENT_SEND_RETRY_OPTIONS = {
+  maxGenericRetries: 0,
+  genericRetryDelayMs: SIIGO_DOCUMENT_SEND_RETRY_DELAY_MS,
+} as const;

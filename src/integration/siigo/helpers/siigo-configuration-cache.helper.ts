@@ -1,29 +1,21 @@
-import { IntegrationConfiguration } from '../../interfaces/integration-configuration.interface';
 import { SiigoCatalogCache } from '../../interfaces/siigo-catalog-cache.interface';
 import { SIIGO_CONFIGURATION_CACHE_TTL_MS } from '../constants/siigo-configuration-cache.constants';
-import { isValidSiigoConfigurationId } from './siigo-document-type.helper';
 
-export function isSiigoCatalogCacheFresh(
-  lastSync?: string,
+export function isSiigoMemoryCacheFresh(
+  fetchedAt: number | undefined,
   ttlMs = SIIGO_CONFIGURATION_CACHE_TTL_MS,
 ): boolean {
-  if (!lastSync?.trim()) {
+  if (!fetchedAt || !Number.isFinite(fetchedAt)) {
     return false;
   }
 
-  const syncedAt = Date.parse(lastSync);
-
-  if (Number.isNaN(syncedAt)) {
-    return false;
-  }
-
-  return Date.now() - syncedAt < ttlMs;
+  return Date.now() - fetchedAt < ttlMs;
 }
 
 export function hasUsableSiigoCatalogCache(
   cache?: SiigoCatalogCache | null,
 ): boolean {
-  if (!cache?.lastSync) {
+  if (!cache) {
     return false;
   }
 
@@ -37,24 +29,4 @@ export function hasUsableSiigoCatalogCache(
 
 export function buildSiigoCatalogCacheTimestamp(): string {
   return new Date().toISOString();
-}
-
-export function hasStoredSiigoDocumentTypeIds(
-  configuration?: IntegrationConfiguration | null,
-): boolean {
-  return (
-    isValidSiigoConfigurationId(configuration?.supportDocumentId) &&
-    isValidSiigoConfigurationId(configuration?.purchaseDocumentId)
-  );
-}
-
-export function isSiigoConfigurationFresh(
-  configuration?: IntegrationConfiguration | null,
-  ttlMs = SIIGO_CONFIGURATION_CACHE_TTL_MS,
-): boolean {
-  return (
-    isSiigoCatalogCacheFresh(configuration?.catalogCache?.lastSync, ttlMs) &&
-    hasUsableSiigoCatalogCache(configuration?.catalogCache) &&
-    hasStoredSiigoDocumentTypeIds(configuration)
-  );
 }

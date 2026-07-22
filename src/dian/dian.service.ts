@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { Company } from '../company/entities/company.entity';
+import { AppConfiguration } from '../config/configuration';
 import { CompaniesRepository } from '../company/repositories/companies.repository';
 import { DianParserService } from './dian-parser.service';
 import { extractInvoiceXmlFromZip } from './helpers/dian-xml.helper';
@@ -19,6 +20,7 @@ export class DianService {
     private readonly httpService: HttpService,
     private readonly dianParserService: DianParserService,
     private readonly companiesRepository: CompaniesRepository,
+    private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
   async searchInvoices(
@@ -26,9 +28,8 @@ export class DianService {
     companyId: string,
   ): Promise<SearchDianResponseDto> {
     const cufes = this.validateCufes(request.cufes);
-    const company = await this.resolveCompany(companyId);
-    const dianCookie = this.getDianCookie(company);
-    console.log('dianCookie', dianCookie);
+    await this.resolveCompany(companyId);
+    const dianCookie = this.getDianCookie();
 
     const resultados: DianInvoiceResult[] = [];
     const errores: SearchDianResponseDto['errores'] = [];
@@ -96,7 +97,7 @@ export class DianService {
     return Buffer.from(response.data);
   }
 
-  private async resolveCompany(companyId: string): Promise<Company> {
+  private async resolveCompany(companyId: string): Promise<void> {
     const trimmedCompanyId = companyId?.trim();
 
     if (!trimmedCompanyId) {
@@ -112,16 +113,14 @@ export class DianService {
         `No se encontró la empresa con id ${trimmedCompanyId}.`,
       );
     }
-
-    return company;
   }
 
-  private getDianCookie(company: Company): string {
-    const cookie = company.dianCookie?.trim();
+  private getDianCookie(): string {
+    const cookie = this.configService.get('dian.cookie', { infer: true })?.trim();
 
     if (!cookie) {
       throw new BadRequestException(
-        `La empresa "${company.name}" no tiene configurada la cookie DIAN (dian_cookie).`,
+        'No está configurada la cookie DIAN (DIAN_COOKIE).',
       );
     }
 

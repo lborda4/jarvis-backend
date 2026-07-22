@@ -13,6 +13,7 @@ const TEMPLATE_HEADERS = [
   'Descripcion',
   'Cantidad',
   'Valor unitario',
+  'Observaciones',
 ] as const;
 
 const TEMPLATE_EXAMPLE_ROWS: string[][] = [
@@ -26,6 +27,7 @@ const TEMPLATE_EXAMPLE_ROWS: string[][] = [
     'Servicio de consultoría',
     '1',
     '150000',
+    'Observaciones del documento soporte',
   ],
   [
     '2026-06-10',
@@ -37,6 +39,7 @@ const TEMPLATE_EXAMPLE_ROWS: string[][] = [
     'Papelería',
     '2',
     '25000',
+    'Compra de insumos de oficina',
   ],
   [
     '2026-06-10',
@@ -48,6 +51,7 @@ const TEMPLATE_EXAMPLE_ROWS: string[][] = [
     'Transporte',
     '1',
     '80000',
+    'Compra de insumos de oficina',
   ],
 ];
 
@@ -67,6 +71,7 @@ export function buildSupportDocumentTemplateExcel(): Buffer {
     { wch: 30 },
     { wch: 10 },
     { wch: 14 },
+    { wch: 36 },
   ];
 
   const workbook = XLSX.utils.book_new();

@@ -1,6 +1,7 @@
 import { ElectronicDocumentProcessingStatus } from '../enums/electronic-document-processing-status.enum';
 import { SuggestedAccount } from '../../integration/helpers/supplier-accounts-catalog.helper';
 import {
+  SupplierCostCenterPreference,
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from '../../integration/interfaces/supplier-mapping-value.interface';
@@ -23,7 +24,9 @@ export class ElectronicDocumentListItemDto {
   suggestedAccount: SuggestedAccount | null;
   suggestedPaymentMethod: SupplierPaymentMethodPreference | null;
   suggestedRetentions: SupplierRetentionPreference[];
+  suggestedCostCenter: SupplierCostCenterPreference | null;
   processingStatus: ElectronicDocumentProcessingStatus;
+  observations?: string | null;
   items?: ElectronicDocumentListItemItemDto[];
   createdAt: string;
   updatedAt: string;

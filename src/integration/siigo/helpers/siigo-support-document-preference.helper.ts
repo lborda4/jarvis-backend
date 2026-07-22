@@ -1,6 +1,7 @@
 import { CreateSiigoSupportDocumentRequestDto } from '../dto/create-siigo-support-document.dto';
 import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import {
+  normalizeSupplierCostCenterPreference,
   normalizeSupplierPaymentMethodPreference,
   normalizeSupplierRetentionPreferences,
 } from '../../helpers/supplier-mapping-value.helper';
@@ -54,6 +55,16 @@ export function buildSupplierPreferenceSnapshotFromSendRequest(
     return null;
   }
 
+  const normalizedCostCenter = snapshot?.costCenter
+    ? normalizeSupplierCostCenterPreference(snapshot.costCenter)
+    : request.cost_center !== undefined
+      ? normalizeSupplierCostCenterPreference({
+          id: request.cost_center,
+          code: String(request.cost_center),
+          name: `Centro ${request.cost_center}`,
+        })
+      : null;
+
   return {
     account: {
       code: accountCode,
@@ -64,5 +75,6 @@ export function buildSupplierPreferenceSnapshotFromSendRequest(
     },
     paymentMethod: normalizedPaymentMethod,
     retentions: normalizeSupplierRetentionPreferences(retentions),
+    ...(normalizedCostCenter ? { costCenter: normalizedCostCenter } : {}),
   };
 }

@@ -14,7 +14,9 @@ import { DianModule } from './dian/dian.module';
 import { ImportSessionModule } from './import-session/import-session.module';
 import { IntegrationModule } from './integration/integration.module';
 import { SiigoModule } from './integration/siigo/siigo.module';
+import { JarvisModule } from './integration/jarvis/jarvis.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { InvoicesModule } from './invoices/invoices.module';
     InvoicesModule,
     DianModule,
     SiigoModule,
+    JarvisModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

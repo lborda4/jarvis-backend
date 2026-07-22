@@ -13,10 +13,12 @@ import {
   resolveImportedSupplierName,
 } from '../integration/helpers/supplier-name-resolution.helper';
 import {
+  resolveSuggestedCostCenterForDocument,
   resolveSuggestedPaymentMethodForDocument,
   resolveSuggestedRetentionsForDocument,
 } from '../integration/helpers/supplier-preferences.helper';
 import {
+  SupplierCostCenterPreference,
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from '../integration/interfaces/supplier-mapping-value.interface';
@@ -26,17 +28,19 @@ import { getSiigoIntegration } from '../integration/siigo/helpers/siigo-context.
 import { DianInvoiceResult } from '../dian/interfaces/dian-invoice-result.interface';
 import { ElectronicDocumentListQueryDto } from './dto/electronic-document-list-query.dto';
 import { ElectronicDocumentListResponseDto } from './dto/electronic-document-list-response.dto';
+import { ElectronicDocumentFilterOptionsDto } from './dto/electronic-document-filter-options.dto';
 import { ElectronicDocumentCompanyOptionDto } from './dto/electronic-document-company-option.dto';
 import { ElectronicDocument } from './entities/electronic-document.entity';
 import { ElectronicDocumentProcessingStatus } from './enums/electronic-document-processing-status.enum';
 import { ElectronicDocumentStatus } from './enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
-import { RecommendedAccount } from './interfaces/recommended-account.interface';
 import { mapDianResultToElectronicDocumentPayload } from './mappers/dian-to-electronic-document-payload.mapper';
 import { GroupedSupportDocument } from './interfaces/support-document-import.interface';
 import { mapGroupedSupportDocumentToPayload } from './mappers/support-document-excel-to-payload.mapper';
 import { mapElectronicDocumentToListItem } from './mappers/electronic-document-list-item.mapper';
 import { parseOptionalElectronicDocumentTypeFilter } from './helpers/electronic-document-type.helper';
+import { normalizeElectronicDocumentPageLimit } from './constants/electronic-document-pagination.constants';
+import { parseImportStatusFilters } from './helpers/import-status-filter.helper';
 import { ElectronicDocumentsRepository } from './repositories/electronic-documents.repository';
 
 @Injectable()
@@ -136,7 +140,6 @@ export class ElectronicDocumentService {
     documentId: string,
     metadata: Partial<{
       supplierExistsInSiigo: boolean | null;
-      recommendedAccount: RecommendedAccount | null;
       processingStatus: ElectronicDocumentProcessingStatus;
     }>,
     companyId?: string,
@@ -145,10 +148,6 @@ export class ElectronicDocumentService {
 
     if (metadata.supplierExistsInSiigo !== undefined) {
       document.supplierExistsInSiigo = metadata.supplierExistsInSiigo;
-    }
-
-    if (metadata.recommendedAccount !== undefined) {
-      document.recommendedAccount = metadata.recommendedAccount;
     }
 
     if (metadata.processingStatus !== undefined) {
@@ -234,7 +233,6 @@ export class ElectronicDocumentService {
       status: ElectronicDocumentStatus.PENDING,
       processingStatus: ElectronicDocumentProcessingStatus.PENDING,
       supplierExistsInSiigo: null,
-      recommendedAccount: null,
       payload,
     });
 
@@ -316,7 +314,6 @@ export class ElectronicDocumentService {
         status: ElectronicDocumentStatus.PENDING,
         processingStatus: ElectronicDocumentProcessingStatus.PENDING,
         supplierExistsInSiigo: null,
-        recommendedAccount: null,
         payload,
       });
     });
@@ -384,10 +381,7 @@ export class ElectronicDocumentService {
     companyId: string,
   ): Promise<ElectronicDocumentListResponseDto> {
     const page = Math.max(Number.parseInt(query.page ?? '1', 10) || 1, 1);
-    const limit = Math.min(
-      Math.max(Number.parseInt(query.limit ?? '10', 10) || 10, 1),
-      200,
-    );
+    const limit = normalizeElectronicDocumentPageLimit(query.limit);
 
     const dateFrom = query.dateFrom?.trim()
       ? new Date(`${query.dateFrom.trim()}T00:00:00.000Z`)
@@ -403,6 +397,15 @@ export class ElectronicDocumentService {
       ?.split(',')
       .map((nit) => nit.trim())
       .filter(Boolean);
+    const issueDates = query.issueDates
+      ?.split(',')
+      .map((date) => date.trim())
+      .filter(Boolean);
+    const siigoDocumentNumbers = query.siigoDocumentNumbers
+      ?.split(',')
+      .map((value) => Number.parseInt(value.trim(), 10))
+      .filter((value) => Number.isFinite(value));
+    const importStatuses = parseImportStatusFilters(query.importStatuses);
 
     const { items, total } = await this.electronicDocumentsRepository.findAll({
       electronicDocumentType,
@@ -412,6 +415,9 @@ export class ElectronicDocumentService {
       dateTo,
       search: query.search,
       supplierNits,
+      issueDates,
+      siigoDocumentNumbers,
+      importStatuses,
       page,
       limit,
     });
@@ -425,6 +431,7 @@ export class ElectronicDocumentService {
           supplierPreferences.accounts.get(document.id) ?? null,
           supplierPreferences.paymentMethods.get(document.id) ?? null,
           supplierPreferences.retentions.get(document.id) ?? [],
+          supplierPreferences.costCenters.get(document.id) ?? null,
         ),
       ),
       total,
@@ -433,19 +440,35 @@ export class ElectronicDocumentService {
     };
   }
 
+  async getFilterOptions(
+    companyId: string,
+    electronicDocumentType?: string,
+  ): Promise<ElectronicDocumentFilterOptionsDto> {
+    const parsedType = parseOptionalElectronicDocumentTypeFilter(
+      electronicDocumentType,
+    );
+
+    return this.electronicDocumentsRepository.findFilterOptions(
+      companyId,
+      parsedType,
+    );
+  }
+
   private async buildSupplierPreferencesLookup(
     documents: ElectronicDocument[],
   ): Promise<{
     accounts: Map<string, SuggestedAccount | null>;
     paymentMethods: Map<string, SupplierPaymentMethodPreference | null>;
     retentions: Map<string, SupplierRetentionPreference[]>;
+    costCenters: Map<string, SupplierCostCenterPreference | null>;
   }> {
     const accounts = new Map<string, SuggestedAccount | null>();
     const paymentMethods = new Map<string, SupplierPaymentMethodPreference | null>();
     const retentions = new Map<string, SupplierRetentionPreference[]>();
+    const costCenters = new Map<string, SupplierCostCenterPreference | null>();
 
     if (!documents.length) {
-      return { accounts, paymentMethods, retentions };
+      return { accounts, paymentMethods, retentions, costCenters };
     }
 
     const configurationIndex = new Map<
@@ -484,6 +507,7 @@ export class ElectronicDocumentService {
         accounts.set(document.id, null);
         paymentMethods.set(document.id, null);
         retentions.set(document.id, []);
+        costCenters.set(document.id, null);
         continue;
       }
 
@@ -511,9 +535,17 @@ export class ElectronicDocumentService {
           integrationId,
         ),
       );
+      costCenters.set(
+        document.id,
+        resolveSuggestedCostCenterForDocument(
+          document,
+          configurationIndex,
+          integrationId,
+        ),
+      );
     }
 
-    return { accounts, paymentMethods, retentions };
+    return { accounts, paymentMethods, retentions, costCenters };
   }
 
   async listCompanyOptions(

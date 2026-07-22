@@ -11,7 +11,8 @@ import {
   SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH,
   SIIGO_PAYMENT_TYPES_PATH,
   SIIGO_TAXES_PATH,
-  SIIGO_TEST_BALANCE_BY_THIRDPARTY_PATH,
+  SIIGO_COST_CENTERS_PATH,
+  SIIGO_TEST_BALANCE_PATH,
 } from '../constants/siigo.constants';
 import { SiigoAuthRequestDto } from '../dto/siigo-auth-request.dto';
 import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
@@ -22,12 +23,13 @@ import {
   SiigoAuthResponse,
   SiigoCustomer,
   SiigoCustomersListResponse,
+  SiigoCostCenter,
   SiigoDocumentType,
   SiigoPaymentType,
   SiigoPurchaseResponse,
   SiigoSupportDocumentResponse,
   SiigoTax,
-  SiigoTestBalanceByThirdPartyRequest,
+  SiigoTestBalanceReportRequest,
   SiigoTestBalanceReportResponse,
 } from '../interfaces/siigo-api.interface';
 
@@ -36,9 +38,17 @@ export class SiigoHttpClient {
   constructor(private readonly httpService: HttpService) {}
 
   async authenticate(payload: SiigoAuthRequestDto): Promise<SiigoAuthResponse> {
+    console.log('[SIIGO HTTP] POST /auth', {
+      username: payload.username,
+      hasAccessKey: Boolean(payload.access_key),
+    });
+
     return this.request<SiigoAuthResponse>({
       method: 'POST',
       url: `${SIIGO_API_BASE_URL}${SIIGO_AUTH_PATH}`,
+      headers: {
+        'Content-Type': 'application/json',
+      },
       data: payload,
     });
   }
@@ -102,14 +112,14 @@ export class SiigoHttpClient {
     console.log('[SIIGO purchase] document:', JSON.stringify(payload.document, null, 2));
     console.log('[SIIGO purchase] date:', payload.date);
     console.log('[SIIGO purchase] supplier:', JSON.stringify(payload.supplier, null, 2));
+    if (payload.cost_center !== undefined) {
+      console.log('[SIIGO purchase] cost_center:', payload.cost_center);
+    }
     console.log(
       '[SIIGO purchase] provider_invoice:',
       JSON.stringify(payload.provider_invoice, null, 2),
     );
     console.log('[SIIGO purchase] observations:', payload.observations ?? null);
-    if (payload.cost_center !== undefined) {
-      console.log('[SIIGO purchase] cost_center:', payload.cost_center);
-    }
     console.log('[SIIGO purchase] items:', JSON.stringify(payload.items, null, 2));
     console.log(
       '[SIIGO purchase] payments:',
@@ -134,6 +144,10 @@ export class SiigoHttpClient {
     console.log(
       '[SIIGO support-document] ===== body POST /v1/purchase-support-documents =====',
     );
+    console.log('[SIIGO support-document] supplier:', JSON.stringify(payload.supplier, null, 2));
+    if (payload.cost_center !== undefined) {
+      console.log('[SIIGO support-document] cost_center:', payload.cost_center);
+    }
     console.log(
       '[SIIGO support-document] body completo:',
       JSON.stringify(payload, null, 2),
@@ -201,14 +215,27 @@ export class SiigoHttpClient {
     return Array.isArray(response) ? response : [];
   }
 
-  async createTestBalanceByThirdParty(
+  async listCostCenters(
     accessToken: string,
-    payload: SiigoTestBalanceByThirdPartyRequest,
+    partnerId?: string,
+  ): Promise<SiigoCostCenter[]> {
+    const response = await this.request<SiigoCostCenter[]>({
+      method: 'GET',
+      url: `${SIIGO_API_BASE_URL}${SIIGO_COST_CENTERS_PATH}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+    });
+
+    return Array.isArray(response) ? response : [];
+  }
+
+  async createTestBalanceReport(
+    accessToken: string,
+    payload: SiigoTestBalanceReportRequest,
     partnerId?: string,
   ): Promise<SiigoTestBalanceReportResponse> {
     return this.request<SiigoTestBalanceReportResponse>({
       method: 'POST',
-      url: `${SIIGO_API_BASE_URL}${SIIGO_TEST_BALANCE_BY_THIRDPARTY_PATH}`,
+      url: `${SIIGO_API_BASE_URL}${SIIGO_TEST_BALANCE_PATH}`,
       headers: this.buildAuthHeaders(accessToken, partnerId),
       data: payload,
     });

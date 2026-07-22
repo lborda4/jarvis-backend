@@ -67,8 +67,6 @@ export class SupplierConfigurationsRepository {
       | 'supplierDocumentType'
       | 'supplierName'
       | 'itemType'
-      | 'mappingValue'
-      | 'autoApply'
     >,
   ): SupplierConfiguration {
     return this.repository.create(data);

@@ -3,6 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { ElectronicDocument } from '../entities/electronic-document.entity';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
+import {
+  applyImportStatusFilters,
+  IMPORT_ROW_STATUS_FILTER,
+  ImportRowStatusFilter,
+} from '../helpers/import-status-filter.helper';
+import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
 
 export interface FindElectronicDocumentsFilters {
   electronicDocumentType?: ElectronicDocumentType;
@@ -12,8 +18,18 @@ export interface FindElectronicDocumentsFilters {
   dateTo?: Date;
   search?: string;
   supplierNits?: string[];
+  issueDates?: string[];
+  siigoDocumentNumbers?: number[];
+  importStatuses?: ImportRowStatusFilter[];
   page: number;
   limit: number;
+}
+
+export interface ElectronicDocumentFilterOptions {
+  issueDates: string[];
+  siigoDocumentNumbers: number[];
+  importStatuses: ImportRowStatusFilter[];
+  suppliers: Array<{ nit: string; name: string }>;
 }
 
 @Injectable()
@@ -34,7 +50,6 @@ export class ElectronicDocumentsRepository {
       | 'status'
       | 'processingStatus'
       | 'supplierExistsInSiigo'
-      | 'recommendedAccount'
       | 'payload'
     >,
   ): ElectronicDocument {
@@ -116,6 +131,22 @@ export class ElectronicDocumentsRepository {
       });
     }
 
+    if (filters.issueDates?.length) {
+      query.andWhere(
+        "document.payload->'invoice'->>'issueDate' IN (:...issueDates)",
+        { issueDates: filters.issueDates },
+      );
+    }
+
+    if (filters.siigoDocumentNumbers?.length) {
+      query.andWhere(
+        'document.siigoDocumentNumber IN (:...siigoDocumentNumbers)',
+        { siigoDocumentNumbers: filters.siigoDocumentNumbers },
+      );
+    }
+
+    applyImportStatusFilters(query, filters.importStatuses ?? []);
+
     const total = await query.getCount();
     const items = await query
       .skip((filters.page - 1) * filters.limit)
@@ -123,6 +154,84 @@ export class ElectronicDocumentsRepository {
       .getMany();
 
     return { items, total };
+  }
+
+  async findFilterOptions(
+    companyId: string,
+    electronicDocumentType?: ElectronicDocumentType,
+  ): Promise<ElectronicDocumentFilterOptions> {
+    const baseQuery = this.repository
+      .createQueryBuilder('document')
+      .where('document.companyId = :companyId', { companyId });
+
+    if (electronicDocumentType) {
+      baseQuery.andWhere('document.electronicDocumentType = :electronicDocumentType', {
+        electronicDocumentType,
+      });
+    }
+
+    const issueDateRows = await baseQuery
+      .clone()
+      .select(
+        "DISTINCT document.payload->'invoice'->>'issueDate'",
+        'issueDate',
+      )
+      .andWhere("document.payload->'invoice'->>'issueDate' IS NOT NULL")
+      .andWhere("document.payload->'invoice'->>'issueDate' <> ''")
+      .orderBy("document.payload->'invoice'->>'issueDate'", 'ASC')
+      .getRawMany<{ issueDate: string }>();
+
+    const siigoNumberRows = await baseQuery
+      .clone()
+      .select('DISTINCT document.siigoDocumentNumber', 'siigoDocumentNumber')
+      .andWhere('document.siigoDocumentNumber IS NOT NULL')
+      .orderBy('document.siigoDocumentNumber', 'ASC')
+      .getRawMany<{ siigoDocumentNumber: string }>();
+
+    const supplierRows = await baseQuery
+      .clone()
+      .select('document.documentNumberThird', 'nit')
+      .addSelect("document.payload->'supplier'->>'name'", 'name')
+      .andWhere('document.documentNumberThird IS NOT NULL')
+      .andWhere("document.documentNumberThird <> ''")
+      .distinct(true)
+      .orderBy("document.payload->'supplier'->>'name'", 'ASC')
+      .getRawMany<{ nit: string; name: string | null }>();
+
+    const statusRows = await baseQuery
+      .clone()
+      .select('document.status', 'status')
+      .addSelect('document.supplierExistsInSiigo', 'supplierExistsInSiigo')
+      .getRawMany<{
+        status: string;
+        supplierExistsInSiigo: boolean | null;
+      }>();
+
+    const importStatuses = new Set<ImportRowStatusFilter>();
+
+    for (const row of statusRows) {
+      importStatuses.add(
+        mapRawDocumentToImportStatus(row.status, row.supplierExistsInSiigo),
+      );
+    }
+
+    return {
+      issueDates: issueDateRows
+        .map((row) => row.issueDate?.trim())
+        .filter((value): value is string => Boolean(value)),
+      siigoDocumentNumbers: siigoNumberRows
+        .map((row) => Number.parseInt(row.siigoDocumentNumber, 10))
+        .filter((value) => Number.isFinite(value)),
+      importStatuses: [...importStatuses].sort((left, right) =>
+        left.localeCompare(right, 'es', { sensitivity: 'base' }),
+      ),
+      suppliers: supplierRows
+        .map((row) => ({
+          nit: row.nit.trim(),
+          name: row.name?.trim() || row.nit.trim(),
+        }))
+        .filter((supplier) => supplier.nit.length > 0),
+    };
   }
 
   async findDistinctCompanies(): Promise<
@@ -140,4 +249,38 @@ export class ElectronicDocumentsRepository {
 
     return rows;
   }
+}
+
+function mapRawDocumentToImportStatus(
+  status: string,
+  supplierExistsInSiigo: boolean | null,
+): ImportRowStatusFilter {
+  if (status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    return IMPORT_ROW_STATUS_FILTER.LISTA;
+  }
+
+  if (
+    status === ElectronicDocumentStatus.PURCHASE_FAILED ||
+    status === ElectronicDocumentStatus.FAILED
+  ) {
+    return IMPORT_ROW_STATUS_FILTER.ERROR;
+  }
+
+  if (
+    supplierExistsInSiigo !== true &&
+    supplierExistsInSiigo !== false &&
+    status !== ElectronicDocumentStatus.SUPPLIER_NOT_FOUND &&
+    status !== ElectronicDocumentStatus.PURCHASE_CREATED
+  ) {
+    return IMPORT_ROW_STATUS_FILTER.EN_PROCESO;
+  }
+
+  if (
+    supplierExistsInSiigo === false ||
+    status === ElectronicDocumentStatus.SUPPLIER_NOT_FOUND
+  ) {
+    return IMPORT_ROW_STATUS_FILTER.REQUIERE_PROVEEDOR;
+  }
+
+  return IMPORT_ROW_STATUS_FILTER.PENDIENTE;
 }

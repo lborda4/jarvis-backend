@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { UserRole } from '../enums/user-role.enum';
 import { UserCompany } from './user-company.entity';
 
 @Entity('users')
@@ -24,6 +25,9 @@ export class User {
 
   @Column({ default: true })
   active: boolean;
+
+  @Column({ type: 'varchar', length: 50, default: UserRole.USER })
+  role: UserRole;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

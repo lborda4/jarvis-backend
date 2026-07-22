@@ -12,7 +12,6 @@ import { ElectronicDocumentStatus } from '../enums/electronic-document-status.en
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 import { ElectronicDocumentProcessingStatus } from '../enums/electronic-document-processing-status.enum';
 import type { ElectronicDocumentPayload } from '../interfaces/electronic-document-payload.interface';
-import type { RecommendedAccount } from '../interfaces/recommended-account.interface';
 
 @Entity('electronic_documents')
 export class ElectronicDocument {
@@ -50,9 +49,6 @@ export class ElectronicDocument {
 
   @Column({ name: 'supplier_exists_in_siigo', type: 'boolean', nullable: true })
   supplierExistsInSiigo: boolean | null;
-
-  @Column({ name: 'recommended_account', type: 'jsonb', nullable: true })
-  recommendedAccount: RecommendedAccount | null;
 
   @Column({
     name: 'processing_status',

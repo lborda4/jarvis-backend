@@ -1,9 +1,3 @@
-export interface SupplierAccountMapping {
-  code: string;
-  name: string;
-  uses: number;
-}
-
 export interface SupplierPaymentMethodPreference {
   id: number;
   name: string;
@@ -18,8 +12,8 @@ export interface SupplierRetentionPreference {
   percentage: number;
 }
 
-export interface SupplierMappingValue {
-  accounts: SupplierAccountMapping[];
-  paymentMethod?: SupplierPaymentMethodPreference | null;
-  retentions?: SupplierRetentionPreference[];
+export interface SupplierCostCenterPreference {
+  id: number;
+  code: string;
+  name: string;
 }

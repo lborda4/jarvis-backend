@@ -22,7 +22,7 @@ export function mapCreateSupportDocumentRequestToSiigo(
     taxesCatalog,
   );
   const items = request.items.map((item) =>
-    mapItem(item, retentionPlacement.itemRetentionIds),
+    mapSiigoDocumentSendItem(item, retentionPlacement.itemRetentionIds),
   );
   const retentions = retentionPlacement.documentRetentions.length
     ? retentionPlacement.documentRetentions
@@ -47,6 +47,9 @@ export function mapCreateSupportDocumentRequestToSiigo(
       identification: request.supplier.identification.trim(),
       branch_office: request.supplier.branch_office ?? 0,
     },
+    ...(request.cost_center !== undefined
+      ? { cost_center: request.cost_center }
+      : {}),
     supplier_receipt_number: {
       prefix: request.supplier_receipt_number.prefix.trim(),
       number: request.supplier_receipt_number.number.trim(),
@@ -57,11 +60,11 @@ export function mapCreateSupportDocumentRequestToSiigo(
     ...(sendStamp ? { stamp: { send: true } } : {}),
     ...(retentions?.length ? { retentions } : {}),
     items,
-    payments: mapPayments(request.payments, calculatedPaymentValue),
+    payments: mapSiigoDocumentSendPayments(request.payments, calculatedPaymentValue),
   };
 }
 
-function mapPayments(
+export function mapSiigoDocumentSendPayments(
   payments: CreateSiigoSupportDocumentRequestDto['payments'],
   calculatedTotal: number,
 ) {
@@ -104,7 +107,7 @@ function mapPayments(
   });
 }
 
-function mapItem(
+export function mapSiigoDocumentSendItem(
   item: CreateSiigoSupportDocumentItemDto,
   itemRetentionIds: number[],
 ) {

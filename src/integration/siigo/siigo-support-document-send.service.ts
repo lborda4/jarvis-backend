@@ -8,14 +8,13 @@ import { ElectronicDocumentStatus } from '../../electronic-document/enums/electr
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { mapElectronicDocumentToResponse } from '../../electronic-document/mappers/electronic-document-response.mapper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
-import { IntegrationsRepository } from '../repositories/integrations.repository';
 import {
   CreateSiigoSupportDocumentRequestDto,
   CreateSiigoSupportDocumentResponseDto,
 } from './dto/create-siigo-support-document.dto';
 import { SIIGO_SUPPORT_DOCUMENT_SEND_STAMP_ENABLED } from './constants/siigo.constants';
-import { getSiigoIntegration } from './helpers/siigo-context.helper';
 import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
+import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
 import { mapCreateSupportDocumentRequestToSiigo } from './mappers/create-siigo-support-document-request.mapper';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoDocumentTypesService } from './siigo-document-types.service';
@@ -24,6 +23,7 @@ import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { validateSupportDocumentRetentions } from './helpers/siigo-support-document-retention.helper';
 import { buildSupplierPreferenceSnapshotFromSendRequest } from './helpers/siigo-support-document-preference.helper';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
+import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
 
 @Injectable()
 export class SiigoSupportDocumentSendService {
@@ -31,12 +31,12 @@ export class SiigoSupportDocumentSendService {
 
   constructor(
     private readonly electronicDocumentService: ElectronicDocumentService,
-    private readonly integrationsRepository: IntegrationsRepository,
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
     private readonly siigoSupportDocumentService: SiigoSupportDocumentService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
+    private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
   ) {}
 
   async sendSupportDocument(
@@ -62,13 +62,7 @@ export class SiigoSupportDocumentSendService {
       );
     }
 
-    const integration = await getSiigoIntegration(
-      this.integrationsRepository,
-      companyId,
-    );
-    const sendStamp =
-      integration.configuration?.supportDocumentSendStamp ??
-      SIIGO_SUPPORT_DOCUMENT_SEND_STAMP_ENABLED;
+    const sendStamp = SIIGO_SUPPORT_DOCUMENT_SEND_STAMP_ENABLED;
     const taxesCatalog = await this.siigoTaxesCatalogService.listTaxes(
       {},
       companyId,
@@ -105,19 +99,27 @@ export class SiigoSupportDocumentSendService {
       );
     siigoPayload.document.id = siigoDocumentTypeId;
 
+    if (request.cost_center !== undefined) {
+      siigoPayload.cost_center = request.cost_center;
+    }
+
     try {
-      const createdSupportDocument = await executeSiigoRequestWithRetries(
-        this.siigoAuthService,
-        companyId,
-        this.logger,
-        'crear Documento Soporte',
-        async (accessToken, partnerId) =>
-          this.siigoSupportDocumentService.createSupportDocument(
-            accessToken,
-            siigoPayload,
-            partnerId,
+      const createdSupportDocument =
+        await this.siigoDocumentSendThrottleService.run(companyId, () =>
+          executeSiigoRequestWithRetries(
+            this.siigoAuthService,
+            companyId,
+            this.logger,
+            'crear Documento Soporte',
+            async (accessToken, partnerId) =>
+              this.siigoSupportDocumentService.createSupportDocument(
+                accessToken,
+                siigoPayload,
+                partnerId,
+              ),
+            SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
           ),
-      );
+        );
 
       const preferenceSnapshot = buildSupplierPreferenceSnapshotFromSendRequest(
         request,
@@ -246,7 +248,6 @@ export class SiigoSupportDocumentSendService {
       electronicDocument,
       companyId,
       {
-        autoApply: true,
         accountCode,
         accountDescription:
           snapshot?.accountDescription?.trim() || accountCode,
@@ -259,6 +260,23 @@ export class SiigoSupportDocumentSendService {
             : { dueDate: paymentMethod.dueDate }),
         },
         retentions,
+        ...(snapshot?.costCenter
+          ? {
+              costCenter: {
+                id: snapshot.costCenter.id,
+                code: snapshot.costCenter.code,
+                name: snapshot.costCenter.name,
+              },
+            }
+          : request.cost_center !== undefined
+            ? {
+                costCenter: {
+                  id: request.cost_center,
+                  code: String(request.cost_center),
+                  name: `Centro ${request.cost_center}`,
+                },
+              }
+            : {}),
       },
     );
 

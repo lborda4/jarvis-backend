@@ -26,9 +26,29 @@ export function handleSiigoApiError(
 
   throw new BadGatewayException({
     message: `Error al ${action} en SIIGO`,
+    code: extractSiigoErrorCode(parsedDetail),
     siigo: parsedDetail,
     detail: formatSiigoErrorMessage(parsedDetail, rawMessage),
   });
+}
+
+function extractSiigoErrorCode(
+  parsedDetail: string | Record<string, unknown>,
+): string | undefined {
+  if (typeof parsedDetail !== 'object' || parsedDetail === null) {
+    return undefined;
+  }
+
+  const errors = parsedDetail.Errors ?? parsedDetail.errors;
+
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return undefined;
+  }
+
+  const firstError = errors[0] as Record<string, unknown> | undefined;
+  const code = firstError?.Code ?? firstError?.code;
+
+  return typeof code === 'string' && code.trim() ? code.trim() : undefined;
 }
 
 function formatSiigoErrorMessage(

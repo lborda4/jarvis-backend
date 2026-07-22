@@ -23,6 +23,7 @@ export function mapUserToAuthUserDto(
     id: user.id,
     name: user.name,
     email: user.email,
+    role: user.role,
     company: mapCompanyToAuthCompanyDto(company),
   };
 }
@@ -32,25 +33,30 @@ export function buildAuthTokensResponse(
   refreshToken: string,
   user: User,
   company: Company,
+  companies: Company[] = [company],
 ): AuthTokensResponseDto {
   const companyDto = mapCompanyToAuthCompanyDto(company);
+  const companiesDto = companies.map(mapCompanyToAuthCompanyDto);
 
   return {
     accessToken,
     refreshToken,
     user: mapUserToAuthUserDto(user, company),
     company: companyDto,
+    companies: companiesDto,
   };
 }
 
 export function buildAuthMeResponse(
   user: User,
   company: Company,
+  companies: Company[] = [company],
 ): AuthMeResponseDto {
   const companyDto = mapCompanyToAuthCompanyDto(company);
 
   return {
     user: mapUserToAuthUserDto(user, company),
     company: companyDto,
+    companies: companies.map(mapCompanyToAuthCompanyDto),
   };
 }

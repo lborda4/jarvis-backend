@@ -10,7 +10,6 @@ import {
 } from 'typeorm';
 import { Company } from '../../company/entities/company.entity';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
-import type { IntegrationConfiguration } from '../interfaces/integration-configuration.interface';
 import type { IntegrationCredentials } from '../interfaces/integration-credentials.interface';
 
 @Entity('integrations')
@@ -29,9 +28,6 @@ export class Integration {
 
   @Column({ type: 'jsonb', default: {} })
   credentials: IntegrationCredentials;
-
-  @Column({ type: 'jsonb', default: {} })
-  configuration: IntegrationConfiguration;
 
   @Column({ default: true })
   active: boolean;

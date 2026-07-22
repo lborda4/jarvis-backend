@@ -24,10 +24,17 @@ export class IntegrationsRepository {
   create(
     data: Pick<
       Integration,
-      'companyId' | 'provider' | 'credentials' | 'configuration' | 'active'
+      'companyId' | 'provider' | 'credentials' | 'active'
     >,
   ): Integration {
     return this.repository.create(data);
+  }
+
+  findAllByCompanyId(companyId: string): Promise<Integration[]> {
+    return this.repository.find({
+      where: { companyId, active: true },
+      order: { provider: 'ASC' },
+    });
   }
 
   save(integration: Integration): Promise<Integration> {
@@ -39,14 +46,6 @@ export class IntegrationsRepository {
     credentials: IntegrationCredentials,
   ): Promise<Integration> {
     integration.credentials = credentials;
-    return this.repository.save(integration);
-  }
-
-  async updateConfiguration(
-    integration: Integration,
-    configuration: Integration['configuration'],
-  ): Promise<Integration> {
-    integration.configuration = configuration;
     return this.repository.save(integration);
   }
 }

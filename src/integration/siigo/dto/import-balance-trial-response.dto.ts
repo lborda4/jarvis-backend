@@ -14,7 +14,8 @@ export class ImportBalanceTrialRequestDto {
   accountEnd?: string;
 
   @ApiPropertyOptional({
-    description: 'Año fiscal del reporte. Por defecto, el año actual.',
+    description:
+      'Año final del rango a consultar. Por defecto, el año actual. Se consultan 3 años hacia atrás desde este valor.',
     example: 2026,
   })
   year?: number;
@@ -36,19 +37,14 @@ export class ImportBalanceTrialRequestDto {
     example: false,
   })
   includesTaxDifference?: boolean;
-
-  @ApiPropertyOptional({
-    description: 'Filtrar por un tercero específico.',
-  })
-  customer?: string;
 }
 
 export class ImportBalanceTrialResponseDto {
   processedRows: number;
-  suppliersCreated: number;
-  suppliersUpdated: number;
-  accountsAdded: number;
-  duplicatedAccounts: number;
+  accountsCreated: number;
+  accountsUpdated: number;
+  skippedRows: number;
+  yearsProcessed: number;
   fileId?: string;
   fileUrl?: string;
 }

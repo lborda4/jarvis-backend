@@ -19,9 +19,16 @@ export interface SiigoCachedTaxCatalogItem {
   active: boolean;
 }
 
+export interface SiigoCachedCostCenterCatalogItem {
+  id: number;
+  code: string;
+  name: string;
+}
+
 export interface SiigoCatalogCache {
   lastSync?: string;
   accounts?: SiigoCachedAccountCatalogItem[];
   paymentTypes?: Record<string, SiigoCachedPaymentTypeCatalogItem[]>;
   taxes?: SiigoCachedTaxCatalogItem[];
+  costCenters?: SiigoCachedCostCenterCatalogItem[];
 }

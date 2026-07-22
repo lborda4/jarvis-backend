@@ -14,6 +14,7 @@ export interface SupportDocumentExcelRow {
   unitValue: number;
   lineTotal: number;
   taxAmount: number;
+  observations?: string;
 }
 
 export interface GroupedSupportDocument {
@@ -28,5 +29,6 @@ export interface GroupedSupportDocument {
   cufe?: string;
   receiverIdentification?: string;
   currency: string;
+  observations?: string;
   rows: SupportDocumentExcelRow[];
 }

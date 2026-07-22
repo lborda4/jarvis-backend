@@ -23,6 +23,7 @@ export class AuthUserDto {
   id: string;
   name: string;
   email: string;
+  role: string;
   company: AuthCompanyDto;
 }
 
@@ -37,11 +38,17 @@ export class AuthTokensResponseDto {
   refreshToken: string;
   user: AuthUserDto;
   company: AuthCompanyDto;
+  companies: AuthCompanyDto[];
 }
 
 export class AuthMeResponseDto {
   user: AuthUserDto;
   company: AuthCompanyDto;
+  companies: AuthCompanyDto[];
+}
+
+export class SwitchCompanyRequestDto {
+  companyId: string;
 }
 
 export class RefreshTokenResponseDto {

@@ -34,4 +34,15 @@ export class CompaniesRepository {
   save(company: Company): Promise<Company> {
     return this.repository.save(company);
   }
+
+  findLinkedWithIntegrations(userId: string): Promise<Company[]> {
+    return this.repository
+      .createQueryBuilder('company')
+      .innerJoin('company.userCompanies', 'userCompany')
+      .leftJoinAndSelect('company.integrations', 'integration')
+      .leftJoinAndSelect('company.companyPlan', 'companyPlan')
+      .where('userCompany.userId = :userId', { userId })
+      .orderBy('company.createdAt', 'DESC')
+      .getMany();
+  }
 }

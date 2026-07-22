@@ -36,6 +36,7 @@ import { SiigoDocumentPreparationService } from './siigo-document-preparation.se
 import { SiigoDocumentResumeService } from './siigo-document-resume.service';
 import { SiigoPurchaseCreationService } from './siigo-purchase-creation.service';
 import { SiigoSupportDocumentSendService } from './siigo-support-document-send.service';
+import { SiigoPurchaseSendService } from './siigo-purchase-send.service';
 import { SiigoSupplierCreationService } from './siigo-supplier-creation.service';
 import { SiigoValidationService } from './siigo-validation.service';
 import { SiigoAuthService } from './siigo-auth.service';
@@ -56,6 +57,7 @@ import {
   ListSiigoTaxesQueryDto,
   SiigoTaxCatalogItemDto,
 } from './dto/list-siigo-taxes.dto';
+import { SiigoCostCenterCatalogItemDto } from './dto/list-siigo-cost-centers.dto';
 import {
   PrepareSiigoDocumentsRequestDto,
   PrepareSiigoDocumentsResponseDto,
@@ -64,9 +66,16 @@ import {
   SaveSiigoCredentialsRequestDto,
   SaveSiigoCredentialsResponseDto,
 } from './dto/save-siigo-credentials.dto';
+import { SiigoCredentialsStatusResponseDto } from './dto/siigo-credentials-status.dto';
+import {
+  CreateSiigoPurchaseSendRequestDto,
+  CreateSiigoPurchaseSendResponseDto,
+} from './dto/create-siigo-purchase-send.dto';
 import { SiigoPaymentTypesCatalogService } from './siigo-payment-types-catalog.service';
+import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
+import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
 
 @ApiTags('integrations/siigo')
 @Controller('integrations/siigo')
@@ -78,10 +87,13 @@ export class SiigoController {
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoPurchaseCreationService: SiigoPurchaseCreationService,
     private readonly siigoSupportDocumentSendService: SiigoSupportDocumentSendService,
+    private readonly siigoPurchaseSendService: SiigoPurchaseSendService,
     private readonly siigoDocumentResumeService: SiigoDocumentResumeService,
     private readonly siigoDocumentPreparationService: SiigoDocumentPreparationService,
     private readonly siigoAccountsCatalogService: SiigoAccountsCatalogService,
+    private readonly siigoCatalogSyncService: SiigoCatalogSyncService,
     private readonly siigoPaymentTypesCatalogService: SiigoPaymentTypesCatalogService,
+    private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoBalanceTrialImportService: SiigoBalanceTrialImportService,
   ) {}
@@ -102,11 +114,25 @@ export class SiigoController {
     );
   }
 
+  @Get('credentials/status')
+  @ApiOperation({
+    summary: 'Estado de credenciales SIIGO',
+    description:
+      'Indica si la empresa activa del JWT ya tiene credenciales SIIGO guardadas.',
+  })
+  getCredentialsStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<SiigoCredentialsStatusResponseDto> {
+    return this.siigoAuthService.getCredentialsStatus(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
   @Get('accounts')
   @ApiOperation({
     summary: 'Catálogo de cuentas contables',
     description:
-      'Consolida las cuentas configuradas en mapping_value de todos los terceros de la empresa activa.',
+      'Consulta las cuentas contables transaccionales almacenadas en la base de datos para la empresa activa.',
   })
   listAccounts(
     @CurrentUser() user: AuthenticatedUser,
@@ -117,11 +143,23 @@ export class SiigoController {
     );
   }
 
+  @Post('catalog/sync')
+  @ApiOperation({
+    summary: 'Sincronizar catálogos SIIGO',
+    description:
+      'Actualiza cuentas contables en base de datos y refresca medios de pago, impuestos y centros de costo en caché local.',
+  })
+  syncCatalogs(@CurrentUser() user: AuthenticatedUser): Promise<{ synced: true }> {
+    return this.siigoCatalogSyncService
+      .syncCatalogs(getAuthenticatedCompanyId(user))
+      .then(() => ({ synced: true }));
+  }
+
   @Get('payment-types')
   @ApiOperation({
     summary: 'Catálogo de medios de pago',
     description:
-      'Consulta las formas de pago configuradas en SIIGO. Envíe documentType=FC para factura de compra o documentType=DS para documento soporte.',
+      'Consulta las formas de pago sincronizadas en caché local. Ejecute POST /catalog/sync al ingresar para refrescarlas.',
   })
   listPaymentTypes(
     @CurrentUser() user: AuthenticatedUser,
@@ -137,7 +175,7 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Catálogo de impuestos SIIGO',
     description:
-      'Consulta los impuestos configurados en SIIGO. Opcionalmente filtre por type (por ejemplo, IVA, ReteIVA, ReteICA, Retefuente).',
+      'Consulta los impuestos sincronizados en caché local. Ejecute POST /catalog/sync al ingresar para refrescarlos.',
   })
   listTaxes(
     @CurrentUser() user: AuthenticatedUser,
@@ -145,6 +183,20 @@ export class SiigoController {
   ): Promise<SiigoTaxCatalogItemDto[]> {
     return this.siigoTaxesCatalogService.listTaxes(
       query,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('cost-centers')
+  @ApiOperation({
+    summary: 'Catálogo de centros de costo SIIGO',
+    description:
+      'Consulta los centros de costo configurados en SIIGO y los sirve desde caché local.',
+  })
+  listCostCenters(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<SiigoCostCenterCatalogItemDto[]> {
+    return this.siigoCostCentersCatalogService.listCostCenters(
       getAuthenticatedCompanyId(user),
     );
   }
@@ -194,11 +246,32 @@ export class SiigoController {
   }
 
   @Post('purchases')
+  @ApiOperation({
+    summary: 'Crear factura de compra en SIIGO',
+    description:
+      'Recibe documentId y delega la creación al handler de factura de compra. Para envío con cuenta, pago y retenciones use POST /integrations/siigo/purchases/send.',
+  })
   createPurchase(
     @CurrentUser() user: AuthenticatedUser,
     @Body() request: CreateSiigoPurchaseRequestDto,
   ): Promise<CreateSiigoPurchaseResponseDto> {
     return this.siigoPurchaseCreationService.createPurchase(
+      request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('purchases/send')
+  @ApiOperation({
+    summary: 'Enviar factura de compra a SIIGO',
+    description:
+      'Recibe date, supplier, provider_invoice, items, payments y retenciones desde el front. El CUFE se envía en observations.',
+  })
+  sendPurchase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: CreateSiigoPurchaseSendRequestDto,
+  ): Promise<CreateSiigoPurchaseSendResponseDto> {
+    return this.siigoPurchaseSendService.sendPurchase(
       request,
       getAuthenticatedCompanyId(user),
     );
@@ -224,9 +297,9 @@ export class SiigoController {
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Importar Balance de Prueba por Terceros',
+    summary: 'Importar Balance de Prueba general',
     description:
-      'Sin archivo: solicita el reporte a SIIGO, descarga el Excel y sincroniza proveedores/cuentas en supplier_configurations. Con archivo: procesa el Excel subido manualmente.',
+      'Sin archivo: solicita el reporte a SIIGO (últimos 3 años), descarga el Excel y sincroniza cuentas contables en siigo_accounts. Con archivo: procesa el Excel subido manualmente.',
   })
   importBalanceTrial(
     @CurrentUser() user: AuthenticatedUser,
@@ -244,7 +317,7 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Preparar documentos en SIIGO',
     description:
-      'Inicia en segundo plano la validación de proveedor, cuenta recomendada y autoApply para los documentos indicados.',
+      'Inicia en segundo plano la validación de proveedor y cuenta recomendada para los documentos indicados.',
   })
   prepareDocuments(
     @CurrentUser() user: AuthenticatedUser,

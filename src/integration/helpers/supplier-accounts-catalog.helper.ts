@@ -1,9 +1,6 @@
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
+import { SiigoAccount } from '../entities/siigo-account.entity';
 import { normalizeSupplierDocument } from '../siigo/helpers/siigo-context.helper';
-import {
-  getMostUsedSupplierAccount,
-  normalizeSupplierMappingValue,
-} from './supplier-mapping-value.helper';
 export {
   resolveSuggestedAccountForDocument,
   resolveSuggestedPaymentMethodForDocument,
@@ -52,48 +49,65 @@ export function isAllowedAccountCode(code: string): boolean {
   );
 }
 
+export function isLeafAccountCode(
+  code: string,
+  allCodes: readonly string[],
+): boolean {
+  const normalizedCode = code.trim();
+
+  if (!normalizedCode) {
+    return false;
+  }
+
+  return !allCodes.some(
+    (otherCode) =>
+      otherCode !== normalizedCode && otherCode.startsWith(normalizedCode),
+  );
+}
+
+export function shouldIncludeAccountInCatalog(
+  account: Pick<SiigoAccount, 'code' | 'isTransactional'>,
+  allCodes: readonly string[],
+): boolean {
+  const code = account.code.trim();
+
+  if (!code || !isAllowedAccountCode(code)) {
+    return false;
+  }
+
+  if (account.isTransactional === true) {
+    return true;
+  }
+
+  return isLeafAccountCode(code, allCodes);
+}
+
 export function collectUniqueAccountsCatalog(
-  configurations: Array<Pick<SupplierConfiguration, 'mappingValue'>>,
+  accounts: Array<Pick<SiigoAccount, 'code' | 'name' | 'isTransactional'>>,
 ): AccountCatalogItem[] {
   const accountsByCode = new Map<string, AccountCatalogItem>();
+  const allCodes = accounts
+    .map((account) => account.code.trim())
+    .filter(Boolean);
 
-  for (const configuration of configurations) {
-    const mappingValue = normalizeSupplierMappingValue(
-      configuration.mappingValue,
-    );
+  for (const account of accounts) {
+    const code = account.code.trim();
+    const name = account.name.trim() || code;
 
-    for (const account of mappingValue.accounts) {
-      const code = account.code.trim();
-      const name = account.name.trim() || code;
-
-      if (!code || accountsByCode.has(code) || !isAllowedAccountCode(code)) {
-        continue;
-      }
-
-      accountsByCode.set(code, { code, name });
+    if (
+      !code ||
+      accountsByCode.has(code) ||
+      !shouldIncludeAccountInCatalog(account, allCodes)
+    ) {
+      continue;
     }
+
+    accountsByCode.set(code, { code, name });
   }
 
   return [...accountsByCode.values()].sort((left, right) =>
     left.code.localeCompare(right.code),
   );
-}
-
-export function resolveSuggestedAccountFromConfiguration(
-  configuration: Pick<SupplierConfiguration, 'mappingValue'> | null | undefined,
-): SuggestedAccount | null {
-  const mappingValue = normalizeSupplierMappingValue(configuration?.mappingValue);
-  const account = getMostUsedSupplierAccount(mappingValue);
-
-  if (!account || !isAllowedAccountCode(account.code)) {
-    return null;
-  }
-
-  return {
-    code: account.code,
-    name: account.name,
-    uses: account.uses,
-  };
 }
 
 export function buildSupplierConfigurationKey(

@@ -6,10 +6,39 @@ export async function ensureSiigoIntegration(
   manager: EntityManager,
   companyId: string,
 ): Promise<Integration> {
+  return ensureIntegration(
+    manager,
+    companyId,
+    IntegrationProvider.SIIGO,
+    {
+      username: '',
+      access_key: '',
+    },
+  );
+}
+
+export async function ensureJarvisIntegration(
+  manager: EntityManager,
+  companyId: string,
+): Promise<Integration> {
+  return ensureIntegration(
+    manager,
+    companyId,
+    IntegrationProvider.JARVIS,
+    {},
+  );
+}
+
+async function ensureIntegration(
+  manager: EntityManager,
+  companyId: string,
+  provider: IntegrationProvider,
+  credentials: Integration['credentials'],
+): Promise<Integration> {
   const repository = manager.getRepository(Integration);
   const existingIntegration = await repository.findOne({
     where: {
-      provider: IntegrationProvider.SIIGO,
+      provider,
       companyId,
       active: true,
     },
@@ -21,12 +50,8 @@ export async function ensureSiigoIntegration(
 
   const integration = repository.create({
     companyId,
-    provider: IntegrationProvider.SIIGO,
-    credentials: {
-      username: '',
-      access_key: '',
-    },
-    configuration: {},
+    provider,
+    credentials,
     active: true,
   });
 

@@ -56,3 +56,11 @@ export function resolveSiigoCredentials(
     partner_id,
   };
 }
+
+export function areSiigoCredentialsConfigured(
+  credentials: IntegrationCredentials,
+): boolean {
+  const normalized = normalizeSiigoCredentials(credentials);
+
+  return Boolean(normalized.username.trim() && normalized.access_key.trim());
+}

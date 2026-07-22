@@ -39,4 +39,5 @@ export class SiigoSupportDocumentRequestDto {
   retentions?: SiigoSupportDocumentRetentionDto[];
   items: SiigoSupportDocumentItemDto[];
   payments: SiigoSupportDocumentPaymentDto[];
+  cost_center?: number;
 }

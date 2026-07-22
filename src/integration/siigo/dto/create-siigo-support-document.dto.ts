@@ -1,5 +1,6 @@
 import { ElectronicDocumentResponseDto } from '../../../electronic-document/dto/electronic-document-response.dto';
 import {
+  SaveSupplierCostCenterPreferenceDto,
   SaveSupplierPaymentMethodPreferenceDto,
   SaveSupplierRetentionPreferenceDto,
 } from './save-account-mapping.dto';
@@ -47,6 +48,7 @@ export class CreateSiigoSupportDocumentSupplierPreferencesDto {
   accountDescription?: string;
   paymentMethod?: SaveSupplierPaymentMethodPreferenceDto;
   retentions?: SaveSupplierRetentionPreferenceDto[];
+  costCenter?: SaveSupplierCostCenterPreferenceDto;
 }
 
 export class CreateSiigoSupportDocumentRequestDto {
@@ -59,6 +61,7 @@ export class CreateSiigoSupportDocumentRequestDto {
   retentions?: CreateSiigoSupportDocumentRetentionDto[];
   items: CreateSiigoSupportDocumentItemDto[];
   payments: CreateSiigoSupportDocumentPaymentDto[];
+  cost_center?: number;
   savePreferences?: boolean;
   supplierPreferences?: CreateSiigoSupportDocumentSupplierPreferencesDto;
 }

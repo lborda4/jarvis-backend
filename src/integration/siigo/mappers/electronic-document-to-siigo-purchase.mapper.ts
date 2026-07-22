@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { ElectronicDocumentPayload } from '../../../electronic-document/interfaces/electronic-document-payload.interface';
 import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
 import { SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT } from '../constants/siigo.constants';
-import { SiigoPurchaseConfig } from '../helpers/siigo-purchase-config.helper';
+import { SiigoPurchaseConfig } from '../helpers/siigo-runtime-config.helper';
 import { splitNitAndCheckDigit } from '../helpers/siigo-nit.helper';
 import { buildSiigoPurchasePayment } from '../helpers/siigo-purchase-total.helper';
 
@@ -63,10 +63,6 @@ export function mapElectronicDocumentToSiigoPurchase(
       }),
     ],
   };
-
-  if (config.costCenter) {
-    request.cost_center = config.costCenter;
-  }
 
   return request;
 }

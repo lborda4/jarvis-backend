@@ -29,12 +29,17 @@ export interface RedisConfig {
   importSessionTtlSeconds: number;
 }
 
+export interface DianConfig {
+  cookie?: string;
+}
+
 export interface AppConfiguration {
   app: AppConfig;
   database: DatabaseConfig;
   jwt: JwtConfig;
   siigo: SiigoConfig;
   redis: RedisConfig;
+  dian: DianConfig;
 }
 
 function parseBoolean(value: string | undefined, defaultValue = false): boolean {
@@ -122,5 +127,8 @@ export default (): AppConfiguration => ({
       process.env.IMPORT_SESSION_TTL_SECONDS,
       3600,
     ),
+  },
+  dian: {
+    cookie: trimOptional(process.env.DIAN_COOKIE),
   },
 });
