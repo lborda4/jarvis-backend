@@ -21,6 +21,15 @@ export class SiigoAccountsRepository {
     });
   }
 
+  countByCompanyAndIntegration(
+    companyId: string,
+    integrationId: string,
+  ): Promise<number> {
+    return this.repository.count({
+      where: { companyId, integrationId },
+    });
+  }
+
   create(
     data: Pick<
       SiigoAccount,

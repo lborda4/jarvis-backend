@@ -119,7 +119,7 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Estado de credenciales SIIGO',
     description:
-      'Indica si la empresa activa del JWT ya tiene credenciales SIIGO guardadas.',
+      'Indica si la empresa activa del JWT ya tiene credenciales SIIGO y cuentas contables sincronizadas.',
   })
   getCredentialsStatus(
     @CurrentUser() user: AuthenticatedUser,

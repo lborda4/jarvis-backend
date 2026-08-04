@@ -4,6 +4,7 @@ import { Integration } from '../entities/integration.entity';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { SiigoCredentials } from '../interfaces/integration-credentials.interface';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
+import { SiigoAccountsRepository } from '../repositories/siigo-accounts.repository';
 import { SiigoHttpClient } from './clients/siigo-http.client';
 import { SiigoCredentialsStatusResponseDto } from './dto/siigo-credentials-status.dto';
 import {
@@ -48,6 +49,7 @@ export class SiigoAuthService {
   constructor(
     private readonly siigoHttpClient: SiigoHttpClient,
     private readonly integrationsRepository: IntegrationsRepository,
+    private readonly siigoAccountsRepository: SiigoAccountsRepository,
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
@@ -162,18 +164,25 @@ export class SiigoAuthService {
     );
 
     if (!integration) {
-      return { configured: false };
+      return { configured: false, hasAccounts: false };
     }
 
     const credentials = normalizeSiigoCredentials(integration.credentials);
     const configured = areSiigoCredentialsConfigured(integration.credentials);
+    const accountsCount =
+      await this.siigoAccountsRepository.countByCompanyAndIntegration(
+        trimmedCompanyId,
+        integration.id,
+      );
+    const hasAccounts = accountsCount > 0;
 
     if (!configured) {
-      return { configured: false };
+      return { configured: false, hasAccounts };
     }
 
     return {
       configured: true,
+      hasAccounts,
       username: credentials.username,
       partner_id: credentials.partner_id,
     };

@@ -7,6 +7,12 @@ export class SiigoCredentialsStatusResponseDto {
   })
   configured: boolean;
 
+  @ApiProperty({
+    description:
+      'Indica si la empresa ya sincronizó cuentas contables desde SIIGO (siigo_accounts).',
+  })
+  hasAccounts: boolean;
+
   @ApiPropertyOptional({
     example: 'asesorias@j2s-soluciones.com',
     description: 'Usuario SIIGO configurado para la empresa activa.',
