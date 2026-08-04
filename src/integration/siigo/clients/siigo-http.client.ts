@@ -27,6 +27,7 @@ import {
   SiigoDocumentType,
   SiigoPaymentType,
   SiigoPurchaseResponse,
+  SiigoSupportDocumentDeleteResponse,
   SiigoSupportDocumentResponse,
   SiigoTax,
   SiigoTestBalanceReportRequest,
@@ -161,6 +162,22 @@ export class SiigoHttpClient {
       url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH}`,
       headers: this.buildAuthHeaders(accessToken, partnerId),
       data: payload,
+    });
+  }
+
+  async deleteSupportDocument(
+    accessToken: string,
+    siigoSupportDocumentId: string,
+    partnerId?: string,
+  ): Promise<SiigoSupportDocumentDeleteResponse> {
+    console.log(
+      `[SIIGO support-document] DELETE ${SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH}/${siigoSupportDocumentId}`,
+    );
+
+    return this.request<SiigoSupportDocumentDeleteResponse>({
+      method: 'DELETE',
+      url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH}/${encodeURIComponent(siigoSupportDocumentId)}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
     });
   }
 

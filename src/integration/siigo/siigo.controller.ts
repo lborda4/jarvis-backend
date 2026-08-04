@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../../auth/interfaces/jwt-payload.interface';
@@ -12,6 +12,7 @@ import {
   CreateSiigoSupportDocumentRequestDto,
   CreateSiigoSupportDocumentResponseDto,
 } from './dto/create-siigo-support-document.dto';
+import { DeleteSiigoSupportDocumentResponseDto } from './dto/delete-siigo-support-document.dto';
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
 import {
@@ -289,6 +290,22 @@ export class SiigoController {
   ): Promise<CreateSiigoSupportDocumentResponseDto> {
     return this.siigoSupportDocumentSendService.sendSupportDocument(
       request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Delete('support-documents/:documentId')
+  @ApiOperation({
+    summary: 'Eliminar Documento Soporte en SIIGO',
+    description:
+      'Elimina en SIIGO el Documento Soporte asociado al electronic-document local usando el siigoPurchaseId guardado.',
+  })
+  deleteSupportDocument(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('documentId') documentId: string,
+  ): Promise<DeleteSiigoSupportDocumentResponseDto> {
+    return this.siigoSupportDocumentSendService.deleteSupportDocument(
+      documentId,
       getAuthenticatedCompanyId(user),
     );
   }

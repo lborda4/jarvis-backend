@@ -13,10 +13,14 @@ import { SiigoAuthContext } from '../interfaces/siigo-auth-context.interface';
 const MAX_UNAUTHORIZED_RETRIES = 2;
 const MAX_SUPPORT_DOCUMENT_NUMBER_RETRIES = 1;
 const SUPPORT_DOCUMENT_NUMBER_RETRY_DELAY_MS = 3000;
+const DEFAULT_DUPLICATED_DOCUMENT_RETRIES = 2;
+const DEFAULT_DUPLICATED_DOCUMENT_RETRY_DELAY_MS = 5000;
 
 export interface ExecuteSiigoRequestRetryOptions {
   maxGenericRetries?: number;
   genericRetryDelayMs?: number;
+  maxDuplicatedDocumentRetries?: number;
+  duplicatedDocumentRetryDelayMs?: number;
 }
 
 export async function executeSiigoRequestWithRetries<T>(
@@ -34,6 +38,11 @@ export async function executeSiigoRequestWithRetries<T>(
 ): Promise<T> {
   const maxGenericRetries = options.maxGenericRetries ?? 0;
   const genericRetryDelayMs = options.genericRetryDelayMs ?? 1000;
+  const maxDuplicatedDocumentRetries =
+    options.maxDuplicatedDocumentRetries ?? DEFAULT_DUPLICATED_DOCUMENT_RETRIES;
+  const duplicatedDocumentRetryDelayMs =
+    options.duplicatedDocumentRetryDelayMs ??
+    DEFAULT_DUPLICATED_DOCUMENT_RETRY_DELAY_MS;
   const authContext =
     authContextOverride ?? (await authService.getValidAuthContext(companyId));
 
@@ -97,8 +106,26 @@ export async function executeSiigoRequestWithRetries<T>(
       );
     }
 
-    if (isSiigoDuplicatedDocumentError(error)) {
-      handleSiigoApiError(logger, error, operationLabel);
+    if (
+      isSiigoDuplicatedDocumentError(error) &&
+      attempt < maxDuplicatedDocumentRetries
+    ) {
+      logger.warn(
+        `[companyId=${companyId}] SIIGO respondió duplicated_document al ${operationLabel}. Esperando ${duplicatedDocumentRetryDelayMs}ms y reintentando (intento ${attempt + 1}/${maxDuplicatedDocumentRetries}).`,
+      );
+
+      await sleep(duplicatedDocumentRetryDelayMs);
+
+      return executeSiigoRequestWithRetries(
+        authService,
+        companyId,
+        logger,
+        operationLabel,
+        request,
+        options,
+        attempt + 1,
+        authContext,
+      );
     }
 
     if (attempt < maxGenericRetries) {

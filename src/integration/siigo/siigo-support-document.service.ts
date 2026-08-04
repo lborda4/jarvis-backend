@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { SiigoHttpClient } from './clients/siigo-http.client';
 import { SiigoSupportDocumentRequestDto } from './dto/siigo-support-document-request.dto';
-import { SiigoSupportDocumentResponse } from './interfaces/siigo-api.interface';
+import {
+  SiigoSupportDocumentDeleteResponse,
+  SiigoSupportDocumentResponse,
+} from './interfaces/siigo-api.interface';
 
 @Injectable()
 export class SiigoSupportDocumentService {
@@ -15,6 +18,18 @@ export class SiigoSupportDocumentService {
     return this.siigoHttpClient.createSupportDocument(
       accessToken,
       payload,
+      partnerId,
+    );
+  }
+
+  async deleteSupportDocument(
+    accessToken: string,
+    siigoSupportDocumentId: string,
+    partnerId?: string,
+  ): Promise<SiigoSupportDocumentDeleteResponse> {
+    return this.siigoHttpClient.deleteSupportDocument(
+      accessToken,
+      siigoSupportDocumentId,
       partnerId,
     );
   }

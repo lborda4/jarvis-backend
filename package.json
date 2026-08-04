@@ -11,7 +11,7 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "start": "NODE_ENV=local nest start",
+    "start": "cross-env NODE_ENV=local nest start",
     "start:dev": "NODE_ENV=local nest start --watch",
     "start:debug": "NODE_ENV=local nest start --debug --watch",
     "start:qa": "NODE_ENV=qa nest start",
@@ -67,6 +67,7 @@
     "@types/node": "^24.0.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.0.0",
+    "cross-env": "^10.1.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

@@ -189,6 +189,24 @@ export class ElectronicDocumentService {
     return updated;
   }
 
+  async clearPurchaseCreated(
+    documentId: string,
+    companyId?: string,
+  ): Promise<ElectronicDocument> {
+    const document = await this.requireById(documentId, companyId);
+    document.status = ElectronicDocumentStatus.ACCOUNT_MAPPED;
+    document.siigoPurchaseId = null;
+    document.siigoDocumentNumber = null;
+
+    const updated = await this.electronicDocumentsRepository.save(document);
+
+    this.logger.log(
+      `Creación en SIIGO revertida (id=${updated.id}, status=${updated.status})`,
+    );
+
+    return updated;
+  }
+
   async createFromParsedInvoice(
     parsedInvoice: DianInvoiceResult,
     electronicDocumentType: ElectronicDocumentType,

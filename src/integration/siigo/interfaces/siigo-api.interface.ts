@@ -123,6 +123,11 @@ export interface SiigoSupportDocumentResponse {
   };
 }
 
+export interface SiigoSupportDocumentDeleteResponse {
+  id: string;
+  deleted: boolean;
+}
+
 export interface SiigoTestBalanceReportRequest {
   account_start?: string;
   account_end?: string;

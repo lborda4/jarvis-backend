@@ -12,6 +12,7 @@ import {
   CreateSiigoSupportDocumentRequestDto,
   CreateSiigoSupportDocumentResponseDto,
 } from './dto/create-siigo-support-document.dto';
+import { DeleteSiigoSupportDocumentResponseDto } from './dto/delete-siigo-support-document.dto';
 import { SIIGO_SUPPORT_DOCUMENT_SEND_STAMP_ENABLED } from './constants/siigo.constants';
 import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
 import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
@@ -200,6 +201,94 @@ export class SiigoSupportDocumentSendService {
         error instanceof Error
           ? error.message
           : 'Error inesperado al crear Documento Soporte en SIIGO',
+      );
+    }
+  }
+
+  async deleteSupportDocument(
+    documentId: string,
+    companyId: string,
+  ): Promise<DeleteSiigoSupportDocumentResponseDto> {
+    const trimmedDocumentId = documentId.trim();
+    const electronicDocument =
+      await this.electronicDocumentService.requireById(
+        trimmedDocumentId,
+        companyId,
+      );
+
+    if (
+      electronicDocument.electronicDocumentType !==
+      ElectronicDocumentType.SUPPORT_DOCUMENT
+    ) {
+      throw new BadRequestException(
+        'El documento indicado no es un Documento Soporte.',
+      );
+    }
+
+    if (electronicDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
+      throw new BadRequestException(
+        'El Documento Soporte no está creado en SIIGO.',
+      );
+    }
+
+    const siigoSupportDocumentId = electronicDocument.siigoPurchaseId?.trim();
+
+    if (!siigoSupportDocumentId) {
+      throw new BadRequestException(
+        'El documento no tiene un id de Documento Soporte en SIIGO.',
+      );
+    }
+
+    try {
+      await this.siigoDocumentSendThrottleService.run(companyId, () =>
+        executeSiigoRequestWithRetries(
+          this.siigoAuthService,
+          companyId,
+          this.logger,
+          'eliminar Documento Soporte',
+          async (accessToken, partnerId) =>
+            this.siigoSupportDocumentService.deleteSupportDocument(
+              accessToken,
+              siigoSupportDocumentId,
+              partnerId,
+            ),
+          SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
+        ),
+      );
+
+      const updatedDocument =
+        await this.electronicDocumentService.clearPurchaseCreated(
+          trimmedDocumentId,
+          companyId,
+        );
+
+      this.logger.log(
+        `[documentId=${trimmedDocumentId}] Documento Soporte eliminado en SIIGO (siigoId=${siigoSupportDocumentId})`,
+      );
+
+      return {
+        success: true,
+        siigoSupportDocumentId,
+        document: mapElectronicDocumentToResponse(updatedDocument),
+      };
+    } catch (error) {
+      this.logger.error(
+        `[documentId=${trimmedDocumentId}] Error al eliminar Documento Soporte en SIIGO (siigoId=${siigoSupportDocumentId})`,
+        error instanceof Error ? error.stack : String(error),
+      );
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
+
+      throw new BadGatewayException(
+        error instanceof Error
+          ? error.message
+          : 'Error inesperado al eliminar Documento Soporte en SIIGO',
       );
     }
   }

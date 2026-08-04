@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { SIIGO_DOCUMENT_SEND_INTERVAL_MS } from './constants/siigo.constants';
 import { sleep } from './helpers/siigo-auth.helper';
 
+/**
+ * Espacia el *inicio* de cada envío por empresa (~1s).
+ * No espera a que termine el request anterior: permite solapamiento
+ * controlado para no alargar lotes grandes.
+ */
 @Injectable()
 export class SiigoDocumentSendThrottleService {
   private readonly startSchedulingChain = new Map<string, Promise<void>>();
