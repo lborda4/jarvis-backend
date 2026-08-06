@@ -25,6 +25,7 @@ import {
 import { getSiigoSupplierName } from './helpers/siigo-supplier.helper';
 import { mapElectronicDocumentPayloadToSiigoSupplier } from './mappers/electronic-document-to-siigo-supplier.mapper';
 import { mapSiigoCustomerToCreatedSupplierResponse } from './mappers/siigo-customer-to-supplier-response.mapper';
+import { normalizeSiigoPersonType } from './helpers/siigo-supplier-identity.helper';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoSupplierService } from './siigo-supplier.service';
 import { SiigoCustomer } from './interfaces/siigo-api.interface';
@@ -47,9 +48,16 @@ export class SiigoSupplierCreationService {
     companyId: string,
   ): Promise<CreateSiigoSupplierResponseDto> {
     const documentId = request?.documentId?.trim();
+    const personType = normalizeSiigoPersonType(request?.person_type);
 
     if (!documentId) {
       throw new BadRequestException('El campo documentId es obligatorio.');
+    }
+
+    if (!personType) {
+      throw new BadRequestException(
+        'Debe indicar si el proveedor es persona natural o persona jurídica.',
+      );
     }
 
     const electronicDocument =
@@ -70,6 +78,7 @@ export class SiigoSupplierCreationService {
 
     const siigoPayload = mapElectronicDocumentPayloadToSiigoSupplier(
       electronicDocument.payload,
+      personType,
     );
 
     console.log('[SIIGO supplier] ANTES crear tercero', {

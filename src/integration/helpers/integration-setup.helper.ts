@@ -20,12 +20,13 @@ export async function ensureSiigoIntegration(
 export async function ensureJarvisIntegration(
   manager: EntityManager,
   companyId: string,
+  credentials: Integration['credentials'] = {},
 ): Promise<Integration> {
   return ensureIntegration(
     manager,
     companyId,
     IntegrationProvider.JARVIS,
-    {},
+    credentials,
   );
 }
 

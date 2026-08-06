@@ -25,6 +25,8 @@ import { validateSupportDocumentRetentions } from './helpers/siigo-support-docum
 import { buildSupplierPreferenceSnapshotFromSendRequest } from './helpers/siigo-support-document-preference.helper';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
+import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 
 @Injectable()
 export class SiigoSupportDocumentSendService {
@@ -38,12 +40,20 @@ export class SiigoSupportDocumentSendService {
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
+    private readonly planSubscriptionService: PlanSubscriptionService,
   ) {}
 
   async sendSupportDocument(
     request: CreateSiigoSupportDocumentRequestDto,
     companyId: string,
   ): Promise<CreateSiigoSupportDocumentResponseDto> {
+    await this.planSubscriptionService.assertCanCreateDocuments({
+      companyId,
+      provider: IntegrationProvider.SIIGO,
+      documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      quantity: 0,
+    });
+
     const documentId = request.documentId.trim();
     const electronicDocument =
       await this.electronicDocumentService.requireById(documentId, companyId);
@@ -132,7 +142,9 @@ export class SiigoSupportDocumentSendService {
           documentId,
           createdSupportDocument.id,
           companyId,
-          createdSupportDocument.number ?? null,
+          createdSupportDocument.number != null
+            ? String(createdSupportDocument.number)
+            : null,
           preferenceSnapshot
             ? {
                 ...electronicDocument.payload,

@@ -13,6 +13,7 @@ import { UserCompaniesRepository } from './repositories/user-companies.repositor
 import { UsersRepository } from './repositories/users.repository';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { AppConfiguration } from '../config/configuration';
+import { RutParserService } from '../admin/rut-parser.service';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AppConfiguration } from '../config/configuration';
     AuthService,
     UsersRepository,
     UserCompaniesRepository,
+    RutParserService,
     JwtStrategy,
     {
       provide: APP_GUARD,

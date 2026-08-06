@@ -23,6 +23,7 @@ import {
 } from './helpers/siigo-auth.helper';
 import { handleSiigoApiError } from './helpers/siigo-error.helper';
 import { AppConfiguration } from '../../config/configuration';
+import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
 
 import { SiigoAuthContext } from './interfaces/siigo-auth-context.interface';
 
@@ -50,6 +51,7 @@ export class SiigoAuthService {
     private readonly siigoHttpClient: SiigoHttpClient,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly siigoAccountsRepository: SiigoAccountsRepository,
+    private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
@@ -158,13 +160,22 @@ export class SiigoAuthService {
       );
     }
 
+    const subscription = await this.planSubscriptionService.getSubscription(
+      trimmedCompanyId,
+      IntegrationProvider.SIIGO,
+    );
+
     const integration = await this.integrationsRepository.findByCompanyAndProvider(
       trimmedCompanyId,
       IntegrationProvider.SIIGO,
     );
 
     if (!integration) {
-      return { configured: false, hasAccounts: false };
+      return {
+        configured: false,
+        hasAccounts: false,
+        subscription,
+      };
     }
 
     const credentials = normalizeSiigoCredentials(integration.credentials);
@@ -177,12 +188,13 @@ export class SiigoAuthService {
     const hasAccounts = accountsCount > 0;
 
     if (!configured) {
-      return { configured: false, hasAccounts };
+      return { configured: false, hasAccounts, subscription };
     }
 
     return {
       configured: true,
       hasAccounts,
+      subscription,
       username: credentials.username,
       partner_id: credentials.partner_id,
     };

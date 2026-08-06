@@ -38,9 +38,13 @@ function buildOptionalAddress(
 
 export function mapElectronicDocumentPayloadToSiigoSupplier(
   payload: ElectronicDocumentPayload,
+  personTypeOverride?: string | null,
 ): SiigoSupplierRequestDto {
   const supplier = payload.supplier;
-  const identity = resolveSiigoSupplierIdentity(supplier.documentType);
+  const identity = resolveSiigoSupplierIdentity({
+    documentType: supplier.documentType,
+    personType: personTypeOverride,
+  });
   const nitParts = splitNitAndCheckDigit(supplier.documentNumber);
   const identification =
     nitParts.identification || supplier.documentNumber.replace(/[^\d]/g, '');

@@ -1,4 +1,49 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ElectronicDocumentType } from '../../../electronic-document/enums/electronic-document-type.enum';
+import { SubscriptionStatus } from '../../../plan/enums/subscription-status.enum';
+
+export class SiigoSubscriptionPlanDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  code: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  documentLimit: number | null;
+
+  @ApiProperty({
+    enum: ElectronicDocumentType,
+    isArray: true,
+  })
+  includedDocumentTypes: ElectronicDocumentType[];
+}
+
+export class SiigoSubscriptionStatusDto {
+  @ApiPropertyOptional({ enum: SubscriptionStatus, nullable: true })
+  status: SubscriptionStatus | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  startedAt: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  documentLimit: number | null;
+
+  @ApiProperty()
+  documentsUsed: number;
+
+  @ApiProperty({
+    enum: ElectronicDocumentType,
+    isArray: true,
+  })
+  includedDocumentTypes: ElectronicDocumentType[];
+
+  @ApiPropertyOptional({ type: SiigoSubscriptionPlanDto, nullable: true })
+  plan: SiigoSubscriptionPlanDto | null;
+}
 
 export class SiigoCredentialsStatusResponseDto {
   @ApiProperty({
@@ -12,6 +57,9 @@ export class SiigoCredentialsStatusResponseDto {
       'Indica si la empresa ya sincronizó cuentas contables desde SIIGO (siigo_accounts).',
   })
   hasAccounts: boolean;
+
+  @ApiProperty({ type: SiigoSubscriptionStatusDto })
+  subscription: SiigoSubscriptionStatusDto;
 
   @ApiPropertyOptional({
     example: 'asesorias@j2s-soluciones.com',

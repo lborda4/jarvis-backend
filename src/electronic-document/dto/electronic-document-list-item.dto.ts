@@ -16,10 +16,11 @@ export class ElectronicDocumentListItemDto {
   issueDate: string | null;
   supplierName: string | null;
   supplierNit: string | null;
+  supplierDocumentType: string | null;
   total: number;
   status: string;
   electronicDocumentType: string | null;
-  siigoDocumentNumber: number | null;
+  siigoDocumentNumber: string | null;
   supplierExistsInSiigo: boolean | null;
   suggestedAccount: SuggestedAccount | null;
   suggestedPaymentMethod: SupplierPaymentMethodPreference | null;

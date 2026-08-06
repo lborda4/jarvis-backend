@@ -16,10 +16,10 @@ export class ElectronicDocumentFilterOptionsDto {
   issueDates: string[];
 
   @ApiProperty({
-    description: 'Consecutivos SIIGO disponibles',
-    example: [1001, 1002],
+    description: 'Consecutivos de documento disponibles',
+    example: ['1001', 'DSJ1'],
   })
-  siigoDocumentNumbers: number[];
+  siigoDocumentNumbers: string[];
 
   @ApiProperty({
     description: 'Estados de importación presentes en el historial',

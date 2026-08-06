@@ -1,0 +1,4 @@
+export enum JarvisResolutionKind {
+  SUPPORT_DOCUMENT = 'SUPPORT_DOCUMENT',
+  ELECTRONIC_INVOICE = 'ELECTRONIC_INVOICE',
+}

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { DianParserService } from '../dian/dian-parser.service';
 import {
   extractInvoiceXmlFromZip,
@@ -14,6 +14,8 @@ import {
 import { ElectronicDocumentType } from '../electronic-document/enums/electronic-document-type.enum';
 import { parseElectronicDocumentType } from '../electronic-document/helpers/electronic-document-type.helper';
 import { ElectronicDocumentService } from '../electronic-document/electronic-document.service';
+import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
+import { JarvisDocumentPreparationService } from '../integration/jarvis/jarvis-document-preparation.service';
 import { SiigoDocumentPreparationService } from '../integration/siigo/siigo-document-preparation.service';
 import { ImportSessionService } from '../import-session/import-session.service';
 import { ExcelService } from '../common/services/excel.service';
@@ -48,6 +50,7 @@ export class InvoicesService {
     private readonly importSessionService: ImportSessionService,
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoDocumentPreparationService: SiigoDocumentPreparationService,
+    private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
   ) {}
 
   async previewSupportDocumentsFromExcel(
@@ -64,6 +67,7 @@ export class InvoicesService {
     );
 
     const groups = parseSupportDocumentExcel(file.buffer);
+    await this.assertSupplierNamesForProvider(groups, companyId);
     applySupportDocumentIssueDate(groups, request?.issueDate);
     const processedRows = groups.reduce(
       (total, group) => total + group.rows.length,
@@ -125,6 +129,7 @@ export class InvoicesService {
     );
 
     const groups = parseSupportDocumentExcel(file.buffer);
+    await this.assertSupplierNamesForProvider(groups, companyId);
     applySupportDocumentIssueDate(groups, request?.issueDate);
     const processedRows = groups.reduce(
       (total, group) => total + group.rows.length,
@@ -159,10 +164,22 @@ export class InvoicesService {
 
     const resolvedCompanyId = companyId?.trim();
     if (resolvedCompanyId && result.documentIds.length > 0) {
-      this.siigoDocumentPreparationService.prepareDocumentsInBackground(
-        result.documentIds,
-        resolvedCompanyId,
-      );
+      const provider =
+        await this.electronicDocumentService.resolveDocumentProvider(
+          resolvedCompanyId,
+        );
+
+      if (provider === IntegrationProvider.JARVIS) {
+        this.jarvisDocumentPreparationService.prepareDocumentsInBackground(
+          result.documentIds,
+          resolvedCompanyId,
+        );
+      } else {
+        this.siigoDocumentPreparationService.prepareDocumentsInBackground(
+          result.documentIds,
+          resolvedCompanyId,
+        );
+      }
     }
 
     return {
@@ -293,14 +310,41 @@ export class InvoicesService {
     };
   }
 
-  getSupportDocumentTemplate(): {
+  getSupportDocumentTemplate(provider?: string): {
     buffer: Buffer;
     filename: string;
   } {
+    const includeSupplierName =
+      provider?.trim().toUpperCase() !== IntegrationProvider.JARVIS;
+
     return {
-      buffer: buildSupportDocumentTemplateExcel(),
+      buffer: buildSupportDocumentTemplateExcel(includeSupplierName),
       filename: SUPPORT_DOCUMENT_TEMPLATE_FILENAME,
     };
+  }
+
+  private async assertSupplierNamesForProvider(
+    groups: ReturnType<typeof parseSupportDocumentExcel>,
+    companyId?: string,
+  ): Promise<void> {
+    const resolvedCompanyId = companyId?.trim();
+    if (!resolvedCompanyId) {
+      return;
+    }
+
+    const provider =
+      await this.electronicDocumentService.resolveDocumentProvider(
+        resolvedCompanyId,
+      );
+
+    if (
+      provider !== IntegrationProvider.JARVIS &&
+      groups.some((group) => !group.supplierName.trim())
+    ) {
+      throw new BadRequestException(
+        'La columna Nombre tercero es obligatoria para Documento Soporte con SIIGO.',
+      );
+    }
   }
 
   private getErrorMessage(error: unknown): string {

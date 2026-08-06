@@ -40,9 +40,22 @@ export class CompaniesRepository {
       .createQueryBuilder('company')
       .innerJoin('company.userCompanies', 'userCompany')
       .leftJoinAndSelect('company.integrations', 'integration')
-      .leftJoinAndSelect('company.companyPlan', 'companyPlan')
+      .leftJoinAndSelect('integration.plan', 'plan')
       .where('userCompany.userId = :userId', { userId })
       .orderBy('company.createdAt', 'DESC')
       .getMany();
+  }
+
+  findAllWithIntegrations(): Promise<Company[]> {
+    return this.repository.find({
+      relations: {
+        integrations: {
+          plan: true,
+        },
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+    });
   }
 }

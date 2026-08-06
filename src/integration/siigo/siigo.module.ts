@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { CompanyModule } from '../../company/company.module';
 import { ElectronicDocumentModule } from '../../electronic-document/electronic-document.module';
+import { PlanModule } from '../../plan/plan.module';
 import { IntegrationModule } from '../integration.module';
 import { SiigoHttpClient } from './clients/siigo-http.client';
 import { SiigoController } from './siigo.controller';
@@ -33,7 +34,13 @@ import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle
 import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
 
 @Module({
-  imports: [HttpModule, IntegrationModule, CompanyModule, ElectronicDocumentModule],
+  imports: [
+    HttpModule,
+    IntegrationModule,
+    CompanyModule,
+    ElectronicDocumentModule,
+    PlanModule,
+  ],
   controllers: [SiigoController],
   providers: [
     SiigoHttpClient,

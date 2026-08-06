@@ -6,15 +6,59 @@ export interface SiigoCredentials {
   expires_at?: string;
 }
 
-import { JarvisEntityType } from '../jarvis/enums/jarvis-entity-type.enum';
+import { JarvisResolutionKind } from '../jarvis/enums/jarvis-resolution-kind.enum';
 import { JarvisTaxRegime } from '../jarvis/enums/jarvis-tax-regime.enum';
+import { JarvisTaxResponsibility } from '../jarvis/enums/jarvis-tax-responsibility.enum';
+import { JarvisVatRegime } from '../jarvis/enums/jarvis-vat-regime.enum';
+
+export interface JarvisDianResolution {
+  kind: JarvisResolutionKind;
+  formNumber?: string | null;
+  nit?: string | null;
+  checkDigit?: string | null;
+  businessName?: string | null;
+  documentTypeLabel: string;
+  modalityCode?: string | null;
+  prefix: string;
+  /** Inicio autorizado del rango DIAN. */
+  fromNumber: number;
+  /** Fin autorizado del rango DIAN. */
+  toNumber: number;
+  /**
+   * Siguiente consecutivo a emitir.
+   * Se inicializa en fromNumber y avanza con cada envío exitoso.
+   */
+  nextConsecutive?: number | null;
+  requestType?: string | null;
+  year?: string | null;
+  authorizedAt?: string | null;
+  technicalKey?: string | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  configuredAt?: string | null;
+}
 
 export interface JarvisCredentials {
   business_name?: string;
+  trade_name?: string;
   economic_activity?: string;
-  entity_type?: JarvisEntityType;
   tax_regime?: JarvisTaxRegime;
+  vat_regime?: JarvisVatRegime;
+  tax_responsibility?: JarvisTaxResponsibility;
+  country?: string;
+  department?: string;
+  municipality?: string;
+  city?: string;
+  email?: string;
+  address?: string;
+  phone?: string;
+  /** @deprecated Conservado por compatibilidad con configuraciones previas. */
+  entity_type?: string;
   configured_at?: string;
+  resolutions?: {
+    support_document?: JarvisDianResolution;
+    electronic_invoice?: JarvisDianResolution;
+  };
 }
 
 export type IntegrationCredentials = SiigoCredentials | JarvisCredentials;

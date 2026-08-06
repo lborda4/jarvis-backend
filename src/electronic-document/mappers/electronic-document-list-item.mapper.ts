@@ -26,6 +26,10 @@ export function mapElectronicDocumentToListItem(
       document.documentNumberThird ??
       document.payload?.supplier?.documentNumber ??
       null,
+    supplierDocumentType:
+      document.documentTypeThird ??
+      document.payload?.supplier?.documentType ??
+      null,
     total: Number(document.payload?.totals?.total ?? 0),
     status: document.status,
     electronicDocumentType: document.electronicDocumentType,

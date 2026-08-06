@@ -29,10 +29,62 @@ export interface ResolvedSiigoSupplierIdentity {
   documentTypeLabel: string;
 }
 
-export function resolveSiigoSupplierIdentity(
-  documentType?: string,
-): ResolvedSiigoSupplierIdentity {
-  const normalized = normalizeDocumentType(documentType);
+export function normalizeSiigoPersonType(
+  personType?: string | null,
+): string | null {
+  const normalized = personType?.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === 'person' || normalized === 'persona') {
+    return SIIGO_PERSON_PERSON_TYPE;
+  }
+
+  if (
+    normalized === 'company' ||
+    normalized === 'empresa' ||
+    normalized === 'juridica' ||
+    normalized === 'jurídica'
+  ) {
+    return SIIGO_COMPANY_PERSON_TYPE;
+  }
+
+  if (normalized === SIIGO_PERSON_PERSON_TYPE.toLowerCase()) {
+    return SIIGO_PERSON_PERSON_TYPE;
+  }
+
+  if (normalized === SIIGO_COMPANY_PERSON_TYPE.toLowerCase()) {
+    return SIIGO_COMPANY_PERSON_TYPE;
+  }
+
+  return null;
+}
+
+export function resolveSiigoSupplierIdentity(params?: {
+  documentType?: string;
+  personType?: string | null;
+}): ResolvedSiigoSupplierIdentity {
+  const forcedPersonType = normalizeSiigoPersonType(params?.personType);
+
+  if (forcedPersonType === SIIGO_PERSON_PERSON_TYPE) {
+    return {
+      personType: SIIGO_PERSON_PERSON_TYPE,
+      idType: SIIGO_CEDULA_ID_TYPE,
+      documentTypeLabel: 'CC',
+    };
+  }
+
+  if (forcedPersonType === SIIGO_COMPANY_PERSON_TYPE) {
+    return {
+      personType: SIIGO_COMPANY_PERSON_TYPE,
+      idType: SIIGO_NIT_ID_TYPE,
+      documentTypeLabel: 'NIT',
+    };
+  }
+
+  const normalized = normalizeDocumentType(params?.documentType);
 
   if (isNaturalPersonDocumentType(normalized)) {
     return {

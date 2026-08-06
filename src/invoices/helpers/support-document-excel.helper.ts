@@ -7,7 +7,7 @@ import {
 import { normalizeSupportDocumentType } from './support-document-type.helper';
 
 const REQUIRED_COLUMNS_MESSAGE =
-  'Fecha, Tipo de documento, Numero de documento, Nombre tercero, Prefijo, Consecutivo, Descripcion';
+  'Fecha, Tipo de documento, Numero de documento, Prefijo, Consecutivo, Descripcion';
 
 const COLUMN_ALIASES = {
   issueDate: ['fecha', 'fecha emision'],
@@ -52,7 +52,6 @@ const COLUMN_ALIASES = {
 const REQUIRED_COLUMN_KEYS = [
   'supplierDocumentType',
   'supplierIdentification',
-  'supplierName',
   'documentPrefix',
   'documentNumber',
   'issueDate',
@@ -385,7 +384,6 @@ function mapSupportDocumentRow(
 
   if (
     !supplierIdentification ||
-    !supplierName ||
     !documentPrefix ||
     !documentNumber ||
     !itemDescription
@@ -485,7 +483,7 @@ function getNumberValue(
 }
 
 function normalizeIdentification(value: string): string {
-  return value.replace(/[^\d]/g, '');
+  return value.replace(/[^\dA-Za-z]/g, '').trim().toUpperCase();
 }
 
 function normalizeHeader(value: string | number): string {

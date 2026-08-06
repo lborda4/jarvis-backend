@@ -22,9 +22,12 @@ import {
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from '../integration/interfaces/supplier-mapping-value.interface';
+import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
+import { JarvisTercerosRepository } from '../integration/jarvis/repositories/jarvis-terceros.repository';
 import { IntegrationsRepository } from '../integration/repositories/integrations.repository';
 import { SupplierConfigurationsRepository } from '../integration/repositories/supplier-configurations.repository';
 import { getSiigoIntegration } from '../integration/siigo/helpers/siigo-context.helper';
+import { PlanSubscriptionService } from '../plan/plan-subscription.service';
 import { DianInvoiceResult } from '../dian/interfaces/dian-invoice-result.interface';
 import { ElectronicDocumentListQueryDto } from './dto/electronic-document-list-query.dto';
 import { ElectronicDocumentListResponseDto } from './dto/electronic-document-list-response.dto';
@@ -54,6 +57,8 @@ export class ElectronicDocumentService {
     private readonly companiesRepository: CompaniesRepository,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
+    private readonly jarvisTercerosRepository: JarvisTercerosRepository,
+    private readonly planSubscriptionService: PlanSubscriptionService,
   ) {}
 
   async requireById(
@@ -167,14 +172,18 @@ export class ElectronicDocumentService {
     documentId: string,
     siigoPurchaseId: string,
     companyId?: string,
-    siigoDocumentNumber?: number | null,
+    siigoDocumentNumber?: string | number | null,
     payload?: ElectronicDocument['payload'],
   ): Promise<ElectronicDocument> {
     const document = await this.requireById(documentId, companyId);
     document.status = ElectronicDocumentStatus.PURCHASE_CREATED;
     document.siigoPurchaseId = siigoPurchaseId;
     document.siigoDocumentNumber =
-      siigoDocumentNumber === undefined ? document.siigoDocumentNumber : siigoDocumentNumber;
+      siigoDocumentNumber === undefined
+        ? document.siigoDocumentNumber
+        : siigoDocumentNumber == null
+          ? null
+          : String(siigoDocumentNumber).trim() || null;
 
     if (payload !== undefined) {
       document.payload = payload;
@@ -273,6 +282,12 @@ export class ElectronicDocumentService {
       groups,
       companyId,
     );
+    const provider = await this.resolveDocumentProvider(company.id);
+
+    if (provider === IntegrationProvider.JARVIS) {
+      return this.buildJarvisSupplierNameLookup(company.id);
+    }
+
     const integration = await getSiigoIntegration(
       this.integrationsRepository,
       company.id,
@@ -304,12 +319,30 @@ export class ElectronicDocumentService {
       groups,
       companyId,
     );
-    const supplierNamesByNit = buildSupplierNameLookup(
-      await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
-        company.id,
-        (await getSiigoIntegration(this.integrationsRepository, company.id)).id,
-      ),
-    );
+    const provider = await this.resolveDocumentProvider(company.id);
+
+    await this.planSubscriptionService.assertCanCreateDocuments({
+      companyId: company.id,
+      provider,
+      documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      quantity: groups.length,
+    });
+
+    const supplierNamesByNit =
+      provider === IntegrationProvider.JARVIS
+        ? await this.buildJarvisSupplierNameLookup(company.id)
+        : buildSupplierNameLookup(
+            await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
+              company.id,
+              (
+                await getSiigoIntegration(
+                  this.integrationsRepository,
+                  company.id,
+                )
+              ).id,
+            ),
+          );
+
     const documents = groups.map((group) => {
       const payload = mapGroupedSupportDocumentToPayload(group);
       const supplierNit = normalizeSupplierNit(payload.supplier.documentNumber);
@@ -318,6 +351,9 @@ export class ElectronicDocumentService {
         group.supplierName,
         supplierNamesByNit,
       );
+      const terceroKnown =
+        provider === IntegrationProvider.JARVIS &&
+        Boolean(supplierNamesByNit.get(supplierNit)?.trim());
 
       payload.supplier.name = supplierName;
       payload.supplier.commercialName = supplierName;
@@ -329,9 +365,13 @@ export class ElectronicDocumentService {
           this.normalizeDocument(payload.supplier.documentNumber) || null,
         documentTypeThird: payload.supplier.documentType,
         electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
-        status: ElectronicDocumentStatus.PENDING,
-        processingStatus: ElectronicDocumentProcessingStatus.PENDING,
-        supplierExistsInSiigo: null,
+        status: terceroKnown
+          ? ElectronicDocumentStatus.ACCOUNT_MAPPED
+          : ElectronicDocumentStatus.PENDING,
+        processingStatus: terceroKnown
+          ? ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED
+          : ElectronicDocumentProcessingStatus.PENDING,
+        supplierExistsInSiigo: terceroKnown ? true : null,
         payload,
       });
     });
@@ -346,7 +386,7 @@ export class ElectronicDocumentService {
     );
 
     this.logger.log(
-      `[companyId=${company.id}] Documentos Soporte importados: documents=${savedDocuments.length}, items=${itemsTotal}`,
+      `[companyId=${company.id}] Documentos Soporte importados (${provider}): documents=${savedDocuments.length}, items=${itemsTotal}`,
     );
 
     return {
@@ -354,6 +394,50 @@ export class ElectronicDocumentService {
       itemsTotal,
       documentIds: savedDocuments.map((document) => document.id),
     };
+  }
+
+  async resolveDocumentProvider(
+    companyId: string,
+  ): Promise<IntegrationProvider> {
+    const jarvis = await this.integrationsRepository.findByCompanyAndProvider(
+      companyId,
+      IntegrationProvider.JARVIS,
+    );
+
+    if (jarvis?.active) {
+      return IntegrationProvider.JARVIS;
+    }
+
+    return IntegrationProvider.SIIGO;
+  }
+
+  private async buildJarvisSupplierNameLookup(
+    companyId: string,
+  ): Promise<Map<string, string>> {
+    const terceros = await this.jarvisTercerosRepository.findByCompany(companyId);
+    const lookup = new Map<string, string>();
+
+    for (const tercero of terceros) {
+      const name = tercero.name?.trim();
+      if (!name) {
+        continue;
+      }
+
+      const digitsOnly = normalizeSupplierNit(tercero.documentNumber);
+      if (digitsOnly) {
+        lookup.set(digitsOnly, name);
+      }
+
+      const alphanumeric = tercero.documentNumber
+        .replace(/[^\dA-Za-z]/g, '')
+        .trim()
+        .toUpperCase();
+      if (alphanumeric) {
+        lookup.set(alphanumeric, name);
+      }
+    }
+
+    return lookup;
   }
 
   private async resolveCompanyForSupportDocuments(
@@ -421,8 +505,8 @@ export class ElectronicDocumentService {
       .filter(Boolean);
     const siigoDocumentNumbers = query.siigoDocumentNumbers
       ?.split(',')
-      .map((value) => Number.parseInt(value.trim(), 10))
-      .filter((value) => Number.isFinite(value));
+      .map((value) => value.trim())
+      .filter(Boolean);
     const importStatuses = parseImportStatusFilters(query.importStatuses);
 
     const { items, total } = await this.electronicDocumentsRepository.findAll({
@@ -499,22 +583,32 @@ export class ElectronicDocumentService {
     const companyIds = [...new Set(documents.map((document) => document.companyId))];
 
     for (const companyId of companyIds) {
-      const integration = await getSiigoIntegration(
-        this.integrationsRepository,
-        companyId,
-      );
-      integrationIdByCompanyId.set(companyId, integration.id);
+      try {
+        const provider = await this.resolveDocumentProvider(companyId);
 
-      const configurations =
-        await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
+        if (provider !== IntegrationProvider.SIIGO) {
+          continue;
+        }
+
+        const integration = await getSiigoIntegration(
+          this.integrationsRepository,
           companyId,
-          integration.id,
         );
+        integrationIdByCompanyId.set(companyId, integration.id);
 
-      for (const [key, configuration] of indexSupplierConfigurations(
-        configurations,
-      )) {
-        configurationIndex.set(key, configuration);
+        const configurations =
+          await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
+            companyId,
+            integration.id,
+          );
+
+        for (const [key, configuration] of indexSupplierConfigurations(
+          configurations,
+        )) {
+          configurationIndex.set(key, configuration);
+        }
+      } catch {
+        // Empresas sin SIIGO (p.ej. Jarvis) no tienen preferencias de cuenta.
       }
     }
 

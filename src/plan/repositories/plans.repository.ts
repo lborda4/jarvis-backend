@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { IntegrationProvider } from '../../integration/enums/integration-provider.enum';
 import { Plan } from '../entities/plan.entity';
 
 @Injectable()
@@ -14,9 +15,12 @@ export class PlansRepository {
     return this.repository.findOne({ where: { id, active: true } });
   }
 
-  findAllActive(): Promise<Plan[]> {
+  findAllActive(provider?: IntegrationProvider): Promise<Plan[]> {
     return this.repository.find({
-      where: { active: true },
+      where: {
+        active: true,
+        ...(provider ? { provider } : {}),
+      },
       order: { documentLimit: 'ASC', name: 'ASC' },
     });
   }

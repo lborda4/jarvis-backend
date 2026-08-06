@@ -33,6 +33,11 @@ export interface DianConfig {
   cookie?: string;
 }
 
+export interface NextPymeConfig {
+  baseUrl: string;
+  apiToken?: string;
+}
+
 export interface AppConfiguration {
   app: AppConfig;
   database: DatabaseConfig;
@@ -40,9 +45,13 @@ export interface AppConfiguration {
   siigo: SiigoConfig;
   redis: RedisConfig;
   dian: DianConfig;
+  nextPyme: NextPymeConfig;
 }
 
-function parseBoolean(value: string | undefined, defaultValue = false): boolean {
+function parseBoolean(
+  value: string | undefined,
+  defaultValue = false,
+): boolean {
   if (value === undefined) {
     return defaultValue;
   }
@@ -130,5 +139,11 @@ export default (): AppConfiguration => ({
   },
   dian: {
     cookie: trimOptional(process.env.DIAN_COOKIE),
+  },
+  nextPyme: {
+    baseUrl:
+      trimOptional(process.env.NEXTPYME_BASE_URL) ??
+      'https://api.nextpyme.plus/api/ubl2.1',
+    apiToken: trimOptional(process.env.NEXTPYME_API_TOKEN),
   },
 });

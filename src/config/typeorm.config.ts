@@ -7,6 +7,7 @@ import { ElectronicDocument } from '../electronic-document/entities/electronic-d
 import { Integration } from '../integration/entities/integration.entity';
 import { SiigoAccount } from '../integration/entities/siigo-account.entity';
 import { SupplierConfiguration } from '../integration/entities/supplier-configuration.entity';
+import { JarvisTercero } from '../integration/jarvis/entities/jarvis-tercero.entity';
 import { Plan } from '../plan/entities/plan.entity';
 import { AppConfiguration } from './configuration';
 
@@ -24,6 +25,7 @@ export function buildTypeOrmConfig(
       SupplierConfiguration,
       SiigoAccount,
       ElectronicDocument,
+      JarvisTercero,
       User,
       UserCompany,
     ],

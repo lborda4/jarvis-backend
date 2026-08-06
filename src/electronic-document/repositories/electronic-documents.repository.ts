@@ -19,7 +19,7 @@ export interface FindElectronicDocumentsFilters {
   search?: string;
   supplierNits?: string[];
   issueDates?: string[];
-  siigoDocumentNumbers?: number[];
+  siigoDocumentNumbers?: string[];
   importStatuses?: ImportRowStatusFilter[];
   page: number;
   limit: number;
@@ -27,7 +27,7 @@ export interface FindElectronicDocumentsFilters {
 
 export interface ElectronicDocumentFilterOptions {
   issueDates: string[];
-  siigoDocumentNumbers: number[];
+  siigoDocumentNumbers: string[];
   importStatuses: ImportRowStatusFilter[];
   suppliers: Array<{ nit: string; name: string }>;
 }
@@ -220,8 +220,8 @@ export class ElectronicDocumentsRepository {
         .map((row) => row.issueDate?.trim())
         .filter((value): value is string => Boolean(value)),
       siigoDocumentNumbers: siigoNumberRows
-        .map((row) => Number.parseInt(row.siigoDocumentNumber, 10))
-        .filter((value) => Number.isFinite(value)),
+        .map((row) => row.siigoDocumentNumber?.trim())
+        .filter((value): value is string => Boolean(value)),
       importStatuses: [...importStatuses].sort((left, right) =>
         left.localeCompare(right, 'es', { sensitivity: 'base' }),
       ),

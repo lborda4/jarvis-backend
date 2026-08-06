@@ -21,11 +21,31 @@ export class IntegrationsRepository {
     });
   }
 
+  findByCompanyAndProviderWithPlan(
+    companyId: string,
+    provider: IntegrationProvider,
+  ): Promise<Integration | null> {
+    return this.repository.findOne({
+      where: { companyId, provider, active: true },
+      relations: { plan: true },
+    });
+  }
+
+  findByIdWithPlan(id: string): Promise<Integration | null> {
+    return this.repository.findOne({
+      where: { id },
+      relations: { plan: true },
+    });
+  }
+
   create(
     data: Pick<
       Integration,
       'companyId' | 'provider' | 'credentials' | 'active'
-    >,
+    > &
+      Partial<
+        Pick<Integration, 'plan' | 'subscriptionStartedAt' | 'subscriptionStatus'>
+      >,
   ): Integration {
     return this.repository.create(data);
   }
@@ -33,6 +53,7 @@ export class IntegrationsRepository {
   findAllByCompanyId(companyId: string): Promise<Integration[]> {
     return this.repository.find({
       where: { companyId, active: true },
+      relations: { plan: true },
       order: { provider: 'ASC' },
     });
   }

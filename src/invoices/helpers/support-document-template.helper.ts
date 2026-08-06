@@ -55,13 +55,24 @@ const TEMPLATE_EXAMPLE_ROWS: string[][] = [
   ],
 ];
 
-export function buildSupportDocumentTemplateExcel(): Buffer {
+export function buildSupportDocumentTemplateExcel(
+  includeSupplierName = true,
+): Buffer {
+  const supplierNameIndex = TEMPLATE_HEADERS.indexOf('Nombre tercero');
+  const headers = includeSupplierName
+    ? [...TEMPLATE_HEADERS]
+    : TEMPLATE_HEADERS.filter((_, index) => index !== supplierNameIndex);
+  const rows = includeSupplierName
+    ? TEMPLATE_EXAMPLE_ROWS
+    : TEMPLATE_EXAMPLE_ROWS.map((row) =>
+        row.filter((_, index) => index !== supplierNameIndex),
+      );
   const worksheet = XLSX.utils.aoa_to_sheet([
-    [...TEMPLATE_HEADERS],
-    ...TEMPLATE_EXAMPLE_ROWS,
+    headers,
+    ...rows,
   ]);
 
-  worksheet['!cols'] = [
+  const columns = [
     { wch: 12 },
     { wch: 18 },
     { wch: 18 },
@@ -73,6 +84,9 @@ export function buildSupportDocumentTemplateExcel(): Buffer {
     { wch: 14 },
     { wch: 36 },
   ];
+  worksheet['!cols'] = includeSupplierName
+    ? columns
+    : columns.filter((_, index) => index !== supplierNameIndex);
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Documentos soporte');

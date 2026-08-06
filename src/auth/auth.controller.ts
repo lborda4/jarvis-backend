@@ -1,5 +1,20 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import { ParseRutResponseDto, ParseRutUploadDto } from '../admin/dto/parse-rut.dto';
+import { RutParserService } from '../admin/rut-parser.service';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
@@ -17,7 +32,30 @@ import type { AuthenticatedUser } from './interfaces/jwt-payload.interface';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly rutParserService: RutParserService,
+  ) {}
+
+  @Public()
+  @Post('rut/parse')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ type: ParseRutUploadDto })
+  @ApiOperation({
+    summary: 'Extraer datos del RUT durante el registro',
+  })
+  async parseRut(
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<ParseRutResponseDto> {
+    return {
+      data: await this.rutParserService.parse(file),
+    };
+  }
 
   @Public()
   @Post('register')

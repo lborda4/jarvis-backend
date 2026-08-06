@@ -6,7 +6,9 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Company } from '../../company/entities/company.entity';
+import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
+import { Integration } from '../../integration/entities/integration.entity';
+import { IntegrationProvider } from '../../integration/enums/integration-provider.enum';
 
 @Entity('plans')
 export class Plan {
@@ -19,8 +21,18 @@ export class Plan {
   @Column({ unique: true })
   code: string;
 
+  @Column({ type: 'varchar', length: 50 })
+  provider: IntegrationProvider;
+
   @Column({ name: 'document_limit', type: 'integer', nullable: true })
   documentLimit: number | null;
+
+  @Column({
+    name: 'included_document_types',
+    type: 'jsonb',
+    default: () => "'[]'",
+  })
+  includedDocumentTypes: ElectronicDocumentType[];
 
   @Column({ default: true })
   active: boolean;
@@ -31,6 +43,6 @@ export class Plan {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  @OneToMany(() => Company, (company) => company.companyPlan)
-  companies: Company[];
+  @OneToMany(() => Integration, (integration) => integration.plan)
+  integrations: Integration[];
 }

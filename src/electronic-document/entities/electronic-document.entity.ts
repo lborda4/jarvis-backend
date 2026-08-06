@@ -44,8 +44,8 @@ export class ElectronicDocument {
   @Column({ name: 'siigo_purchase_id', type: 'varchar', nullable: true })
   siigoPurchaseId: string | null;
 
-  @Column({ name: 'siigo_document_number', type: 'integer', nullable: true })
-  siigoDocumentNumber: number | null;
+  @Column({ name: 'siigo_document_number', type: 'varchar', length: 64, nullable: true })
+  siigoDocumentNumber: string | null;
 
   @Column({ name: 'supplier_exists_in_siigo', type: 'boolean', nullable: true })
   supplierExistsInSiigo: boolean | null;
