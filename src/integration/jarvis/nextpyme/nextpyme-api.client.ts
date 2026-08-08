@@ -60,6 +60,7 @@ export interface NextPymeSupportDocumentCreatePayload {
   time?: string;
   prefix?: string;
   notes?: string;
+  type_currency_id?: number;
   seller: {
     identification_number: number | string;
     dv?: number | string;

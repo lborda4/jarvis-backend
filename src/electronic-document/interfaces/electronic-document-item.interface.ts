@@ -8,5 +8,6 @@ export interface ElectronicDocumentItem {
   cantidad: number;
   valorUnitario: number;
   total: number;
+  codigo?: string;
   accountMapping?: ElectronicDocumentItemAccountMapping;
 }

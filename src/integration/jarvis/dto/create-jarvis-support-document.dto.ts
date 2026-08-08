@@ -84,6 +84,9 @@ export class JarvisCatalogsResponseDto {
 
   @ApiProperty({ type: [JarvisCatalogItemDto] })
   paymentForms: JarvisCatalogItemDto[];
+
+  @ApiProperty({ type: [JarvisCatalogItemDto] })
+  currencies: JarvisCatalogItemDto[];
 }
 
 export class CreateManualJarvisSupportDocumentItemDto {
@@ -104,6 +107,9 @@ export class CreateManualJarvisSupportDocumentItemDto {
     description: 'IVA u otro impuesto a cargo de la línea',
   })
   taxAmount?: number;
+
+  @ApiPropertyOptional({ example: 'PRUEBA' })
+  code?: string;
 }
 
 export class CreateManualJarvisSupportDocumentRequestDto {
@@ -118,6 +124,12 @@ export class CreateManualJarvisSupportDocumentRequestDto {
 
   @ApiPropertyOptional({ example: 'Proveedor Ejemplo SAS' })
   supplierName?: string;
+
+  @ApiPropertyOptional({
+    example: 'COP',
+    description: 'Código ISO de moneda (tabla maestra type_currencies)',
+  })
+  currency?: string;
 
   @ApiProperty({ example: 'DS' })
   documentPrefix: string;

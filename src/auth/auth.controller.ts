@@ -59,7 +59,9 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  @ApiOperation({ summary: 'Registrar usuario y empresa' })
+  @ApiOperation({
+    summary: 'Registrar usuario y vincularlo a una empresa existente por NIT',
+  })
   register(
     @Body() request: RegisterRequestDto,
   ): Promise<AuthTokensResponseDto> {

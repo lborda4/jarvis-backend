@@ -59,10 +59,11 @@ export class JarvisSupportDocumentSendService {
   ) {}
 
   async listCatalogs(): Promise<JarvisCatalogsResponseDto> {
-    const [taxes, paymentMethods, paymentForms] = await Promise.all([
+    const [taxes, paymentMethods, paymentForms, currencies] = await Promise.all([
       this.nextPymeMasterCatalogService.getTaxes(),
       this.nextPymeMasterCatalogService.getPaymentMethods(),
       this.nextPymeMasterCatalogService.getPaymentForms(),
+      this.nextPymeMasterCatalogService.getTypeCurrencies(),
     ]);
 
     return {
@@ -84,6 +85,11 @@ export class JarvisSupportDocumentSendService {
         name: form.name,
         code: form.code ?? null,
       })),
+      currencies: currencies.map((currency) => ({
+        id: currency.id,
+        name: currency.name,
+        code: currency.code ?? null,
+      })),
     };
   }
 
@@ -97,6 +103,7 @@ export class JarvisSupportDocumentSendService {
     );
     const documentPrefix = request.documentPrefix?.trim() || 'DS';
     const documentNumber = request.documentNumber?.trim();
+    const currency = (request.currency?.trim() || 'COP').toUpperCase();
     const items = Array.isArray(request.items) ? request.items : [];
 
     if (!issueDate) {
@@ -166,6 +173,7 @@ export class JarvisSupportDocumentSendService {
       }
 
       const lineTotal = this.toMoney(quantity * unitValue - discount);
+      const itemCode = item.code?.trim();
 
       return {
         supplierIdentification,
@@ -174,8 +182,12 @@ export class JarvisSupportDocumentSendService {
         documentPrefix,
         documentNumber,
         issueDate,
-        currency: 'COP',
+        ...(request.payment?.due_date?.trim()
+          ? { dueDate: request.payment.due_date.trim() }
+          : {}),
+        currency,
         itemDescription: description,
+        ...(itemCode ? { itemCode } : {}),
         quantity,
         unitValue: this.toMoney(unitValue),
         lineTotal,
@@ -194,7 +206,10 @@ export class JarvisSupportDocumentSendService {
       documentPrefix,
       documentNumber,
       issueDate,
-      currency: 'COP',
+      ...(request.payment?.due_date?.trim()
+        ? { dueDate: request.payment.due_date.trim() }
+        : {}),
+      currency,
       ...(request.observations?.trim()
         ? { observations: request.observations.trim() }
         : {}),
@@ -384,6 +399,10 @@ export class JarvisSupportDocumentSendService {
         issueDate,
         taxTotals,
       );
+      const currencyId =
+        await this.nextPymeMasterCatalogService.resolveCurrencyId(
+          electronicDocument.payload.invoice.currency,
+        );
 
       const payload = {
         type_document_id:
@@ -391,6 +410,7 @@ export class JarvisSupportDocumentSendService {
         number: numbering.number,
         date: issueDate,
         prefix: numbering.prefix,
+        ...(currencyId ? { type_currency_id: currencyId } : {}),
         ...(request.observations?.trim() ||
         electronicDocument.payload.observations?.trim()
           ? {
@@ -422,7 +442,12 @@ export class JarvisSupportDocumentSendService {
                 payment_form_id: request.payment.payment_form_id ?? 1,
                 payment_method_id: request.payment.id,
                 payment_due_date: request.payment.due_date || issueDate,
-                duration_measure: '0',
+                duration_measure: String(
+                  this.daysBetween(
+                    issueDate,
+                    request.payment.due_date || issueDate,
+                  ),
+                ),
               },
             }
           : {}),
@@ -631,7 +656,7 @@ export class JarvisSupportDocumentSendService {
         line_extension_amount: lineExtension,
         free_of_charge_indicator: false,
         description: item.descripcion?.trim() || `Ítem ${index + 1}`,
-        code: `ITEM-${index + 1}`,
+        code: item.codigo?.trim() || `ITEM-${index + 1}`,
         type_item_identification_id:
           this.nextPymeMasterCatalogService.getDefaultItemIdentificationId(),
         price_amount: unitValue,
@@ -786,5 +811,18 @@ export class JarvisSupportDocumentSendService {
 
   private formatMoney(value: number): string {
     return this.toMoney(value).toFixed(2);
+  }
+
+  private daysBetween(fromDate: string, toDate: string): number {
+    const from = new Date(`${fromDate}T00:00:00`);
+    const to = new Date(`${toDate}T00:00:00`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      return 0;
+    }
+
+    return Math.max(
+      0,
+      Math.round((to.getTime() - from.getTime()) / 86_400_000),
+    );
   }
 }

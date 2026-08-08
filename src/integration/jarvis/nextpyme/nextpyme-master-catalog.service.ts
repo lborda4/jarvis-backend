@@ -84,6 +84,31 @@ export class NextPymeMasterCatalogService {
     return this.getTable('payment_forms');
   }
 
+  async getTypeCurrencies(): Promise<NextPymeMasterRow[]> {
+    return this.getTable('type_currencies');
+  }
+
+  async resolveCurrencyId(codeOrName?: string | null): Promise<number | null> {
+    const currencies = await this.getTypeCurrencies();
+    const needle = this.normalizeText(codeOrName);
+
+    if (!needle) {
+      return null;
+    }
+
+    const byCode = currencies.find(
+      (item) => this.normalizeText(item.code) === needle,
+    );
+    if (byCode) {
+      return byCode.id;
+    }
+
+    const byName = currencies.find((item) =>
+      this.normalizeText(item.name).includes(needle),
+    );
+    return byName?.id ?? null;
+  }
+
   async getMunicipalities(): Promise<NextPymeMasterRow[]> {
     return this.getTable('municipalities');
   }

@@ -10,6 +10,7 @@ export interface SupportDocumentExcelRow {
   receiverIdentification?: string;
   currency?: string;
   itemDescription: string;
+  itemCode?: string;
   quantity: number;
   unitValue: number;
   lineTotal: number;

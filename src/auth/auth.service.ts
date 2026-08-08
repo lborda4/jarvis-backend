@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -9,18 +10,9 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { DataSource } from 'typeorm';
 import { Company } from '../company/entities/company.entity';
-import { CompanyPersonType } from '../company/enums/company-person-type.enum';
-import type { CompanyResponsible } from '../company/interfaces/company-responsible.interface';
-import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
-import {
-  ensureJarvisIntegration,
-  ensureSiigoIntegration,
-} from '../integration/helpers/integration-setup.helper';
-import { buildJarvisCredentialsSeed } from '../integration/jarvis/helpers/jarvis-credentials.helper';
 import { AppConfiguration } from '../config/configuration';
 import { UserCompany } from './entities/user-company.entity';
 import { User } from './entities/user.entity';
-import { JarvisCredentialsSeedDto } from '../integration/jarvis/dto/jarvis-credentials-seed.dto';
 import {
   AuthMeResponseDto,
   AuthTokensResponseDto,
@@ -58,28 +50,9 @@ export class AuthService {
     const name = request?.name?.trim();
     const email = request?.email?.trim().toLowerCase();
     const password = request?.password ?? '';
-    const companyName = request?.company?.name?.trim();
-    const companyNit = this.normalizeNit(request?.company?.nit);
-    const companyPersonType = this.normalizeCompanyPersonType(
-      request?.company?.personType,
-    );
-    const companyProvider = this.normalizeIntegrationProvider(
-      request?.company?.provider,
-    );
-    const companyResponsible = this.normalizeResponsible(
-      request?.company?.responsible,
-    );
+    const companyNit = this.normalizeNit(request?.nit);
 
-    this.validateRegisterInput(
-      name,
-      email,
-      password,
-      companyName,
-      companyNit,
-      companyPersonType,
-      companyProvider,
-      companyResponsible,
-    );
+    this.validateRegisterInput(name, email, password, companyNit);
 
     const existingUser = await this.usersRepository.findByEmail(email);
 
@@ -104,6 +77,17 @@ export class AuthService {
         const companiesRepository = manager.getRepository(Company);
         const userCompaniesRepository = manager.getRepository(UserCompany);
 
+        const company = await companiesRepository.findOne({
+          where: { nit: companyNit },
+        });
+
+        if (!company) {
+          throw new NotFoundException({
+            message: AUTH_ERROR_MESSAGE.COMPANY_NOT_REGISTERED,
+            code: AUTH_ERROR_CODE.COMPANY_NOT_REGISTERED,
+          });
+        }
+
         const user =
           existingUser ??
           (await usersRepository.save(
@@ -114,43 +98,6 @@ export class AuthService {
               active: true,
             }),
           ));
-
-        let company = await companiesRepository.findOne({
-          where: { nit: companyNit },
-        });
-
-        if (!company) {
-          company = await companiesRepository.save(
-            companiesRepository.create({
-              name: companyName,
-              nit: companyNit,
-              personType: companyPersonType,
-              responsible: companyResponsible,
-            }),
-          );
-
-          try {
-            if (companyProvider === IntegrationProvider.JARVIS) {
-              const jarvisCredentials = this.normalizeJarvisCredentialsSeed(
-                request?.company?.jarvisCredentials,
-              );
-
-              await ensureJarvisIntegration(
-                manager,
-                company.id,
-                jarvisCredentials ?? {},
-              );
-            } else {
-              await ensureSiigoIntegration(manager, company.id);
-            }
-          } catch (error) {
-            throw new BadRequestException(
-              error instanceof Error
-                ? error.message
-                : `No se pudo configurar la integración ${companyProvider}.`,
-            );
-          }
-        }
 
         const existingLink = await userCompaniesRepository.findOne({
           where: {
@@ -403,11 +350,7 @@ export class AuthService {
     name?: string,
     email?: string,
     password?: string,
-    companyName?: string,
     companyNit?: string,
-    companyPersonType?: CompanyPersonType | null,
-    companyProvider?: IntegrationProvider | null,
-    companyResponsible?: CompanyResponsible | null,
   ): void {
     if (!name) {
       throw new BadRequestException('El nombre es obligatorio.');
@@ -423,83 +366,9 @@ export class AuthService {
       );
     }
 
-    if (!companyName) {
-      throw new BadRequestException('El nombre de la empresa es obligatorio.');
-    }
-
     if (!companyNit) {
       throw new BadRequestException('El NIT de la empresa es obligatorio.');
     }
-
-    if (!companyPersonType) {
-      throw new BadRequestException(
-        'Debe indicar si la empresa es persona natural o persona jurídica.',
-      );
-    }
-
-    if (!companyProvider) {
-      throw new BadRequestException(
-        'Debe seleccionar la integración SIIGO o Jarvis.',
-      );
-    }
-
-    if (!companyResponsible) {
-      throw new BadRequestException(
-        'El nombre, teléfono y correo de la persona a cargo son obligatorios.',
-      );
-    }
-  }
-
-  private normalizeCompanyPersonType(
-    personType?: CompanyPersonType,
-  ): CompanyPersonType | null {
-    return Object.values(CompanyPersonType).includes(personType!)
-      ? personType!
-      : null;
-  }
-
-  private normalizeIntegrationProvider(
-    provider?: IntegrationProvider,
-  ): IntegrationProvider | null {
-    return Object.values(IntegrationProvider).includes(provider!)
-      ? provider!
-      : null;
-  }
-
-  private normalizeResponsible(
-    responsible?: Partial<CompanyResponsible>,
-  ): CompanyResponsible | null {
-    const name = responsible?.name?.trim();
-    const phone = responsible?.phone?.trim();
-    const email = responsible?.email?.trim().toLowerCase();
-
-    return name && phone && email ? { name, phone, email } : null;
-  }
-
-  private normalizeJarvisCredentialsSeed(
-    seed?: JarvisCredentialsSeedDto,
-  ): ReturnType<typeof buildJarvisCredentialsSeed> | null {
-    if (!seed || typeof seed !== 'object') {
-      return null;
-    }
-
-    const credentials = buildJarvisCredentialsSeed(seed);
-
-    if (
-      !credentials.business_name &&
-      !credentials.address &&
-      !credentials.email &&
-      !credentials.phone &&
-      !credentials.department &&
-      !credentials.municipality &&
-      !credentials.economic_activity &&
-      !credentials.tax_regime &&
-      !credentials.vat_regime
-    ) {
-      return null;
-    }
-
-    return credentials;
   }
 
   private normalizeNit(nit?: string): string {

@@ -9,6 +9,7 @@ export function mapGroupedSupportDocumentToPayload(
     cantidad: row.quantity > 0 ? row.quantity : 1,
     valorUnitario: row.unitValue,
     total: row.lineTotal > 0 ? row.lineTotal : row.quantity * row.unitValue,
+    ...(row.itemCode?.trim() ? { codigo: row.itemCode.trim() } : {}),
   }));
 
   const subtotal = roundMoney(
