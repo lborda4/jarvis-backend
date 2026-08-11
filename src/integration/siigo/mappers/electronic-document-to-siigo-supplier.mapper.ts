@@ -48,7 +48,6 @@ export function mapElectronicDocumentPayloadToSiigoSupplier(
   const nitParts = splitNitAndCheckDigit(supplier.documentNumber);
   const identification =
     nitParts.identification || supplier.documentNumber.replace(/[^\d]/g, '');
-  const name = supplier.name?.trim();
 
   if (!identification) {
     throw new BadRequestException(
@@ -56,9 +55,7 @@ export function mapElectronicDocumentPayloadToSiigoSupplier(
     );
   }
 
-  if (!name) {
-    throw new BadRequestException('El nombre del proveedor es obligatorio.');
-  }
+  const name = supplier.name?.trim() || `Proveedor ${identification}`;
 
   const siigoPayload: SiigoSupplierRequestDto = {
     type: SIIGO_SUPPLIER_TYPE,

@@ -39,8 +39,9 @@ export class NextPymeRutService {
   async lookupDocument(
     documentType: JarvisDocumentType,
     documentNumber: string,
+    tokenOverride?: string,
   ): Promise<LookupJarvisTerceroNitResponseDto> {
-    const token = this.requireToken();
+    const token = tokenOverride?.trim() || this.requireToken();
     const baseUrl = this.getBaseUrl();
     const typeDocumentIdentificationId = await this.resolveDocumentTypeId(
       documentType,

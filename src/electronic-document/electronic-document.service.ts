@@ -396,6 +396,110 @@ export class ElectronicDocumentService {
     };
   }
 
+  async createFromPurchaseInvoiceRows(
+    rows: Array<{
+      issuerNit: string;
+      issuerName: string;
+      payload: import('./interfaces/electronic-document-payload.interface').ElectronicDocumentPayload;
+    }>,
+    companyId: string,
+  ): Promise<{
+    documentsCreated: number;
+    itemsTotal: number;
+    documentIds: string[];
+  }> {
+    if (!rows.length) {
+      throw new BadRequestException(
+        'No se encontraron facturas electrónicas recibidas para importar. Solo se procesan filas con Tipo de documento "Factura electrónica" y Grupo "Recibido".',
+      );
+    }
+
+    const trimmedCompanyId = companyId?.trim();
+    if (!trimmedCompanyId) {
+      throw new BadRequestException(
+        'No se pudo determinar la empresa activa del usuario autenticado.',
+      );
+    }
+
+    const company = await this.companiesRepository.findById(trimmedCompanyId);
+    if (!company) {
+      throw new BadRequestException(
+        `No se encontró la empresa con id ${trimmedCompanyId}.`,
+      );
+    }
+
+    const provider = await this.resolveDocumentProvider(company.id);
+
+    await this.planSubscriptionService.assertCanCreateDocuments({
+      companyId: company.id,
+      provider,
+      documentType: ElectronicDocumentType.PURCHASE_INVOICE,
+      quantity: rows.length,
+    });
+
+    const supplierNamesByNit =
+      provider === IntegrationProvider.JARVIS
+        ? await this.buildJarvisSupplierNameLookup(company.id)
+        : buildSupplierNameLookup(
+            await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
+              company.id,
+              (
+                await getSiigoIntegration(
+                  this.integrationsRepository,
+                  company.id,
+                )
+              ).id,
+            ),
+          );
+
+    const documents = rows.map((row) => {
+      const payload = row.payload;
+      const supplierNit = normalizeSupplierNit(row.issuerNit);
+      const supplierName = resolveImportedSupplierName(
+        supplierNit,
+        row.issuerName,
+        supplierNamesByNit,
+      );
+      const terceroKnown =
+        provider === IntegrationProvider.JARVIS &&
+        Boolean(supplierNamesByNit.get(supplierNit)?.trim());
+
+      payload.supplier.name = supplierName;
+      payload.supplier.commercialName = supplierName;
+
+      return this.electronicDocumentsRepository.create({
+        companyId: company.id,
+        cufe: payload.invoice.cufe || null,
+        documentNumberThird:
+          this.normalizeDocument(payload.supplier.documentNumber) || null,
+        documentTypeThird: payload.supplier.documentType,
+        electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE,
+        status: terceroKnown
+          ? ElectronicDocumentStatus.ACCOUNT_MAPPED
+          : ElectronicDocumentStatus.PENDING,
+        processingStatus: terceroKnown
+          ? ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED
+          : ElectronicDocumentProcessingStatus.PENDING,
+        supplierExistsInSiigo: terceroKnown ? true : null,
+        payload,
+      });
+    });
+
+    const savedDocuments = await this.dataSource.transaction(async (manager) => {
+      return manager.save(ElectronicDocument, documents);
+    });
+
+    this.logger.log(
+      `[companyId=${company.id}] Facturas de compra importadas (${provider}): documents=${savedDocuments.length}`,
+    );
+
+    return {
+      documentsCreated: savedDocuments.length,
+      itemsTotal: savedDocuments.length,
+      documentIds: savedDocuments.map((document) => document.id),
+    };
+  }
+
   async resolveDocumentProvider(
     companyId: string,
   ): Promise<IntegrationProvider> {

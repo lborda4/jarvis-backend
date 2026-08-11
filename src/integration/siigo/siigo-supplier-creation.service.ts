@@ -62,8 +62,53 @@ export class SiigoSupplierCreationService {
 
     const electronicDocument =
       await this.electronicDocumentService.requireById(documentId, companyId);
+
+    const profileName = request?.name?.trim();
+    const profileDocumentNumber = request?.document_number?.trim();
+    const profileDocumentType = request?.document_type?.trim();
+    const profileCheckDigit = request?.check_digit?.trim();
+    const profileEmail = request?.email?.trim();
+    const profilePhone = request?.phone?.trim();
+    const profileAddress = request?.address?.trim();
+
+    if (
+      profileName ||
+      profileDocumentNumber ||
+      profileDocumentType ||
+      profileCheckDigit ||
+      profileEmail ||
+      profilePhone ||
+      profileAddress
+    ) {
+      await this.electronicDocumentService.updatePayload(
+        documentId,
+        {
+          ...electronicDocument.payload,
+          supplier: {
+            ...electronicDocument.payload.supplier,
+            ...(profileName
+              ? { name: profileName, commercialName: profileName }
+              : {}),
+            ...(profileDocumentNumber
+              ? { documentNumber: profileDocumentNumber }
+              : {}),
+            ...(profileDocumentType
+              ? { documentType: profileDocumentType }
+              : {}),
+            ...(profileCheckDigit ? { checkDigit: profileCheckDigit } : {}),
+            ...(profileEmail ? { email: profileEmail } : {}),
+            ...(profilePhone ? { phone: profilePhone } : {}),
+            ...(profileAddress ? { address: profileAddress } : {}),
+          },
+        },
+        companyId,
+      );
+    }
+
+    const refreshedDocument =
+      await this.electronicDocumentService.requireById(documentId, companyId);
     const supplier = resolveSupplierDocumentFromPayload(
-      electronicDocument.payload,
+      refreshedDocument.payload,
     );
 
     if (!supplier.normalizedDocumentNumber) {
@@ -77,7 +122,7 @@ export class SiigoSupplierCreationService {
     );
 
     const siigoPayload = mapElectronicDocumentPayloadToSiigoSupplier(
-      electronicDocument.payload,
+      refreshedDocument.payload,
       personType,
     );
 
@@ -117,7 +162,7 @@ export class SiigoSupplierCreationService {
       return this.completeSupplierCreation(
         documentId,
         companyId,
-        electronicDocument,
+        refreshedDocument,
         supplier.normalizedDocumentNumber,
         siigoSupplier,
       );

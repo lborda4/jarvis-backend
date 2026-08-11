@@ -9,6 +9,7 @@ import {
   AuthTokenPayload,
 } from '../interfaces/jwt-payload.interface';
 import { AppConfiguration } from '../../config/configuration';
+import { UserRole } from '../enums/user-role.enum';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -35,10 +36,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
-    const userCompany = await this.userCompaniesRepository.findByUserIdAndCompanyId(
-      payload.sub,
-      payload.companyId,
-    );
+    const companyId = payload.companyId?.trim() ?? '';
+
+    if (!companyId) {
+      if (user.role !== UserRole.ADMIN) {
+        throw new UnauthorizedException(
+          'El token no contiene una empresa activa válida.',
+        );
+      }
+
+      return {
+        userId: user.id,
+        email: user.email,
+        companyId: null,
+      };
+    }
+
+    const userCompany =
+      await this.userCompaniesRepository.findByUserIdAndCompanyId(
+        payload.sub,
+        companyId,
+      );
 
     if (!userCompany?.company) {
       throw new UnauthorizedException(

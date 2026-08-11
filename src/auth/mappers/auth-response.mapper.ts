@@ -17,14 +17,14 @@ export function mapCompanyToAuthCompanyDto(company: Company): AuthCompanyDto {
 
 export function mapUserToAuthUserDto(
   user: User,
-  company: Company,
+  company: Company | null,
 ): AuthUserDto {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
-    company: mapCompanyToAuthCompanyDto(company),
+    company: company ? mapCompanyToAuthCompanyDto(company) : null,
   };
 }
 
@@ -32,10 +32,10 @@ export function buildAuthTokensResponse(
   accessToken: string,
   refreshToken: string,
   user: User,
-  company: Company,
-  companies: Company[] = [company],
+  company: Company | null,
+  companies: Company[] = company ? [company] : [],
 ): AuthTokensResponseDto {
-  const companyDto = mapCompanyToAuthCompanyDto(company);
+  const companyDto = company ? mapCompanyToAuthCompanyDto(company) : null;
   const companiesDto = companies.map(mapCompanyToAuthCompanyDto);
 
   return {
@@ -49,10 +49,10 @@ export function buildAuthTokensResponse(
 
 export function buildAuthMeResponse(
   user: User,
-  company: Company,
-  companies: Company[] = [company],
+  company: Company | null,
+  companies: Company[] = company ? [company] : [],
 ): AuthMeResponseDto {
-  const companyDto = mapCompanyToAuthCompanyDto(company);
+  const companyDto = company ? mapCompanyToAuthCompanyDto(company) : null;
 
   return {
     user: mapUserToAuthUserDto(user, company),

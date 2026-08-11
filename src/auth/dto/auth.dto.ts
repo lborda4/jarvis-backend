@@ -19,7 +19,7 @@ export class AuthUserDto {
   name: string;
   email: string;
   role: string;
-  company: AuthCompanyDto;
+  company: AuthCompanyDto | null;
 }
 
 export class AuthCompanyDto {
@@ -32,13 +32,13 @@ export class AuthTokensResponseDto {
   accessToken: string;
   refreshToken: string;
   user: AuthUserDto;
-  company: AuthCompanyDto;
+  company: AuthCompanyDto | null;
   companies: AuthCompanyDto[];
 }
 
 export class AuthMeResponseDto {
   user: AuthUserDto;
-  company: AuthCompanyDto;
+  company: AuthCompanyDto | null;
   companies: AuthCompanyDto[];
 }
 

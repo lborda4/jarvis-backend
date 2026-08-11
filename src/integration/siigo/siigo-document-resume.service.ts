@@ -164,6 +164,7 @@ export class SiigoDocumentResumeService {
   private async createBatchContext(companyId: string): Promise<SiigoBatchContext> {
     return {
       authContext: await this.siigoAuthService.getValidAuthContext(companyId),
+      localSupplierNamesByNit: new Map(),
       supplierByNit: new Map(),
       supplierRequestsInFlight: new Map(),
     };

@@ -33,6 +33,7 @@ import {
   AUTH_ERROR_CODE,
   AUTH_ERROR_MESSAGE,
 } from './constants/auth-error.constants';
+import { UserRole } from './enums/user-role.enum';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -163,7 +164,7 @@ export class AuthService {
       });
     }
 
-    const company = await this.resolveActiveCompanyForUser(user.id);
+    const company = await this.resolveActiveCompanyForUser(user);
 
     return this.buildAuthResponse(user, company);
   }
@@ -229,10 +230,27 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
+    const companyId = payload.companyId?.trim() ?? '';
+
+    if (!companyId) {
+      if (user.role !== UserRole.ADMIN) {
+        throw new UnauthorizedException(
+          'El token no contiene una empresa activa válida.',
+        );
+      }
+
+      const tokens = await this.generateTokens(user, null);
+
+      return {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      };
+    }
+
     const userCompany =
       await this.userCompaniesRepository.findByUserIdAndCompanyId(
         user.id,
-        payload.companyId,
+        companyId,
       );
 
     if (!userCompany?.company) {
@@ -256,10 +274,23 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
+    const companies = await this.listCompaniesForUser(user.id);
+    const companyId = currentUser.companyId?.trim() ?? '';
+
+    if (!companyId) {
+      if (user.role !== UserRole.ADMIN) {
+        throw new UnauthorizedException(
+          'La empresa activa no está asociada al usuario.',
+        );
+      }
+
+      return buildAuthMeResponse(user, null, companies);
+    }
+
     const userCompany =
       await this.userCompaniesRepository.findByUserIdAndCompanyId(
         currentUser.userId,
-        currentUser.companyId,
+        companyId,
       );
 
     if (!userCompany?.company) {
@@ -268,18 +299,14 @@ export class AuthService {
       );
     }
 
-    return buildAuthMeResponse(
-      user,
-      userCompany.company,
-      await this.listCompaniesForUser(user.id),
-    );
+    return buildAuthMeResponse(user, userCompany.company, companies);
   }
 
   private async buildAuthResponse(
     user: User,
-    company: Company,
+    company: Company | null,
   ): Promise<AuthTokensResponseDto> {
-    const tokens = await this.generateTokens(user, company.id);
+    const tokens = await this.generateTokens(user, company?.id ?? null);
     const companies = await this.listCompaniesForUser(user.id);
 
     return buildAuthTokensResponse(
@@ -299,10 +326,16 @@ export class AuthService {
       .filter((company): company is Company => Boolean(company));
   }
 
-  private async resolveActiveCompanyForUser(userId: string): Promise<Company> {
-    const companies = await this.listCompaniesForUser(userId);
+  private async resolveActiveCompanyForUser(
+    user: User,
+  ): Promise<Company | null> {
+    const companies = await this.listCompaniesForUser(user.id);
 
     if (companies.length === 0) {
+      if (user.role === UserRole.ADMIN) {
+        return null;
+      }
+
       throw new UnauthorizedException({
         message: AUTH_ERROR_MESSAGE.NO_ACTIVE_COMPANY,
         code: AUTH_ERROR_CODE.NO_ACTIVE_COMPANY,
@@ -314,18 +347,18 @@ export class AuthService {
 
   private async generateTokens(
     user: User,
-    companyId: string,
+    companyId: string | null,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const accessPayload: AuthTokenPayload = {
       sub: user.id,
       email: user.email,
-      companyId,
+      companyId: companyId ?? null,
       type: 'access',
     };
     const refreshPayload: AuthTokenPayload = {
       sub: user.id,
       email: user.email,
-      companyId,
+      companyId: companyId ?? null,
       type: 'refresh',
     };
 

@@ -2,11 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
+import { buildSupplierNameLookup } from '../helpers/supplier-accounts-catalog.helper';
+import { IntegrationsRepository } from '../repositories/integrations.repository';
+import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
 import { SiigoImportValidationStatus } from './enums/siigo-import-validation-status.enum';
 import {
-  DocumentPreparationNextStep,
   DocumentPreparationResult,
 } from './interfaces/document-preparation-result.interface';
+import { getSiigoIntegration } from './helpers/siigo-context.helper';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoValidationService } from './siigo-validation.service';
@@ -23,6 +26,8 @@ export class SiigoDocumentPreparationService {
     private readonly siigoValidationService: SiigoValidationService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoAuthService: SiigoAuthService,
+    private readonly integrationsRepository: IntegrationsRepository,
+    private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
   ) {}
 
   prepareDocumentsInBackground(
@@ -38,6 +43,7 @@ export class SiigoDocumentPreparationService {
   ): Promise<void> {
     const batchContext = await this.createBatchContext(companyId);
 
+    // Paralelo: un fallo no bloquea al resto.
     await Promise.all(
       documentIds.map(async (documentId) => {
         try {
@@ -174,8 +180,19 @@ export class SiigoDocumentPreparationService {
   }
 
   private async createBatchContext(companyId: string): Promise<SiigoBatchContext> {
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+    const configurations =
+      await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
+        companyId,
+        integration.id,
+      );
+
     return {
       authContext: await this.siigoAuthService.getValidAuthContext(companyId),
+      localSupplierNamesByNit: buildSupplierNameLookup(configurations),
       supplierByNit: new Map(),
       supplierRequestsInFlight: new Map(),
     };

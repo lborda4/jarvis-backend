@@ -116,6 +116,13 @@ export function normalizeJarvisCredentials(
     JarvisResolutionKind.ELECTRONIC_INVOICE,
   );
 
+  const idSoftware = String(
+    raw.id_software ?? raw.idSoftware ?? raw.IDSoftware ?? '',
+  ).trim();
+  const tokenNextPyme = String(
+    raw.token_nextpyme ?? raw.tokenNextPyme ?? raw.token_nextPyme ?? '',
+  ).trim();
+
   return {
     business_name: readString(raw, 'business_name', 'businessName'),
     trade_name: readString(raw, 'trade_name', 'tradeName') || undefined,
@@ -136,6 +143,8 @@ export function normalizeJarvisCredentials(
     email: readString(raw, 'email', 'email') || undefined,
     address: readString(raw, 'address', 'address') || undefined,
     phone: readString(raw, 'phone', 'phone') || undefined,
+    id_software: idSoftware || undefined,
+    token_nextpyme: tokenNextPyme || undefined,
     configured_at: raw.configured_at
       ? String(raw.configured_at)
       : raw.configuredAt

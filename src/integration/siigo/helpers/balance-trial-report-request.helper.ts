@@ -1,6 +1,6 @@
 import { SiigoTestBalanceReportRequest } from '../interfaces/siigo-api.interface';
 import { ImportBalanceTrialRequestDto } from '../dto/import-balance-trial-response.dto';
-import { BALANCE_TRIAL_YEARS_LOOKBACK } from '../constants/supplier-configuration.constants';
+import { BALANCE_TRIAL_YEARS_COUNT } from '../constants/supplier-configuration.constants';
 
 function buildBalanceTrialReportRequestForYear(
   year: number,
@@ -52,7 +52,8 @@ export function buildBalanceTrialReportRequests(
   request?: ImportBalanceTrialRequestDto,
 ): SiigoTestBalanceReportRequest[] {
   const endYear = request?.year ?? new Date().getFullYear();
-  const startYear = endYear - BALANCE_TRIAL_YEARS_LOOKBACK;
+  const yearsCount = Math.max(1, BALANCE_TRIAL_YEARS_COUNT);
+  const startYear = endYear - (yearsCount - 1);
   const requests: SiigoTestBalanceReportRequest[] = [];
 
   for (let year = startYear; year <= endYear; year += 1) {

@@ -52,6 +52,10 @@ export interface JarvisCredentials {
   email?: string;
   address?: string;
   phone?: string;
+  /** Identificador de software DIAN/NextPyme de la empresa. */
+  id_software?: string;
+  /** Token Bearer de NextPyme propio de la empresa. */
+  token_nextpyme?: string;
   /** @deprecated Conservado por compatibilidad con configuraciones previas. */
   entity_type?: string;
   configured_at?: string;

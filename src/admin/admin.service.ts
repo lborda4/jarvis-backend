@@ -438,7 +438,9 @@ export class AdminService {
       !credentials.municipality &&
       !credentials.economic_activity &&
       !credentials.tax_regime &&
-      !credentials.vat_regime
+      !credentials.vat_regime &&
+      !credentials.id_software &&
+      !credentials.token_nextpyme
     ) {
       return null;
     }

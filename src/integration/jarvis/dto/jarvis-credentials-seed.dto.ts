@@ -42,4 +42,15 @@ export class JarvisCredentialsSeedDto {
 
   @ApiPropertyOptional()
   phone?: string;
+
+  @ApiPropertyOptional({
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    description: 'ID de software DIAN/NextPyme de la empresa.',
+  })
+  idSoftware?: string;
+
+  @ApiPropertyOptional({
+    description: 'Token de autenticación NextPyme de la empresa.',
+  })
+  tokenNextPyme?: string;
 }

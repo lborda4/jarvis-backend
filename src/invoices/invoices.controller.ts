@@ -79,6 +79,18 @@ export class InvoicesController {
     );
   }
 
+  @Post('purchase-invoices/import')
+  @UseInterceptors(FileInterceptor('file'))
+  importPurchaseInvoices(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<ImportSupportDocumentsResponseDto> {
+    return this.invoicesService.importPurchaseInvoicesFromExcel(
+      file,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
   @Post('xml')
   @UseInterceptors(FileInterceptor('file'))
   extractInvoicesFromXml(

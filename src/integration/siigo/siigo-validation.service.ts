@@ -8,6 +8,9 @@ import { ElectronicDocumentStatus } from '../../electronic-document/enums/electr
 import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
 import { resolveSupplierDocumentFromPayload } from '../../electronic-document/helpers/electronic-document-supplier.helper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
+import { IntegrationsRepository } from '../repositories/integrations.repository';
+import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
+import { SIIGO_DEFAULT_ITEM_TYPE } from './constants/supplier-configuration.constants';
 import {
   ValidateSiigoImportRequestDto,
   ValidateSiigoImportResponseDto,
@@ -18,6 +21,7 @@ import {
   isSiigoUnauthorizedError,
   sleep,
 } from './helpers/siigo-auth.helper';
+import { getSiigoIntegration, normalizeSupplierDocument } from './helpers/siigo-context.helper';
 import { handleSiigoApiError } from './helpers/siigo-error.helper';
 import { buildSiigoImportResponse } from './helpers/siigo-import-response.helper';
 import { getSiigoSupplierName } from './helpers/siigo-supplier.helper';
@@ -35,6 +39,8 @@ export class SiigoValidationService {
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoSupplierService: SiigoSupplierService,
     private readonly electronicDocumentService: ElectronicDocumentService,
+    private readonly integrationsRepository: IntegrationsRepository,
+    private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
   ) {}
 
   async validateImport(
@@ -43,9 +49,6 @@ export class SiigoValidationService {
     batchContext?: SiigoBatchContext,
   ): Promise<ValidateSiigoImportResponseDto> {
     const documentId = request?.documentId?.trim();
-
-    console.log('[SIIGO import] ===== INICIO =====');
-    console.log('[SIIGO import] documentId', documentId);
 
     try {
       const electronicDocument =
@@ -60,30 +63,42 @@ export class SiigoValidationService {
         );
       }
 
+      const nit = supplier.normalizedDocumentNumber;
+      const documentType =
+        electronicDocument.payload.supplier.documentType?.trim() || 'NIT';
+
+      // 1) BD local primero (sin llamar a SIIGO).
+      const localName =
+        batchContext?.localSupplierNamesByNit.get(nit)?.trim() ||
+        (await this.findLocalSupplierName(companyId, nit));
+
+      if (localName) {
+        batchContext?.localSupplierNamesByNit.set(nit, localName);
+        await this.applyResolvedSupplierName(
+          documentId,
+          electronicDocument.payload,
+          localName,
+          companyId,
+        );
+
+        return buildSiigoImportResponse({
+          status: SiigoImportValidationStatus.ACCOUNT_REQUIRED,
+          supplierDocument: nit,
+          supplierName: localName,
+        });
+      }
+
+      // 2) Consultar SIIGO (dedupe por NIT en el batch).
       const branchOffice = 0;
-
-      console.log('[SIIGO import] proveedor a consultar en SIIGO', {
-        documentId,
-        documentType: supplier.documentType,
-        documentNumber: supplier.documentNumber,
-        normalizedDocumentNumber: supplier.normalizedDocumentNumber,
-        branchOffice,
-      });
-
       const siigoSupplier = await this.findSupplierInSiigo(
         documentId,
-        supplier.normalizedDocumentNumber,
+        nit,
         branchOffice,
         companyId,
         batchContext,
       );
 
       if (!siigoSupplier) {
-        console.log('[SIIGO import] resultado: NO existe en SIIGO', {
-          documentId,
-          supplierDocument: supplier.normalizedDocumentNumber,
-        });
-
         await this.electronicDocumentService.updateStatus(
           documentId,
           ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
@@ -92,54 +107,44 @@ export class SiigoValidationService {
 
         return buildSiigoImportResponse({
           status: SiigoImportValidationStatus.THIRD_PARTY_REQUIRED,
-          supplierDocument: supplier.normalizedDocumentNumber,
+          supplierDocument: nit,
           supplierName: electronicDocument.payload.supplier.name || null,
         });
       }
 
-      const supplierName = getSiigoSupplierName(siigoSupplier);
+      const supplierName =
+        getSiigoSupplierName(siigoSupplier) || `Proveedor ${nit}`;
 
-      await this.electronicDocumentService.updateStatus(
-        documentId,
-        ElectronicDocumentStatus.ACCOUNT_REQUIRED,
+      // 3) Guardar/actualizar tercero en BD y reflejar nombre en el documento.
+      await this.upsertLocalSupplier(
         companyId,
-      );
-      await this.electronicDocumentService.updateProcessingMetadata(
-        documentId,
-        {
-          supplierExistsInSiigo: true,
-          processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_REQUIRED,
-        },
-        companyId,
-      );
-
-      console.log('[SIIGO import] resultado: existe en SIIGO', {
-        documentId,
-        supplierDocument: supplier.normalizedDocumentNumber,
+        nit,
+        documentType,
         supplierName,
-        siigoCustomerId: siigoSupplier.id,
-      });
-      console.log('[SIIGO import] ===== FIN OK =====');
+      );
+      batchContext?.localSupplierNamesByNit.set(nit, supplierName);
+
+      await this.applyResolvedSupplierName(
+        documentId,
+        electronicDocument.payload,
+        supplierName,
+        companyId,
+      );
 
       return buildSiigoImportResponse({
         status: SiigoImportValidationStatus.ACCOUNT_REQUIRED,
-        supplierDocument: supplier.normalizedDocumentNumber,
+        supplierDocument: nit,
         supplierName,
       });
     } catch (error) {
       if (error instanceof BadRequestException) {
-        console.error('[SIIGO import] error de validación (400)', {
-          documentId,
-          message: error.message,
-        });
         throw error;
       }
 
-      console.error('[SIIGO import] error en flujo import', {
-        documentId,
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      this.logger.error(
+        `[documentId=${documentId}] Error al validar proveedor en SIIGO`,
+        error instanceof Error ? error.stack : String(error),
+      );
 
       if (error instanceof BadGatewayException) {
         throw error;
@@ -151,6 +156,96 @@ export class SiigoValidationService {
           : 'Error inesperado al validar proveedor en SIIGO',
       );
     }
+  }
+
+  private async findLocalSupplierName(
+    companyId: string,
+    nit: string,
+  ): Promise<string | null> {
+    try {
+      const integration = await getSiigoIntegration(
+        this.integrationsRepository,
+        companyId,
+      );
+      const configuration =
+        await this.supplierConfigurationsRepository.findByCompanyIntegrationAndNormalizedSupplierDocument(
+          companyId,
+          integration.id,
+          nit,
+        );
+
+      return configuration?.supplierName?.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async upsertLocalSupplier(
+    companyId: string,
+    nit: string,
+    documentType: string,
+    supplierName: string,
+  ): Promise<void> {
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+    const existing =
+      await this.supplierConfigurationsRepository.findByCompanyIntegrationAndNormalizedSupplierDocument(
+        companyId,
+        integration.id,
+        nit,
+      );
+
+    if (existing) {
+      existing.supplierName = supplierName;
+      existing.supplierDocument = normalizeSupplierDocument(nit);
+      existing.supplierDocumentType = documentType;
+      await this.supplierConfigurationsRepository.save(existing);
+      return;
+    }
+
+    await this.supplierConfigurationsRepository.save(
+      this.supplierConfigurationsRepository.create({
+        companyId,
+        integrationId: integration.id,
+        supplierDocument: normalizeSupplierDocument(nit),
+        supplierDocumentType: documentType,
+        supplierName,
+        itemType: SIIGO_DEFAULT_ITEM_TYPE,
+      }),
+    );
+  }
+
+  private async applyResolvedSupplierName(
+    documentId: string,
+    payload: Awaited<
+      ReturnType<ElectronicDocumentService['requireById']>
+    >['payload'],
+    supplierName: string,
+    companyId: string,
+  ): Promise<void> {
+    await this.electronicDocumentService.updatePayloadAndStatus(
+      documentId,
+      {
+        ...payload,
+        supplier: {
+          ...payload.supplier,
+          name: supplierName,
+          commercialName: supplierName,
+        },
+      },
+      ElectronicDocumentStatus.ACCOUNT_REQUIRED,
+      companyId,
+    );
+    await this.electronicDocumentService.updateProcessingMetadata(
+      documentId,
+      {
+        supplierExistsInSiigo: true,
+        processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_REQUIRED,
+      },
+      companyId,
+    );
   }
 
   private async findSupplierInSiigo(
@@ -211,47 +306,20 @@ export class SiigoValidationService {
     attempt = 0,
     batchContext?: SiigoBatchContext,
   ): Promise<SiigoCustomer | null> {
-    console.log('[SIIGO import] ANTES consulta proveedor SIIGO', {
-      documentId,
-      supplierDocument,
-      branchOffice,
-      attempt,
-    });
-
     try {
-      const result = await this.siigoSupplierService.findSupplierByNit(
+      return await this.siigoSupplierService.findSupplierByNit(
         authContext.accessToken,
         supplierDocument,
         branchOffice,
         authContext.partnerId,
       );
-
-      console.log('[SIIGO import] DESPUÉS consulta proveedor SIIGO', {
-        documentId,
-        supplierDocument,
-        found: Boolean(result),
-        siigoCustomerId: result?.id,
-      });
-
-      return result;
     } catch (error) {
-      console.error('[SIIGO import] error en consulta proveedor SIIGO', {
-        documentId,
-        supplierDocument,
-        attempt,
-        message: error instanceof Error ? error.message : String(error),
-      });
-
       this.logger.error(
         `[documentId=${documentId}] Error al consultar tercero en SIIGO`,
         error instanceof Error ? error.stack : String(error),
       );
 
       if (isSiigoUnauthorizedError(error) && attempt < 1) {
-        console.log('[SIIGO import] reintentando por 401 - refrescando token', {
-          documentId,
-        });
-
         const refreshedContext =
           await this.siigoAuthService.forceRefreshAuthContext(companyId);
 
@@ -269,10 +337,6 @@ export class SiigoValidationService {
       }
 
       if (isSiigoRateLimitError(error) && attempt < 2) {
-        console.log('[SIIGO import] reintentando por 429', {
-          documentId,
-          attempt,
-        });
         await sleep(1500);
 
         return this.querySupplierWithRetries(

@@ -12,8 +12,10 @@ export function mapRowToInvoicePreview(row: ExcelRow): InvoicePreviewDto {
     issuerName: getString(row, EXCEL_COLUMNS.ISSUER_NAME),
     receiverNit: getString(row, EXCEL_COLUMNS.RECEIVER_NIT),
     receiverName: getString(row, EXCEL_COLUMNS.RECEIVER_NAME),
-    currency: '',
-    paymentMethod: getString(row, EXCEL_COLUMNS.PAYMENT_METHOD),
+    currency: getString(row, EXCEL_COLUMNS.CURRENCY),
+    paymentMethod:
+      getString(row, EXCEL_COLUMNS.PAYMENT_FORM) ||
+      getString(row, EXCEL_COLUMNS.PAYMENT_METHOD),
     total: getNumber(row, EXCEL_COLUMNS.TOTAL),
     status: getString(row, EXCEL_COLUMNS.STATUS),
     group: getString(row, EXCEL_COLUMNS.GROUP),

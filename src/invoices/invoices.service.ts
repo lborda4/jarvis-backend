@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DianParserService } from '../dian/dian-parser.service';
 import {
   extractInvoiceXmlFromZip,
@@ -28,6 +28,10 @@ import {
 } from './dto/import-support-documents.dto';
 import { UploadXmlRequestDto } from './dto/upload-xml-request.dto';
 import { parseSupportDocumentExcel } from './helpers/support-document-excel.helper';
+import {
+  mapDianSalesInvoiceRowToPayload,
+  parseDianSalesInvoiceExcel,
+} from './helpers/sales-invoice-excel.helper';
 import { applySupportDocumentIssueDate } from './helpers/support-document-issue-date.helper';
 import {
   buildSupportDocumentTemplateExcel,
@@ -67,7 +71,6 @@ export class InvoicesService {
     );
 
     const groups = parseSupportDocumentExcel(file.buffer);
-    await this.assertSupplierNamesForProvider(groups, companyId);
     applySupportDocumentIssueDate(groups, request?.issueDate);
     const processedRows = groups.reduce(
       (total, group) => total + group.rows.length,
@@ -129,7 +132,6 @@ export class InvoicesService {
     );
 
     const groups = parseSupportDocumentExcel(file.buffer);
-    await this.assertSupplierNamesForProvider(groups, companyId);
     applySupportDocumentIssueDate(groups, request?.issueDate);
     const processedRows = groups.reduce(
       (total, group) => total + group.rows.length,
@@ -161,6 +163,79 @@ export class InvoicesService {
     this.logger.log(
       `Documentos Soporte guardados: documentsCreated=${result.documentsCreated}, itemsTotal=${result.itemsTotal}`,
     );
+
+    const resolvedCompanyId = companyId?.trim();
+    if (resolvedCompanyId && result.documentIds.length > 0) {
+      const provider =
+        await this.electronicDocumentService.resolveDocumentProvider(
+          resolvedCompanyId,
+        );
+
+      if (provider === IntegrationProvider.JARVIS) {
+        this.jarvisDocumentPreparationService.prepareDocumentsInBackground(
+          result.documentIds,
+          resolvedCompanyId,
+        );
+      } else {
+        this.siigoDocumentPreparationService.prepareDocumentsInBackground(
+          result.documentIds,
+          resolvedCompanyId,
+        );
+      }
+    }
+
+    return {
+      processedRows,
+      itemsTotal: result.itemsTotal,
+      documentsCreated: result.documentsCreated,
+      documentIds: result.documentIds,
+      records,
+    };
+  }
+
+  async importPurchaseInvoicesFromExcel(
+    file?: Express.Multer.File,
+    companyId?: string,
+  ): Promise<ImportSupportDocumentsResponseDto> {
+    if (!file) {
+      throw new MissingFileException();
+    }
+
+    this.logger.log(
+      `Iniciando importación de Facturas de compra DIAN (${file.originalname ?? 'archivo.xlsx'})`,
+    );
+
+    const { processedRows, rows } = parseDianSalesInvoiceExcel(file.buffer);
+
+    this.logger.log(
+      `Facturas de compra DIAN: filasLeídas=${processedRows}, facturasRecibidas=${rows.length}`,
+    );
+
+    const result =
+      await this.electronicDocumentService.createFromPurchaseInvoiceRows(
+        rows.map((row) => ({
+          issuerNit: row.issuerNit,
+          issuerName: row.issuerName,
+          payload: mapDianSalesInvoiceRowToPayload(row),
+        })),
+        companyId ?? '',
+      );
+
+    const records = rows.map((row) => ({
+      cufe: row.cufe,
+      documentType: row.documentType,
+      issueDate: row.issueDate,
+      receptionDate: row.receptionDate,
+      issuerNit: row.issuerNit,
+      issuerName: row.issuerName,
+      receiverNit: row.receiverNit,
+      receiverName: row.receiverName,
+      currency: row.currency,
+      paymentMethod: row.paymentForm || row.paymentMethod,
+      total: row.total,
+      status: row.status,
+      group: row.group,
+    }));
 
     const resolvedCompanyId = companyId?.trim();
     if (resolvedCompanyId && result.documentIds.length > 0) {
@@ -314,37 +389,13 @@ export class InvoicesService {
     buffer: Buffer;
     filename: string;
   } {
-    const includeSupplierName =
-      provider?.trim().toUpperCase() !== IntegrationProvider.JARVIS;
+    void provider;
 
+    // El nombre del tercero se resuelve por NIT (BD → SIIGO), no va en el Excel.
     return {
-      buffer: buildSupportDocumentTemplateExcel(includeSupplierName),
+      buffer: buildSupportDocumentTemplateExcel(false),
       filename: SUPPORT_DOCUMENT_TEMPLATE_FILENAME,
     };
-  }
-
-  private async assertSupplierNamesForProvider(
-    groups: ReturnType<typeof parseSupportDocumentExcel>,
-    companyId?: string,
-  ): Promise<void> {
-    const resolvedCompanyId = companyId?.trim();
-    if (!resolvedCompanyId) {
-      return;
-    }
-
-    const provider =
-      await this.electronicDocumentService.resolveDocumentProvider(
-        resolvedCompanyId,
-      );
-
-    if (
-      provider !== IntegrationProvider.JARVIS &&
-      groups.some((group) => !group.supplierName.trim())
-    ) {
-      throw new BadRequestException(
-        'La columna Nombre tercero es obligatoria para Documento Soporte con SIIGO.',
-      );
-    }
   }
 
   private getErrorMessage(error: unknown): string {

@@ -18,6 +18,7 @@ import { JarvisTercero } from './entities/jarvis-tercero.entity';
 import { JarvisDocumentType } from './enums/jarvis-document-type.enum';
 import { JarvisEntityType } from './enums/jarvis-entity-type.enum';
 import { JarvisTaxRegime } from './enums/jarvis-tax-regime.enum';
+import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
 import { NextPymeRutService } from './nextpyme-rut.service';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
 
@@ -128,7 +129,6 @@ export class JarvisTercerosService {
     identificationNumber?: string,
   ): Promise<LookupJarvisTerceroNitResponseDto> {
     const trimmedCompanyId = this.requireCompanyId(companyId);
-    await this.requireJarvisIntegration(trimmedCompanyId);
 
     const resolvedDocumentType = documentType ?? JarvisDocumentType.NIT;
     if (!VALID_DOCUMENT_TYPES.has(resolvedDocumentType)) {
@@ -146,10 +146,37 @@ export class JarvisTercerosService {
       );
     }
 
+    const companyToken = await this.resolveCompanyNextPymeToken(
+      trimmedCompanyId,
+    );
+
     return this.nextPymeRutService.lookupDocument(
       resolvedDocumentType,
       documentNumber,
+      companyToken,
     );
+  }
+
+  /**
+   * Prefer company Jarvis `token_nextpyme` when configured.
+   * Otherwise NextPymeRutService falls back to NEXTPYME_API_TOKEN.
+   */
+  private async resolveCompanyNextPymeToken(
+    companyId: string,
+  ): Promise<string | undefined> {
+    const integration =
+      await this.integrationsRepository.findByCompanyAndProvider(
+        companyId,
+        IntegrationProvider.JARVIS,
+      );
+
+    if (!integration?.credentials) {
+      return undefined;
+    }
+
+    const credentials = normalizeJarvisCredentials(integration.credentials);
+    const token = credentials.token_nextpyme?.trim();
+    return token || undefined;
   }
 
   private requireCompanyId(companyId: string): string {
