@@ -37,6 +37,7 @@ import {
   isValidSiigoConfigurationId,
   pickSiigoDocumentTypeId,
 } from './helpers/siigo-document-type.helper';
+import { normalizeSiigoCredentials } from './helpers/siigo-credentials.helper';
 import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoAccountsBalanceSyncService } from './siigo-accounts-balance-sync.service';
@@ -74,17 +75,17 @@ export class SiigoConfigurationCacheService {
     companyId: string,
   ): Promise<SiigoPaymentTypeCatalogItemDto[]> {
     const normalizedDocumentType = documentType.trim().toUpperCase();
-    const cached = this.memoryCacheByCompany.get(companyId);
+    const cache = await this.ensureCompanyCache(companyId);
 
-    return cached?.catalog.paymentTypes?.[normalizedDocumentType] ?? [];
+    return cache.catalog.paymentTypes?.[normalizedDocumentType] ?? [];
   }
 
   async getTaxes(
     typeFilter: string | undefined,
     companyId: string,
   ): Promise<SiigoTaxCatalogItemDto[]> {
-    const cached = this.memoryCacheByCompany.get(companyId);
-    const taxes = cached?.catalog.taxes ?? [];
+    const cache = await this.ensureCompanyCache(companyId);
+    const taxes = cache.catalog.taxes ?? [];
     const normalizedFilter = typeFilter?.trim().toLowerCase();
 
     if (!normalizedFilter) {
@@ -270,6 +271,18 @@ export class SiigoConfigurationCacheService {
   }
 
   private async syncSupportDocumentTypeId(companyId: string): Promise<number> {
+    const persistedId = await this.readPersistedDocumentTypeId(
+      companyId,
+      'support_document_id',
+    );
+
+    if (persistedId != null) {
+      this.logger.log(
+        `[companyId=${companyId}] Usando comprobante DS configurado (id=${persistedId})`,
+      );
+      return persistedId;
+    }
+
     const documentTypes = await executeSiigoRequestWithRetries(
       this.siigoAuthService,
       companyId,
@@ -291,6 +304,18 @@ export class SiigoConfigurationCacheService {
   }
 
   private async syncPurchaseDocumentTypeId(companyId: string): Promise<number> {
+    const persistedId = await this.readPersistedDocumentTypeId(
+      companyId,
+      'purchase_invoice_id',
+    );
+
+    if (persistedId != null) {
+      this.logger.log(
+        `[companyId=${companyId}] Usando comprobante FC configurado (id=${persistedId})`,
+      );
+      return persistedId;
+    }
+
     const documentTypes = await executeSiigoRequestWithRetries(
       this.siigoAuthService,
       companyId,
@@ -309,6 +334,24 @@ export class SiigoConfigurationCacheService {
       SIIGO_PURCHASE_DOCUMENT_TYPE_QUERY,
       'factura de compra',
     );
+  }
+
+  private async readPersistedDocumentTypeId(
+    companyId: string,
+    key: 'support_document_id' | 'purchase_invoice_id',
+  ): Promise<number | null> {
+    try {
+      const integration = await getSiigoIntegration(
+        this.integrationsRepository,
+        companyId,
+      );
+      const credentials = normalizeSiigoCredentials(integration.credentials);
+      const value = credentials.document_types?.[key];
+
+      return isValidSiigoConfigurationId(value) ? value : null;
+    } catch {
+      return null;
+    }
   }
 
   private async syncAccountsCatalog(

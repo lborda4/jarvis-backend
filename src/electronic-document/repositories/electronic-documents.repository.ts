@@ -67,6 +67,10 @@ export class ElectronicDocumentsRepository {
     });
   }
 
+  async deleteById(id: string): Promise<void> {
+    await this.repository.delete({ id });
+  }
+
   async findAll(
     filters: FindElectronicDocumentsFilters,
   ): Promise<{ items: ElectronicDocument[]; total: number }> {

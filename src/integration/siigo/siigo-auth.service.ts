@@ -15,8 +15,10 @@ import {
   normalizeSiigoCredentials,
   resolveSiigoCredentials,
   areSiigoCredentialsConfigured,
+  areSiigoDocumentTypesConfigured,
   SiigoEnvCredentials,
 } from './helpers/siigo-credentials.helper';
+import { isValidSiigoConfigurationId } from './helpers/siigo-document-type.helper';
 import {
   formatAuthorizationHeader,
   stripBearerPrefix,
@@ -104,10 +106,14 @@ export class SiigoAuthService {
         }),
       );
     } else {
+      const existingCredentials = normalizeSiigoCredentials(
+        integration.credentials,
+      );
       integration.credentials = {
         username,
         access_key,
         partner_id: partner_id || undefined,
+        document_types: existingCredentials.document_types,
       };
     }
 
@@ -115,6 +121,8 @@ export class SiigoAuthService {
       username,
       access_key,
       partner_id: partner_id || undefined,
+      document_types: normalizeSiigoCredentials(integration.credentials)
+        .document_types,
     };
 
     try {
@@ -174,6 +182,7 @@ export class SiigoAuthService {
       return {
         configured: false,
         hasAccounts: false,
+        documentTypesConfigured: false,
         subscription,
       };
     }
@@ -186,17 +195,41 @@ export class SiigoAuthService {
         integration.id,
       );
     const hasAccounts = accountsCount > 0;
+    const documentTypesConfigured = areSiigoDocumentTypesConfigured(
+      integration.credentials,
+      subscription.includedDocumentTypes,
+    );
+    const supportDocumentTypeId = isValidSiigoConfigurationId(
+      credentials.document_types?.support_document_id,
+    )
+      ? credentials.document_types!.support_document_id!
+      : null;
+    const purchaseInvoiceTypeId = isValidSiigoConfigurationId(
+      credentials.document_types?.purchase_invoice_id,
+    )
+      ? credentials.document_types!.purchase_invoice_id!
+      : null;
 
     if (!configured) {
-      return { configured: false, hasAccounts, subscription };
+      return {
+        configured: false,
+        hasAccounts,
+        documentTypesConfigured: false,
+        subscription,
+        supportDocumentTypeId,
+        purchaseInvoiceTypeId,
+      };
     }
 
     return {
       configured: true,
       hasAccounts,
+      documentTypesConfigured,
       subscription,
       username: credentials.username,
       partner_id: credentials.partner_id,
+      supportDocumentTypeId,
+      purchaseInvoiceTypeId,
     };
   }
 

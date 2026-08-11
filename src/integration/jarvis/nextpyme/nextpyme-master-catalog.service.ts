@@ -145,7 +145,7 @@ export class NextPymeMasterCatalogService {
 
     if (!selected) {
       throw new BadRequestException(
-        'No hay resolución de Documento Soporte (type_document_id=11) configurada en NextPyme. Configúrela antes de emitir.',
+        'No hay resolución de Documento Soporte configurada. Configúrela antes de emitir.',
       );
     }
 

@@ -92,12 +92,6 @@ export class AdminService {
       );
     }
 
-    if (!responsible) {
-      throw new BadRequestException(
-        'Los datos de la persona a cargo (nombre, teléfono y correo) son obligatorios.',
-      );
-    }
-
     if (integrations.length === 0) {
       throw new BadRequestException(
         'Debe seleccionar al menos una integración (SIIGO, Jarvis o ambas).',
@@ -409,11 +403,11 @@ export class AdminService {
   private normalizeResponsible(
     responsible?: Partial<CompanyResponsible>,
   ): CompanyResponsible | null {
-    const name = responsible?.name?.trim();
-    const phone = responsible?.phone?.trim();
-    const email = responsible?.email?.trim().toLowerCase();
+    const name = responsible?.name?.trim() ?? '';
+    const phone = responsible?.phone?.trim() ?? '';
+    const email = responsible?.email?.trim().toLowerCase() ?? '';
 
-    if (!name || !phone || !email) {
+    if (!name && !phone && !email) {
       return null;
     }
 

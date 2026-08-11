@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../../auth/interfaces/jwt-payload.interface';
@@ -77,6 +77,15 @@ import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.ser
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
 import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
+import { SiigoDocumentTypesService } from './siigo-document-types.service';
+import {
+  ListSiigoDocumentTypesQueryDto,
+  SiigoDocumentTypeCatalogItemDto,
+} from './dto/list-siigo-document-types.dto';
+import {
+  SaveSiigoDocumentTypesRequestDto,
+  SaveSiigoDocumentTypesResponseDto,
+} from './dto/save-siigo-document-types.dto';
 
 @ApiTags('integrations/siigo')
 @Controller('integrations/siigo')
@@ -97,6 +106,7 @@ export class SiigoController {
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoBalanceTrialImportService: SiigoBalanceTrialImportService,
+    private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
   ) {}
 
   @Post('credentials')
@@ -119,13 +129,45 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Estado de credenciales SIIGO',
     description:
-      'Indica si la empresa activa del JWT ya tiene credenciales SIIGO y cuentas contables sincronizadas.',
+      'Indica si la empresa activa del JWT ya tiene credenciales SIIGO, cuentas contables sincronizadas y comprobantes de cargue configurados.',
   })
   getCredentialsStatus(
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<SiigoCredentialsStatusResponseDto> {
     return this.siigoAuthService.getCredentialsStatus(
       getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('document-types')
+  @ApiOperation({
+    summary: 'Listar comprobantes SIIGO (document types)',
+    description:
+      'Consulta GET /v1/document-types de SIIGO filtrado por type=DS (Documento soporte) o type=FC (Factura de compra).',
+  })
+  listDocumentTypes(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListSiigoDocumentTypesQueryDto,
+  ): Promise<SiigoDocumentTypeCatalogItemDto[]> {
+    return this.siigoDocumentTypesService.listDocumentTypesForCompany(
+      getAuthenticatedCompanyId(user),
+      query.type,
+    );
+  }
+
+  @Put('document-types/selection')
+  @ApiOperation({
+    summary: 'Guardar comprobantes de cargue',
+    description:
+      'Persiste los ids de comprobante DS/FC seleccionados en integrations.credentials.document_types.',
+  })
+  saveDocumentTypeSelection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: SaveSiigoDocumentTypesRequestDto,
+  ): Promise<SaveSiigoDocumentTypesResponseDto> {
+    return this.siigoDocumentTypesService.saveDocumentTypeSelection(
+      getAuthenticatedCompanyId(user),
+      request,
     );
   }
 

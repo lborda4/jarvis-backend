@@ -152,7 +152,7 @@ export class NextPymeApiClient {
 
       if (response.status < 200 || response.status >= 300) {
         throw new BadGatewayException(
-          `NextPyme respondió con estado ${response.status} al consultar ${table}.`,
+          `No se pudieron cargar los catálogos (código ${response.status}).`,
         );
       }
 
@@ -174,7 +174,7 @@ export class NextPymeApiClient {
       }
 
       throw new BadGatewayException(
-        `No fue posible consultar la tabla maestra ${table} en NextPyme.`,
+        'No fue posible cargar el catálogo solicitado. Intenta nuevamente.',
       );
     }
   }
@@ -212,7 +212,7 @@ export class NextPymeApiClient {
 
       if (response.status < 200 || response.status >= 300) {
         throw new BadGatewayException(
-          `NextPyme respondió con estado ${response.status} al consultar resoluciones.`,
+          `No se pudieron consultar las resoluciones (código ${response.status}).`,
         );
       }
 
@@ -226,7 +226,7 @@ export class NextPymeApiClient {
       }
 
       throw new BadGatewayException(
-        'No fue posible consultar las resoluciones de NextPyme.',
+        'No fue posible consultar las resoluciones. Intenta nuevamente.',
       );
     }
   }
@@ -268,7 +268,7 @@ export class NextPymeApiClient {
         const detail = this.extractErrorMessage(response.data);
         throw new BadGatewayException(
           detail ||
-            `NextPyme respondió con estado ${response.status} al configurar la resolución.`,
+            `No se pudo configurar la resolución (código ${response.status}).`,
         );
       }
 
@@ -282,7 +282,7 @@ export class NextPymeApiClient {
       }
 
       throw new BadGatewayException(
-        'No fue posible configurar la resolución en NextPyme.',
+        'No fue posible configurar la resolución. Intenta nuevamente.',
       );
     }
   }
@@ -324,7 +324,7 @@ export class NextPymeApiClient {
         const detail = this.extractErrorMessage(response.data);
         throw new BadGatewayException(
           detail ||
-            `NextPyme respondió con estado ${response.status} al crear el documento soporte.`,
+            `No se pudo crear el documento soporte (código ${response.status}).`,
         );
       }
 
@@ -338,7 +338,7 @@ export class NextPymeApiClient {
       }
 
       throw new BadGatewayException(
-        'No fue posible crear el documento soporte en NextPyme.',
+        'No fue posible crear el documento soporte. Intenta nuevamente.',
       );
     }
   }
@@ -551,7 +551,7 @@ export class NextPymeApiClient {
 
     if (!token) {
       throw new ServiceUnavailableException(
-        'NextPyme no está configurado. Falta NEXTPYME_API_TOKEN.',
+        'La integración de facturación electrónica no está configurada. Contacta al administrador.',
       );
     }
 

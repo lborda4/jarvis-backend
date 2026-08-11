@@ -16,44 +16,56 @@ const TEMPLATE_HEADERS = [
   'Observaciones',
 ] as const;
 
-const TEMPLATE_EXAMPLE_ROWS: string[][] = [
-  [
-    '2026-06-10',
-    'NIT',
-    '900123456',
-    'Proveedor Ejemplo S.A.S.',
-    'DS',
-    '100',
-    'Servicio de consultoría',
-    '1',
-    '150000',
-    'Observaciones del documento soporte',
-  ],
-  [
-    '2026-06-10',
-    'CC',
-    '1234567890',
-    'Juan Pérez',
-    'DS',
-    '101',
-    'Papelería',
-    '2',
-    '25000',
-    'Compra de insumos de oficina',
-  ],
-  [
-    '2026-06-10',
-    'CC',
-    '1234567890',
-    'Juan Pérez',
-    'DS',
-    '101',
-    'Transporte',
-    '1',
-    '80000',
-    'Compra de insumos de oficina',
-  ],
-];
+function getTodayFormatted(): string {
+  const today = new Date();
+  const day = String(today.getDate()).padStart(2, '0');
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const year = today.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function buildTemplateExampleRows(): string[][] {
+  const todayFormatted = getTodayFormatted();
+
+  return [
+    [
+      todayFormatted,
+      'NIT',
+      '900123456',
+      'Proveedor Ejemplo S.A.S.',
+      'DS',
+      '100',
+      'Servicio de consultoría',
+      '1',
+      '150000',
+      'Observaciones del documento soporte',
+    ],
+    [
+      todayFormatted,
+      'CC',
+      '1234567890',
+      'Juan Pérez',
+      'DS',
+      '101',
+      'Papelería',
+      '2',
+      '25000',
+      'Compra de insumos de oficina',
+    ],
+    [
+      todayFormatted,
+      'CC',
+      '1234567890',
+      'Juan Pérez',
+      'DS',
+      '101',
+      'Transporte',
+      '1',
+      '80000',
+      'Compra de insumos de oficina',
+    ],
+  ];
+}
 
 export function buildSupportDocumentTemplateExcel(
   includeSupplierName = true,
@@ -62,9 +74,10 @@ export function buildSupportDocumentTemplateExcel(
   const headers = includeSupplierName
     ? [...TEMPLATE_HEADERS]
     : TEMPLATE_HEADERS.filter((_, index) => index !== supplierNameIndex);
+  const exampleRows = buildTemplateExampleRows();
   const rows = includeSupplierName
-    ? TEMPLATE_EXAMPLE_ROWS
-    : TEMPLATE_EXAMPLE_ROWS.map((row) =>
+    ? exampleRows
+    : exampleRows.map((row) =>
         row.filter((_, index) => index !== supplierNameIndex),
       );
   const worksheet = XLSX.utils.aoa_to_sheet([

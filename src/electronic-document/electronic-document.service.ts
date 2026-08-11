@@ -216,6 +216,29 @@ export class ElectronicDocumentService {
     return updated;
   }
 
+  /**
+   * Elimina un documento electrónico local que aún no está en estado "lista"
+   * (PURCHASE_CREATED). Aplica a Documento soporte y Factura de compra.
+   */
+  async deleteLocalDocument(
+    documentId: string,
+    companyId: string,
+  ): Promise<void> {
+    const document = await this.requireById(documentId, companyId);
+
+    if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+      throw new BadRequestException(
+        'No se puede eliminar un documento ya enviado. Solo se pueden borrar registros que no estén en lista.',
+      );
+    }
+
+    await this.electronicDocumentsRepository.deleteById(document.id);
+
+    this.logger.log(
+      `Documento electrónico eliminado de la BD (id=${document.id}, type=${document.electronicDocumentType}, status=${document.status})`,
+    );
+  }
+
   async createFromParsedInvoice(
     parsedInvoice: DianInvoiceResult,
     electronicDocumentType: ElectronicDocumentType,

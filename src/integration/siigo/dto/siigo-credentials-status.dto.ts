@@ -58,6 +58,12 @@ export class SiigoCredentialsStatusResponseDto {
   })
   hasAccounts: boolean;
 
+  @ApiProperty({
+    description:
+      'Indica si ya se configuraron los comprobantes de cargue requeridos por el plan (DS/FC).',
+  })
+  documentTypesConfigured: boolean;
+
   @ApiProperty({ type: SiigoSubscriptionStatusDto })
   subscription: SiigoSubscriptionStatusDto;
 
@@ -72,4 +78,16 @@ export class SiigoCredentialsStatusResponseDto {
     description: 'Partner ID configurado para la empresa activa.',
   })
   partner_id?: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Comprobante DS seleccionado para Documento soporte.',
+  })
+  supportDocumentTypeId?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Comprobante FC seleccionado para Factura de compra.',
+  })
+  purchaseInvoiceTypeId?: number | null;
 }

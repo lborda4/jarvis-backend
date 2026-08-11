@@ -541,7 +541,7 @@ export class JarvisSupportDocumentSendService {
       throw new BadGatewayException(
         error instanceof Error
           ? error.message
-          : 'Error inesperado al crear Documento Soporte en NextPyme',
+          : 'Error inesperado al crear el Documento Soporte.',
       );
     }
   }

@@ -1,6 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { GroupedSupportDocument } from '../../electronic-document/interfaces/support-document-import.interface';
 
+/**
+ * Normaliza fechas de Documento soporte a YYYY-MM-DD (interno).
+ * Acepta en Excel: dd/mm/aaaa, dd-mm-aaaa y también aaaa-mm-dd.
+ */
 export function normalizeSupportDocumentIssueDate(value?: string): string {
   const trimmed = value?.trim() ?? '';
 
@@ -18,16 +22,19 @@ export function normalizeSupportDocumentIssueDate(value?: string): string {
     return isoMatch[1];
   }
 
-  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const dayMonthYearMatch = trimmed.match(
+    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/,
+  );
 
-  if (slashMatch) {
-    const day = slashMatch[1].padStart(2, '0');
-    const month = slashMatch[2].padStart(2, '0');
-    return `${slashMatch[3]}-${month}-${day}`;
+  if (dayMonthYearMatch) {
+    const day = dayMonthYearMatch[1].padStart(2, '0');
+    const month = dayMonthYearMatch[2].padStart(2, '0');
+    const year = dayMonthYearMatch[3];
+    return `${year}-${month}-${day}`;
   }
 
   throw new BadRequestException(
-    'La fecha de emisión debe tener formato YYYY-MM-DD.',
+    'La fecha de emisión debe tener formato día/mes/año (ej. 10/06/2026).',
   );
 }
 

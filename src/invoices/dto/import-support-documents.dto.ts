@@ -28,7 +28,7 @@ export class ImportSupportDocumentsRequestDto {
 
   @ApiPropertyOptional({
     description:
-      'Fecha de emisión (YYYY-MM-DD) enviada por el front. Si no se envía, se usa la del Excel cuando exista.',
+      'Fecha de emisión en formato día/mes/año (ej. 10/06/2026). Si no se envía, se usa la del Excel cuando exista.',
     example: '2026-06-10',
   })
   issueDate?: string;

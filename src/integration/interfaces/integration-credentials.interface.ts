@@ -1,9 +1,16 @@
+export interface SiigoDocumentTypeSelection {
+  support_document_id?: number;
+  purchase_invoice_id?: number;
+}
+
 export interface SiigoCredentials {
   username: string;
   access_key: string;
   partner_id?: string;
   token?: string;
   expires_at?: string;
+  /** Comprobantes de cargue seleccionados en el setup (DS / FC). */
+  document_types?: SiigoDocumentTypeSelection;
 }
 
 import { JarvisResolutionKind } from '../jarvis/enums/jarvis-resolution-kind.enum';

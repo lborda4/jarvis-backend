@@ -1,4 +1,12 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -57,6 +65,23 @@ export class ElectronicDocumentController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ElectronicDocumentCompanyOptionDto[]> {
     return this.electronicDocumentService.listCompanyOptions(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Delete(':documentId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Eliminar documento electrónico local',
+    description:
+      'Borra de la base de datos un Documento soporte o Factura de compra que aún no esté en estado lista (enviado).',
+  })
+  async deleteDocument(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('documentId') documentId: string,
+  ): Promise<void> {
+    await this.electronicDocumentService.deleteLocalDocument(
+      documentId,
       getAuthenticatedCompanyId(user),
     );
   }

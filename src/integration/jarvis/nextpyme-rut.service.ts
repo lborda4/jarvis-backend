@@ -68,7 +68,7 @@ export class NextPymeRutService {
 
       if (response.status < 200 || response.status >= 300) {
         throw new BadGatewayException(
-          `NextPyme respondió con estado ${response.status}.`,
+          `No se pudo consultar el documento (código ${response.status}). Intenta nuevamente.`,
         );
       }
 
@@ -82,7 +82,7 @@ export class NextPymeRutService {
       }
 
       throw new BadGatewayException(
-        'No fue posible consultar el documento en NextPyme. Intenta nuevamente.',
+        'No fue posible consultar el documento. Intenta nuevamente.',
       );
     }
   }
@@ -212,7 +212,7 @@ export class NextPymeRutService {
 
     if (!token) {
       throw new ServiceUnavailableException(
-        'La consulta de documentos no está configurada. Falta NEXTPYME_API_TOKEN.',
+        'La consulta de documentos no está configurada. Contacta al administrador.',
       );
     }
 

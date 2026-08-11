@@ -105,8 +105,11 @@ export class CreateAdminCompanyRequestDto {
   })
   personType: CompanyPersonType;
 
-  @ApiProperty({ type: AdminCompanyResponsibleDto })
-  responsible: AdminCompanyResponsibleDto;
+  @ApiPropertyOptional({
+    type: AdminCompanyResponsibleDto,
+    description: 'Persona a cargo (opcional).',
+  })
+  responsible?: AdminCompanyResponsibleDto;
 
   @ApiProperty({
     enum: IntegrationProvider,
