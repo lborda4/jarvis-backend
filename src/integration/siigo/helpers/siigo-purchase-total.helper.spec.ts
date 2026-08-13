@@ -4,6 +4,7 @@ import {
   calculateSiigoPurchasePaymentValue,
   calculateSiigoSupportDocumentPaymentValue,
   roundMoney,
+  roundSiigoAmount,
 } from './siigo-purchase-total.helper';
 
 describe('siigo-purchase-total.helper', () => {
@@ -55,6 +56,29 @@ describe('siigo-purchase-total.helper', () => {
     );
 
     expect(total).toBe(83300);
+  });
+
+  it('redondea a pesos enteros en /purchases/send cuando el precio trae decimales reales (caso reportado en producción)', () => {
+    // El precio no es un número redondo porque viene de dividir el total
+    // real de la factura entre (1 + %IVA) — con roundMoney (2 decimales)
+    // da 111176.45 y SIIGO lo rechaza con invalid_total_payments porque su
+    // "total purchase calculated" es 111176 (pesos enteros, sin decimales).
+    const taxesCatalog = [
+      { id: 11792, name: 'IVA 5%', type: 'IVA', percentage: 5, active: true },
+    ];
+
+    const totalWithCentsRounding = calculateSiigoSupportDocumentPaymentValue(
+      [{ quantity: 1, price: 105882.33, taxes: [{ id: 11792 }] }],
+      taxesCatalog,
+    );
+    expect(totalWithCentsRounding).toBe(111176.45);
+
+    const totalForPurchaseSend = calculateSiigoSupportDocumentPaymentValue(
+      [{ quantity: 1, price: 105882.33, taxes: [{ id: 11792 }] }],
+      taxesCatalog,
+      { roundAmount: roundSiigoAmount },
+    );
+    expect(totalForPurchaseSend).toBe(111176);
   });
 
   it('resta Retefuente del valor de pago en documento soporte', () => {

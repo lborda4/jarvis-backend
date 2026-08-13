@@ -16,12 +16,7 @@ import { SIIGO_DEFAULT_ITEM_TYPE } from './constants/supplier-configuration.cons
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
 import { getSiigoIntegration, normalizeSupplierDocument } from './helpers/siigo-context.helper';
-import { handleSiigoApiError } from './helpers/siigo-error.helper';
-import {
-  isSiigoRateLimitError,
-  isSiigoUnauthorizedError,
-  sleep,
-} from './helpers/siigo-auth.helper';
+import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
 import { getSiigoSupplierName } from './helpers/siigo-supplier.helper';
 import { mapElectronicDocumentPayloadToSiigoSupplier } from './mappers/electronic-document-to-siigo-supplier.mapper';
 import { mapSiigoCustomerToCreatedSupplierResponse } from './mappers/siigo-customer-to-supplier-response.mapper';
@@ -126,16 +121,9 @@ export class SiigoSupplierCreationService {
       personType,
     );
 
-    console.log('[SIIGO supplier] ANTES crear tercero', {
-      documentId,
-      identification: siigoPayload.identification,
-      idType: siigoPayload.id_type,
-      personType: siigoPayload.person_type,
-      name: siigoPayload.name,
-      checkDigit: siigoPayload.check_digit ?? null,
-      address: siigoPayload.address ?? null,
-      phones: siigoPayload.phones ?? null,
-    });
+    this.logger.log(
+      `[documentId=${documentId}] Creando tercero en SIIGO (identification=${siigoPayload.identification}, idType=${siigoPayload.id_type}, personType=${siigoPayload.person_type})`,
+    );
 
     try {
       const branchOffice = 0;
@@ -153,10 +141,9 @@ export class SiigoSupplierCreationService {
           `[documentId=${documentId}] Tercero ya existe en SIIGO (nit=${supplier.normalizedDocumentNumber}); se reutiliza sin crear duplicado`,
         );
       } else {
-        console.log('[SIIGO supplier] DESPUÉS crear tercero OK', {
-          documentId,
-          siigoCustomerId: siigoSupplier.id,
-        });
+        this.logger.log(
+          `[documentId=${documentId}] Tercero creado en SIIGO (siigoCustomerId=${siigoSupplier.id})`,
+        );
       }
 
       return this.completeSupplierCreation(
@@ -171,11 +158,6 @@ export class SiigoSupplierCreationService {
         `[documentId=${documentId}] Error al crear tercero en SIIGO`,
         error instanceof Error ? error.stack : String(error),
       );
-
-      console.error('[SIIGO supplier] error crear tercero', {
-        documentId,
-        message: error instanceof Error ? error.message : String(error),
-      });
 
       if (error instanceof BadRequestException) {
         throw error;
@@ -244,72 +226,38 @@ export class SiigoSupplierCreationService {
     supplierDocument: string,
     branchOffice: number,
     companyId: string,
-    attempt = 0,
   ): Promise<SiigoCustomer | null> {
-    let authContext = await this.siigoAuthService.getValidAuthContext(companyId);
-
-    try {
-      return await this.siigoSupplierService.findSupplierByNit(
-        authContext.accessToken,
-        supplierDocument,
-        branchOffice,
-        authContext.partnerId,
-      );
-    } catch (error) {
-      if (isSiigoUnauthorizedError(error) && attempt < 1) {
-        authContext = await this.siigoAuthService.forceRefreshAuthContext(companyId);
-
-        return this.findSupplierInSiigoWithRetries(
+    return executeSiigoRequestWithRetries(
+      this.siigoAuthService,
+      companyId,
+      this.logger,
+      'consultar tercero',
+      (accessToken, partnerId) =>
+        this.siigoSupplierService.findSupplierByNit(
+          accessToken,
           supplierDocument,
           branchOffice,
-          companyId,
-          attempt + 1,
-        );
-      }
-
-      if (isSiigoRateLimitError(error) && attempt < 2) {
-        await sleep(1500);
-
-        return this.findSupplierInSiigoWithRetries(
-          supplierDocument,
-          branchOffice,
-          companyId,
-          attempt + 1,
-        );
-      }
-
-      handleSiigoApiError(this.logger, error, 'consultar tercero');
-    }
+          partnerId,
+        ),
+    );
   }
 
   private async createSupplierInSiigoWithRetries(
     payload: SiigoSupplierRequestDto,
     companyId: string,
-    attempt = 0,
   ): Promise<SiigoCustomer> {
-    let authContext = await this.siigoAuthService.getValidAuthContext(companyId);
-
-    try {
-      return await this.siigoSupplierService.createSupplier(
-        authContext.accessToken,
-        payload,
-        authContext.partnerId,
-      );
-    } catch (error) {
-      if (isSiigoUnauthorizedError(error) && attempt < 1) {
-        authContext = await this.siigoAuthService.forceRefreshAuthContext(companyId);
-
-        return this.createSupplierInSiigoWithRetries(payload, companyId, attempt + 1);
-      }
-
-      if (isSiigoRateLimitError(error) && attempt < 2) {
-        await sleep(1500);
-
-        return this.createSupplierInSiigoWithRetries(payload, companyId, attempt + 1);
-      }
-
-      handleSiigoApiError(this.logger, error, 'crear tercero');
-    }
+    return executeSiigoRequestWithRetries(
+      this.siigoAuthService,
+      companyId,
+      this.logger,
+      'crear tercero',
+      (accessToken, partnerId) =>
+        this.siigoSupplierService.createSupplier(
+          accessToken,
+          payload,
+          partnerId,
+        ),
+    );
   }
 
   private async createSupplierConfiguration(

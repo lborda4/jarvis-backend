@@ -34,6 +34,8 @@ import {
   AUTH_ERROR_MESSAGE,
 } from './constants/auth-error.constants';
 import { UserRole } from './enums/user-role.enum';
+import { resolveActiveCompanyId } from './helpers/authenticated-company.helper';
+import { normalizeCompanyInviteCode } from '../company/helpers/company-invite-code.helper';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -52,8 +54,9 @@ export class AuthService {
     const email = request?.email?.trim().toLowerCase();
     const password = request?.password ?? '';
     const companyNit = this.normalizeNit(request?.nit);
+    const inviteCode = normalizeCompanyInviteCode(request?.inviteCode);
 
-    this.validateRegisterInput(name, email, password, companyNit);
+    this.validateRegisterInput(name, email, password, companyNit, inviteCode);
 
     const existingUser = await this.usersRepository.findByEmail(email);
 
@@ -86,6 +89,13 @@ export class AuthService {
           throw new NotFoundException({
             message: AUTH_ERROR_MESSAGE.COMPANY_NOT_REGISTERED,
             code: AUTH_ERROR_CODE.COMPANY_NOT_REGISTERED,
+          });
+        }
+
+        if (company.inviteCode !== inviteCode) {
+          throw new UnauthorizedException({
+            message: AUTH_ERROR_MESSAGE.INVALID_INVITE_CODE,
+            code: AUTH_ERROR_CODE.INVALID_INVITE_CODE,
           });
         }
 
@@ -230,15 +240,13 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
-    const companyId = payload.companyId?.trim() ?? '';
+    const companyId = resolveActiveCompanyId(
+      payload.companyId,
+      user.role,
+      'El token no contiene una empresa activa válida.',
+    );
 
     if (!companyId) {
-      if (user.role !== UserRole.ADMIN) {
-        throw new UnauthorizedException(
-          'El token no contiene una empresa activa válida.',
-        );
-      }
-
       const tokens = await this.generateTokens(user, null);
 
       return {
@@ -275,15 +283,13 @@ export class AuthService {
     }
 
     const companies = await this.listCompaniesForUser(user.id);
-    const companyId = currentUser.companyId?.trim() ?? '';
+    const companyId = resolveActiveCompanyId(
+      currentUser.companyId,
+      user.role,
+      'La empresa activa no está asociada al usuario.',
+    );
 
     if (!companyId) {
-      if (user.role !== UserRole.ADMIN) {
-        throw new UnauthorizedException(
-          'La empresa activa no está asociada al usuario.',
-        );
-      }
-
       return buildAuthMeResponse(user, null, companies);
     }
 
@@ -384,6 +390,7 @@ export class AuthService {
     email?: string,
     password?: string,
     companyNit?: string,
+    inviteCode?: string,
   ): void {
     if (!name) {
       throw new BadRequestException('El nombre es obligatorio.');
@@ -401,6 +408,12 @@ export class AuthService {
 
     if (!companyNit) {
       throw new BadRequestException('El NIT de la empresa es obligatorio.');
+    }
+
+    if (!inviteCode) {
+      throw new BadRequestException(
+        'El código de invitación de la empresa es obligatorio.',
+      );
     }
   }
 

@@ -2,6 +2,10 @@ export class SiigoPurchaseItemTaxDto {
   id: number;
 }
 
+export class SiigoPurchaseRetentionDto {
+  id: number;
+}
+
 export class SiigoPurchaseItemDto {
   type: string;
   code: string;
@@ -31,6 +35,7 @@ export class SiigoPurchaseRequestDto {
     number: string;
   };
   observations?: string;
+  retentions?: SiigoPurchaseRetentionDto[];
   items: SiigoPurchaseItemDto[];
   payments: SiigoPurchasePaymentDto[];
 }

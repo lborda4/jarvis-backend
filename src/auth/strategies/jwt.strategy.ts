@@ -9,7 +9,7 @@ import {
   AuthTokenPayload,
 } from '../interfaces/jwt-payload.interface';
 import { AppConfiguration } from '../../config/configuration';
-import { UserRole } from '../enums/user-role.enum';
+import { resolveActiveCompanyId } from '../helpers/authenticated-company.helper';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -30,20 +30,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Token de acceso inválido.');
     }
 
-    const user = await this.usersRepository.findById(payload.sub);
+    const requestedCompanyId = payload.companyId?.trim() ?? '';
 
-    if (!user?.active) {
-      throw new UnauthorizedException('Usuario inactivo o no encontrado.');
-    }
+    // Sin empresa en el token (solo posible para ADMIN): un único query.
+    if (!requestedCompanyId) {
+      const user = await this.usersRepository.findById(payload.sub);
 
-    const companyId = payload.companyId?.trim() ?? '';
-
-    if (!companyId) {
-      if (user.role !== UserRole.ADMIN) {
-        throw new UnauthorizedException(
-          'El token no contiene una empresa activa válida.',
-        );
+      if (!user?.active) {
+        throw new UnauthorizedException('Usuario inactivo o no encontrado.');
       }
+
+      resolveActiveCompanyId(
+        payload.companyId,
+        user.role,
+        'El token no contiene una empresa activa válida.',
+      );
 
       return {
         userId: user.id,
@@ -52,21 +53,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       };
     }
 
+    // Con empresa: un único query trae usuario + vínculo + empresa juntos,
+    // en vez de dos consultas separadas en cada request autenticado.
     const userCompany =
       await this.userCompaniesRepository.findByUserIdAndCompanyId(
         payload.sub,
-        companyId,
+        requestedCompanyId,
       );
 
-    if (!userCompany?.company) {
+    if (!userCompany?.user?.active) {
+      throw new UnauthorizedException('Usuario inactivo o no encontrado.');
+    }
+
+    if (!userCompany.company) {
       throw new UnauthorizedException(
         'La empresa activa del token no está asociada al usuario.',
       );
     }
 
     return {
-      userId: user.id,
-      email: user.email,
+      userId: userCompany.user.id,
+      email: userCompany.user.email,
       companyId: userCompany.companyId,
     };
   }

@@ -22,6 +22,7 @@ export class ImportSessionStore implements OnModuleDestroy {
   private readonly redis?: Redis;
   private readonly memoryStore = new Map<string, MemorySessionEntry>();
   private readonly ttlSeconds: number;
+  private cleanupInterval?: NodeJS.Timeout;
 
   constructor(
     private readonly configService: ConfigService<AppConfiguration, true>,
@@ -41,11 +42,34 @@ export class ImportSessionStore implements OnModuleDestroy {
     this.logger.warn(
       'REDIS_URL no configurado. Usando almacenamiento temporal en memoria.',
     );
+
+    // Sin Redis, expiresAt nunca se revisaba: el mapa en memoria crecía sin
+    // límite mientras viviera el proceso. Barremos entradas vencidas
+    // periódicamente para no acumularlas indefinidamente.
+    const cleanupIntervalMs = Math.min(this.ttlSeconds * 1000, 5 * 60 * 1000);
+    this.cleanupInterval = setInterval(
+      () => this.evictExpiredMemoryEntries(),
+      cleanupIntervalMs,
+    ).unref();
   }
 
   async onModuleDestroy(): Promise<void> {
     if (this.redis) {
       await this.redis.quit();
+    }
+
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+  }
+
+  private evictExpiredMemoryEntries(): void {
+    const now = Date.now();
+
+    for (const [key, entry] of this.memoryStore) {
+      if (entry.expiresAt <= now) {
+        this.memoryStore.delete(key);
+      }
     }
   }
 

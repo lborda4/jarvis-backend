@@ -32,7 +32,7 @@ export class UserCompaniesRepository {
   ): Promise<UserCompany | null> {
     return this.repository.findOne({
       where: { userId, companyId },
-      relations: { company: true },
+      relations: { user: true, company: true },
     });
   }
 

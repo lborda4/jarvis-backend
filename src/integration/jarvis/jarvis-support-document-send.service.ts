@@ -5,6 +5,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { withPostgresAdvisoryLock } from '../../common/helpers/postgres-advisory-lock.helper';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
@@ -18,6 +20,10 @@ import { JarvisTaxRegime } from './enums/jarvis-tax-regime.enum';
 import { JarvisTaxResponsibility } from './enums/jarvis-tax-responsibility.enum';
 import { JarvisVatRegime } from './enums/jarvis-vat-regime.enum';
 import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
+import {
+  normalizeJarvisDocumentNumber,
+  normalizeJarvisDocumentType,
+} from './helpers/jarvis-document-number.helper';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import {
@@ -48,6 +54,7 @@ export class JarvisSupportDocumentSendService {
   private readonly logger = new Logger(JarvisSupportDocumentSendService.name);
 
   constructor(
+    private readonly dataSource: DataSource,
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly jarvisTercerosRepository: JarvisTercerosRepository,
@@ -59,12 +66,14 @@ export class JarvisSupportDocumentSendService {
   ) {}
 
   async listCatalogs(): Promise<JarvisCatalogsResponseDto> {
-    const [taxes, paymentMethods, paymentForms, currencies] = await Promise.all([
-      this.nextPymeMasterCatalogService.getTaxes(),
-      this.nextPymeMasterCatalogService.getPaymentMethods(),
-      this.nextPymeMasterCatalogService.getPaymentForms(),
-      this.nextPymeMasterCatalogService.getTypeCurrencies(),
-    ]);
+    const [taxes, paymentMethods, paymentForms, currencies] = await Promise.all(
+      [
+        this.nextPymeMasterCatalogService.getTaxes(),
+        this.nextPymeMasterCatalogService.getPaymentMethods(),
+        this.nextPymeMasterCatalogService.getPaymentForms(),
+        this.nextPymeMasterCatalogService.getTypeCurrencies(),
+      ],
+    );
 
     return {
       taxes: taxes.map((tax) => ({
@@ -98,7 +107,7 @@ export class JarvisSupportDocumentSendService {
     companyId: string,
   ): Promise<CreateManualJarvisSupportDocumentResponseDto> {
     const issueDate = request.issueDate?.trim();
-    const supplierIdentification = this.normalizeDocument(
+    const supplierIdentification = normalizeJarvisDocumentNumber(
       request.supplierIdentification ?? '',
     );
     const documentPrefix = request.documentPrefix?.trim() || 'DS';
@@ -128,7 +137,7 @@ export class JarvisSupportDocumentSendService {
       );
     }
 
-    const documentType = this.normalizeDocumentType(
+    const documentType = normalizeJarvisDocumentType(
       request.supplierDocumentType,
     );
     const tercero =
@@ -145,7 +154,9 @@ export class JarvisSupportDocumentSendService {
     }
 
     const supplierName =
-      request.supplierName?.trim() || tercero?.name?.trim() || supplierIdentification;
+      request.supplierName?.trim() ||
+      tercero?.name?.trim() ||
+      supplierIdentification;
 
     const rows: SupportDocumentExcelRow[] = items.map((item, index) => {
       const description = item.description?.trim();
@@ -273,7 +284,7 @@ export class JarvisSupportDocumentSendService {
       companyId,
       provider: IntegrationProvider.JARVIS,
       documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
-      quantity: 0,
+      quantity: 1,
     });
 
     const documentId = request.documentId?.trim();
@@ -281,8 +292,10 @@ export class JarvisSupportDocumentSendService {
       throw new BadRequestException('El campo documentId es obligatorio.');
     }
 
-    const electronicDocument =
-      await this.electronicDocumentService.requireById(documentId, companyId);
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
 
     if (
       electronicDocument.electronicDocumentType !==
@@ -293,7 +306,9 @@ export class JarvisSupportDocumentSendService {
       );
     }
 
-    if (electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (
+      electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED
+    ) {
       throw new BadRequestException(
         'El Documento Soporte ya fue enviado a DIAN para este registro.',
       );
@@ -311,7 +326,7 @@ export class JarvisSupportDocumentSendService {
       );
     }
 
-    const supplierDocumentNumber = this.normalizeDocument(
+    const supplierDocumentNumber = normalizeJarvisDocumentNumber(
       electronicDocument.payload.supplier.documentNumber ||
         electronicDocument.documentNumberThird ||
         '',
@@ -323,7 +338,7 @@ export class JarvisSupportDocumentSendService {
       );
     }
 
-    const documentType = this.normalizeDocumentType(
+    const documentType = normalizeJarvisDocumentType(
       electronicDocument.payload.supplier.documentType ||
         electronicDocument.documentTypeThird,
     );
@@ -348,176 +363,189 @@ export class JarvisSupportDocumentSendService {
       electronicDocument.payload.invoice.issueDate ||
       new Date().toISOString().slice(0, 10);
 
+    const resolutionLockKey = `jarvis-resolution:${companyId}:${JarvisResolutionKind.SUPPORT_DOCUMENT}`;
+
     try {
-      const numbering = await this.jarvisSetupService.allocateResolutionNumber(
-        companyId,
-        JarvisResolutionKind.SUPPORT_DOCUMENT,
-      );
-      const municipalityId =
-        await this.nextPymeMasterCatalogService.resolveMunicipalityId(
-          credentials.municipality,
-          credentials.city ?? company?.name,
-          electronicDocument.payload.supplier.cityCode,
-        );
-      const liabilityId =
-        await this.nextPymeMasterCatalogService.resolveLiabilityId(
-          credentials.tax_responsibility ??
-            JarvisTaxResponsibility.NOT_APPLICABLE,
-        );
-      const terceroVatRegime =
-        tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
-          ? JarvisVatRegime.NON_RESPONSIBLE
-          : tercero.taxRegime
-            ? JarvisVatRegime.RESPONSIBLE
-            : credentials.vat_regime;
-      const regimeId = await this.nextPymeMasterCatalogService.resolveRegimeId(
-        terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
-      );
+      return await withPostgresAdvisoryLock(
+        this.dataSource,
+        resolutionLockKey,
+        async () => {
+          const numbering =
+            await this.jarvisSetupService.allocateResolutionNumber(
+              companyId,
+              JarvisResolutionKind.SUPPORT_DOCUMENT,
+            );
+          const municipalityId =
+            await this.nextPymeMasterCatalogService.resolveMunicipalityId(
+              credentials.municipality,
+              credentials.city ?? company?.name,
+              electronicDocument.payload.supplier.cityCode,
+            );
+          const liabilityId =
+            await this.nextPymeMasterCatalogService.resolveLiabilityId(
+              credentials.tax_responsibility ??
+                JarvisTaxResponsibility.NOT_APPLICABLE,
+            );
+          const terceroVatRegime =
+            tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
+              ? JarvisVatRegime.NON_RESPONSIBLE
+              : tercero.taxRegime
+                ? JarvisVatRegime.RESPONSIBLE
+                : credentials.vat_regime;
+          const regimeId =
+            await this.nextPymeMasterCatalogService.resolveRegimeId(
+              terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
+            );
 
-      this.logger.log(
-        `[documentId=${documentId}] Numeración local ${JSON.stringify({
-          resolutionNumber: numbering.formNumber,
-          prefix: numbering.prefix,
-          number: numbering.number,
-          toNumber: numbering.toNumber,
-          municipalityId,
-          liabilityId,
-          regimeId,
-          terceroVatRegime,
-          typeDocumentIdentificationId:
-            DOCUMENT_TYPE_IDENTIFICATION_FALLBACK[documentType] ?? 6,
-        })}`,
-      );
+          this.logger.log(
+            `[documentId=${documentId}] Numeración local ${JSON.stringify({
+              resolutionNumber: numbering.formNumber,
+              prefix: numbering.prefix,
+              number: numbering.number,
+              toNumber: numbering.toNumber,
+              municipalityId,
+              liabilityId,
+              regimeId,
+              terceroVatRegime,
+              typeDocumentIdentificationId:
+                DOCUMENT_TYPE_IDENTIFICATION_FALLBACK[documentType] ?? 6,
+            })}`,
+          );
 
-      const totals = this.buildMonetaryTotals(electronicDocument.payload);
-      const taxTotals = this.buildTaxTotals(
-        electronicDocument.payload,
-        request.retentions ?? [],
-      );
-      const invoiceLines = this.buildInvoiceLines(
-        electronicDocument.payload,
-        issueDate,
-        taxTotals,
-      );
-      const currencyId =
-        await this.nextPymeMasterCatalogService.resolveCurrencyId(
-          electronicDocument.payload.invoice.currency,
-        );
+          const totals = this.buildMonetaryTotals(electronicDocument.payload);
+          const taxTotals = this.buildTaxTotals(
+            electronicDocument.payload,
+            request.retentions ?? [],
+          );
+          const invoiceLines = this.buildInvoiceLines(
+            electronicDocument.payload,
+            issueDate,
+            taxTotals,
+          );
+          const currencyId =
+            await this.nextPymeMasterCatalogService.resolveCurrencyId(
+              electronicDocument.payload.invoice.currency,
+            );
 
-      const payload = {
-        type_document_id:
-          this.nextPymeMasterCatalogService.getSupportDocumentTypeId(),
-        number: numbering.number,
-        date: issueDate,
-        prefix: numbering.prefix,
-        ...(currencyId ? { type_currency_id: currencyId } : {}),
-        ...(request.observations?.trim() ||
-        electronicDocument.payload.observations?.trim()
-          ? {
-              notes:
-                request.observations?.trim() ||
-                electronicDocument.payload.observations?.trim(),
-            }
-          : {}),
-        seller: {
-          identification_number: Number(tercero.documentNumber),
-          ...(tercero.checkDigit
-            ? { dv: Number(tercero.checkDigit) || tercero.checkDigit }
-            : {}),
-          name: tercero.name,
-          phone: tercero.phone || credentials.phone || '0000000000',
-          address: tercero.address || credentials.address || 'SIN DIRECCION',
-          email: tercero.email || credentials.email || 'sin-email@example.com',
-          type_document_identification_id:
-            DOCUMENT_TYPE_IDENTIFICATION_FALLBACK[documentType] ?? 6,
-          type_organization_id:
-            tercero.entityType === JarvisEntityType.NATURAL_PERSON ? 2 : 1,
-          municipality_id: municipalityId,
-          type_liability_id: liabilityId,
-          type_regime_id: regimeId,
-        },
-        ...(request.payment?.id
-          ? {
-              payment_form: {
-                payment_form_id: request.payment.payment_form_id ?? 1,
-                payment_method_id: request.payment.id,
-                payment_due_date: request.payment.due_date || issueDate,
-                duration_measure: String(
-                  this.daysBetween(
-                    issueDate,
-                    request.payment.due_date || issueDate,
-                  ),
-                ),
+          const payload = {
+            type_document_id:
+              this.nextPymeMasterCatalogService.getSupportDocumentTypeId(),
+            number: numbering.number,
+            date: issueDate,
+            prefix: numbering.prefix,
+            ...(currencyId ? { type_currency_id: currencyId } : {}),
+            ...(request.observations?.trim() ||
+            electronicDocument.payload.observations?.trim()
+              ? {
+                  notes:
+                    request.observations?.trim() ||
+                    electronicDocument.payload.observations?.trim(),
+                }
+              : {}),
+            seller: {
+              identification_number: Number(tercero.documentNumber),
+              ...(tercero.checkDigit
+                ? { dv: Number(tercero.checkDigit) || tercero.checkDigit }
+                : {}),
+              name: tercero.name,
+              phone: tercero.phone || credentials.phone || '0000000000',
+              address:
+                tercero.address || credentials.address || 'SIN DIRECCION',
+              email:
+                tercero.email || credentials.email || 'sin-email@example.com',
+              type_document_identification_id:
+                DOCUMENT_TYPE_IDENTIFICATION_FALLBACK[documentType] ?? 6,
+              type_organization_id:
+                tercero.entityType === JarvisEntityType.NATURAL_PERSON ? 2 : 1,
+              municipality_id: municipalityId,
+              type_liability_id: liabilityId,
+              type_regime_id: regimeId,
+            },
+            ...(request.payment?.id
+              ? {
+                  payment_form: {
+                    payment_form_id: request.payment.payment_form_id ?? 1,
+                    payment_method_id: request.payment.id,
+                    payment_due_date: request.payment.due_date || issueDate,
+                    duration_measure: String(
+                      this.daysBetween(
+                        issueDate,
+                        request.payment.due_date || issueDate,
+                      ),
+                    ),
+                  },
+                }
+              : {}),
+            legal_monetary_totals: totals,
+            ...(taxTotals.length > 0 ? { tax_totals: taxTotals } : {}),
+            invoice_lines: invoiceLines,
+          };
+
+          this.logger.log(
+            `[documentId=${documentId}] Body documento soporte -> NextPyme ${JSON.stringify(
+              payload,
+              null,
+              2,
+            )}`,
+          );
+
+          const created =
+            await this.nextPymeApiClient.createSupportDocument(payload);
+
+          this.logger.log(
+            `[documentId=${documentId}] Respuesta NextPyme ${JSON.stringify(created)}`,
+          );
+          const createdId = this.readCreatedId(created, numbering.number);
+          const createdConsecutive = this.readCreatedConsecutive(
+            created,
+            numbering.prefix,
+            numbering.number,
+          );
+          const createdNumber = this.readCreatedNumber(
+            created,
+            numbering.number,
+            createdConsecutive,
+          );
+          const createdCude = this.readCreatedCude(created);
+
+          await this.jarvisSetupService.commitResolutionNumber(
+            companyId,
+            JarvisResolutionKind.SUPPORT_DOCUMENT,
+            createdNumber,
+          );
+
+          const updatedDocument =
+            await this.electronicDocumentService.markPurchaseCreated(
+              documentId,
+              createdId,
+              companyId,
+              createdConsecutive,
+              {
+                ...electronicDocument.payload,
+                observations:
+                  request.observations?.trim() ||
+                  electronicDocument.payload.observations,
               },
-            }
-          : {}),
-        legal_monetary_totals: totals,
-        ...(taxTotals.length > 0 ? { tax_totals: taxTotals } : {}),
-        invoice_lines: invoiceLines,
-      };
+            );
 
-      this.logger.log(
-        `[documentId=${documentId}] Body documento soporte -> NextPyme ${JSON.stringify(
-          payload,
-          null,
-          2,
-        )}`,
-      );
+          this.logger.log(
+            `[documentId=${documentId}] Documento soporte enviado a NextPyme (id=${createdId}, consecutive=${createdConsecutive}, number=${createdNumber}, cude=${createdCude ?? 'n/a'})`,
+          );
 
-      const created = await this.nextPymeApiClient.createSupportDocument(payload);
-
-      this.logger.log(
-        `[documentId=${documentId}] Respuesta NextPyme ${JSON.stringify(created)}`,
-      );
-      const createdId = this.readCreatedId(created, numbering.number);
-      const createdConsecutive = this.readCreatedConsecutive(
-        created,
-        numbering.prefix,
-        numbering.number,
-      );
-      const createdNumber = this.readCreatedNumber(
-        created,
-        numbering.number,
-        createdConsecutive,
-      );
-      const createdCude = this.readCreatedCude(created);
-
-      await this.jarvisSetupService.commitResolutionNumber(
-        companyId,
-        JarvisResolutionKind.SUPPORT_DOCUMENT,
-        createdNumber,
-      );
-
-      const updatedDocument =
-        await this.electronicDocumentService.markPurchaseCreated(
-          documentId,
-          createdId,
-          companyId,
-          createdConsecutive,
-          {
-            ...electronicDocument.payload,
-            observations:
-              request.observations?.trim() ||
-              electronicDocument.payload.observations,
-          },
-        );
-
-      this.logger.log(
-        `[documentId=${documentId}] Documento soporte enviado a NextPyme (id=${createdId}, consecutive=${createdConsecutive}, number=${createdNumber}, cude=${createdCude ?? 'n/a'})`,
-      );
-
-      return {
-        success: true,
-        supportDocument: {
-          id: createdId,
-          number: createdNumber,
-          consecutive: createdConsecutive,
-          prefix: numbering.prefix,
-          date: issueDate,
-          cude: createdCude,
+          return {
+            success: true,
+            supportDocument: {
+              id: createdId,
+              number: createdNumber,
+              consecutive: createdConsecutive,
+              prefix: numbering.prefix,
+              date: issueDate,
+              cude: createdCude,
+            },
+            document: mapElectronicDocumentToResponse(updatedDocument),
+          };
         },
-        document: mapElectronicDocumentToResponse(updatedDocument),
-      };
+      );
     } catch (error) {
       await this.electronicDocumentService.updateStatus(
         documentId,
@@ -553,7 +581,9 @@ export class JarvisSupportDocumentSendService {
   ) {
     const lineExtension = this.toMoney(payload.totals.subtotal);
     const taxAmount = this.toMoney(payload.totals.iva);
-    const payable = this.toMoney(payload.totals.total || lineExtension + taxAmount);
+    const payable = this.toMoney(
+      payload.totals.total || lineExtension + taxAmount,
+    );
 
     return {
       line_extension_amount: this.formatMoney(lineExtension),
@@ -738,8 +768,7 @@ export class JarvisSupportDocumentSendService {
     fallbackNumber: number,
   ): string {
     const normalizedPrefix = prefix.trim().toUpperCase();
-    const message =
-      typeof payload.message === 'string' ? payload.message : '';
+    const message = typeof payload.message === 'string' ? payload.message : '';
     const messageMatch = message.match(/#\s*([A-Za-z0-9_-]+)/);
     if (messageMatch?.[1]) {
       return messageMatch[1].trim().toUpperCase();
@@ -779,30 +808,6 @@ export class JarvisSupportDocumentSendService {
     }
 
     return null;
-  }
-
-  private normalizeDocument(value: string): string {
-    return value.replace(/[^\dA-Za-z]/g, '').trim().toUpperCase();
-  }
-
-  private normalizeDocumentType(value?: string | null): string {
-    const normalized = String(value ?? '')
-      .trim()
-      .toUpperCase();
-
-    if (normalized.includes('CC') || normalized.includes('CEDULA')) {
-      return JarvisDocumentType.CC;
-    }
-
-    if (normalized.includes('CE') || normalized.includes('EXTRANJ')) {
-      return JarvisDocumentType.CE;
-    }
-
-    if (normalized.includes('PA') || normalized.includes('PASAPORTE')) {
-      return JarvisDocumentType.PA;
-    }
-
-    return JarvisDocumentType.NIT;
   }
 
   private toMoney(value: number): number {

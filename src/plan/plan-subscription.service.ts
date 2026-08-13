@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ElectronicDocument } from '../electronic-document/entities/electronic-document.entity';
+import { ElectronicDocumentStatus } from '../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../electronic-document/enums/electronic-document-type.enum';
 import { Integration } from '../integration/entities/integration.entity';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
@@ -20,6 +21,7 @@ export interface PlanSubscriptionSnapshot {
   startedAt: string | null;
   documentLimit: number | null;
   documentsUsed: number;
+  remaining: number | null;
   includedDocumentTypes: ElectronicDocumentType[];
   plan: {
     id: string;
@@ -226,20 +228,23 @@ export class PlanSubscriptionService {
     }
 
     const startedAt = integration.subscriptionStartedAt ?? integration.createdAt;
-    const primaryType = includedDocumentTypes[0] ?? null;
-    const documentsUsed = primaryType
-      ? await this.countDocumentsSince(
-          integration.companyId,
-          primaryType,
-          startedAt,
-        )
-      : 0;
+    const usagePerType = await Promise.all(
+      includedDocumentTypes.map((documentType) =>
+        this.countDocumentsSince(integration.companyId, documentType, startedAt),
+      ),
+    );
+    const documentsUsed = usagePerType.reduce((sum, count) => sum + count, 0);
+    const remaining =
+      plan.documentLimit == null
+        ? null
+        : Math.max(0, plan.documentLimit - documentsUsed);
 
     return {
       status: integration.subscriptionStatus,
       startedAt: integration.subscriptionStartedAt?.toISOString() ?? null,
       documentLimit: plan.documentLimit,
       documentsUsed,
+      remaining,
       includedDocumentTypes,
       plan: {
         id: plan.id,
@@ -262,6 +267,9 @@ export class PlanSubscriptionService {
       .andWhere('document.electronicDocumentType = :documentType', {
         documentType,
       })
+      .andWhere('document.status = :status', {
+        status: ElectronicDocumentStatus.PURCHASE_CREATED,
+      })
       .andWhere('document.createdAt >= :since', { since })
       .getCount();
   }
@@ -272,6 +280,7 @@ export class PlanSubscriptionService {
       startedAt: null,
       documentLimit: null,
       documentsUsed: 0,
+      remaining: null,
       includedDocumentTypes: [],
       plan: null,
     };

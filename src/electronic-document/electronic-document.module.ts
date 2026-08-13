@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyModule } from '../company/company.module';
 import { IntegrationModule } from '../integration/integration.module';
 import { JarvisModule } from '../integration/jarvis/jarvis.module';
+import { SiigoModule } from '../integration/siigo/siigo.module';
 import { PlanModule } from '../plan/plan.module';
 import { ElectronicDocumentController } from './electronic-document.controller';
 import { ElectronicDocumentService } from './electronic-document.service';
@@ -16,6 +17,7 @@ import { ElectronicDocumentsRepository } from './repositories/electronic-documen
     IntegrationModule,
     PlanModule,
     forwardRef(() => JarvisModule),
+    forwardRef(() => SiigoModule),
   ],
   controllers: [ElectronicDocumentController],
   providers: [ElectronicDocumentsRepository, ElectronicDocumentService],

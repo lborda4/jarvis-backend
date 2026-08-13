@@ -5,6 +5,10 @@ import {
   SupportDocumentExcelRow,
 } from '../../electronic-document/interfaces/support-document-import.interface';
 import { normalizeSupportDocumentType } from './support-document-type.helper';
+import {
+  convertDayMonthYearToIso,
+  matchIsoDate,
+} from '../../common/helpers/date-normalization.helper';
 
 const REQUIRED_COLUMNS_MESSAGE =
   'Fecha, Tipo de documento, Numero de documento, Prefijo, Consecutivo, Descripcion';
@@ -511,28 +515,11 @@ function normalizeDate(value: string): string {
     return new Date().toISOString().slice(0, 10);
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed;
-  }
-
-  const isoMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
-
-  if (isoMatch) {
-    return isoMatch[1];
-  }
-
-  const dayMonthYearMatch = trimmed.match(
-    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/,
+  return (
+    matchIsoDate(trimmed) ??
+    convertDayMonthYearToIso(trimmed, { allowDotSeparator: true }) ??
+    trimmed
   );
-
-  if (dayMonthYearMatch) {
-    const day = dayMonthYearMatch[1].padStart(2, '0');
-    const month = dayMonthYearMatch[2].padStart(2, '0');
-    const year = dayMonthYearMatch[3];
-    return `${year}-${month}-${day}`;
-  }
-
-  return trimmed;
 }
 
 function normalizeOptionalDate(value: string): string | undefined {

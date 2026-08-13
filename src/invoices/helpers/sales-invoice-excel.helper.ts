@@ -4,6 +4,10 @@ import {
   DIAN_SALES_INVOICE_DOCUMENT_TYPE,
   EXCEL_COLUMNS,
 } from '../../common/constants/excel.constants';
+import {
+  convertDayMonthYearToIso,
+  matchIsoDate,
+} from '../../common/helpers/date-normalization.helper';
 import type { ElectronicDocumentPayload } from '../../electronic-document/interfaces/electronic-document-payload.interface';
 import * as XLSX from 'xlsx';
 
@@ -79,22 +83,9 @@ export function normalizeDianDate(value: string): string {
     return '';
   }
 
-  const match = trimmed.match(
-    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/,
+  return (
+    convertDayMonthYearToIso(trimmed) ?? matchIsoDate(trimmed) ?? trimmed
   );
-
-  if (match) {
-    const day = match[1].padStart(2, '0');
-    const month = match[2].padStart(2, '0');
-    const year = match[3];
-    return `${year}-${month}-${day}`;
-  }
-
-  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-    return trimmed.slice(0, 10);
-  }
-
-  return trimmed;
 }
 
 function isSalesInvoiceReceived(row: DianSalesInvoiceRow): boolean {

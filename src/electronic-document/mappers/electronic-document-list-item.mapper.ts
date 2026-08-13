@@ -6,6 +6,7 @@ import {
   SupplierPaymentMethodPreference,
   SupplierRetentionPreference,
 } from '../../integration/interfaces/supplier-mapping-value.interface';
+import { SuggestedItemTax } from '../../integration/siigo/helpers/siigo-item-tax-suggestion.helper';
 
 export function mapElectronicDocumentToListItem(
   document: ElectronicDocument,
@@ -13,6 +14,7 @@ export function mapElectronicDocumentToListItem(
   suggestedPaymentMethod: SupplierPaymentMethodPreference | null = null,
   suggestedRetentions: SupplierRetentionPreference[] = [],
   suggestedCostCenter: SupplierCostCenterPreference | null = null,
+  itemTaxSuggestions: Array<SuggestedItemTax | null> = [],
 ): ElectronicDocumentListItemDto {
   return {
     id: document.id,
@@ -41,7 +43,7 @@ export function mapElectronicDocumentToListItem(
     suggestedCostCenter,
     processingStatus: document.processingStatus,
     observations: document.payload?.observations?.trim() || null,
-    items: mapDocumentItems(document),
+    items: mapDocumentItems(document, itemTaxSuggestions),
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
   };
@@ -49,6 +51,7 @@ export function mapElectronicDocumentToListItem(
 
 function mapDocumentItems(
   document: ElectronicDocument,
+  itemTaxSuggestions: Array<SuggestedItemTax | null>,
 ): ElectronicDocumentListItemDto['items'] {
   const items = document.payload?.items;
 
@@ -56,10 +59,11 @@ function mapDocumentItems(
     return [];
   }
 
-  return items.map((item) => ({
+  return items.map((item, index) => ({
     description: item.descripcion?.trim() || 'Ítem importado',
     quantity: item.cantidad > 0 ? item.cantidad : 1,
     unitValue: item.valorUnitario > 0 ? item.valorUnitario : item.total,
     total: item.total,
+    suggestedTax: itemTaxSuggestions[index] ?? null,
   }));
 }

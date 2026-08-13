@@ -8,8 +8,13 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { AppConfiguration } from '../../../config/configuration';
-
-type UnknownRecord = Record<string, unknown>;
+import {
+  collectRecords,
+  findInRecord,
+  normalizeRecordKey,
+  normalizeRecordValue,
+  UnknownRecord,
+} from './nextpyme-record-scan.helper';
 
 export interface NextPymeMasterRow {
   id: number;
@@ -114,6 +119,71 @@ export interface NextPymeSupportDocumentCreatePayload {
       percent: string;
     }>;
   }>;
+}
+
+export interface NextPymeInvoiceQueryParty {
+  identification_number?: string | number;
+  name?: string;
+  address?: string;
+  department?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+  code?: string;
+  type_identification?: string | number;
+  municipality?: {
+    name?: string;
+    code?: string;
+    department?: {
+      name?: string;
+      code?: string;
+    };
+  };
+}
+
+export interface NextPymeInvoiceQueryLineTax {
+  tax_id?: number;
+  tax_amount?: string | number;
+  taxable_amount?: string | number;
+  percent?: string | number;
+}
+
+export interface NextPymeInvoiceQueryLine {
+  invoiced_quantity?: string | number;
+  line_extension_amount?: string | number;
+  free_of_charge_indicator?: string | boolean;
+  description?: string;
+  code?: string;
+  price_amount?: string | number;
+  base_quantity?: string | number;
+  tax_totals?: NextPymeInvoiceQueryLineTax[];
+}
+
+export interface NextPymeInvoiceQueryResult {
+  type_document_id?: number;
+  prefix?: string;
+  number?: string | number;
+  date?: string;
+  time?: string;
+  resolution?: string;
+  notes?: string;
+  seller: NextPymeInvoiceQueryParty;
+  customer?: NextPymeInvoiceQueryParty;
+  payment_form?: {
+    payment_form_id?: string | number;
+    payment_method_id?: string | number;
+    payment_due_date?: string;
+    duration_measure?: string | number;
+  };
+  legal_monetary_totals: {
+    line_extension_amount?: string | number;
+    tax_exclusive_amount?: string | number;
+    tax_inclusive_amount?: string | number;
+    allowance_total_amount?: string | number;
+    charge_total_amount?: string | number;
+    payable_amount?: string | number;
+  };
+  invoice_lines: NextPymeInvoiceQueryLine[];
 }
 
 const LOG_PREVIEW_LIMIT = 4000;
@@ -343,6 +413,76 @@ export class NextPymeApiClient {
     }
   }
 
+  async getInvoiceByCufe(
+    cufe: string,
+  ): Promise<NextPymeInvoiceQueryResult | null> {
+    const token = this.requireToken();
+    const url = this.getInvoiceQueryUrl();
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.request<unknown>({
+          method: 'GET',
+          url,
+          data: { qr_cufe: cufe },
+          headers: this.buildAuthHeaders(token),
+          timeout: 20000,
+          validateStatus: () => true,
+        }),
+      );
+
+      this.logger.log(
+        `[return-invoice-data] cufe=${cufe} status=${response.status} respuesta=${this.preview(
+          response.data,
+        )}`,
+      );
+
+      if (response.status < 200 || response.status >= 300) {
+        return null;
+      }
+
+      return this.parseInvoiceQueryResponse(response.data);
+    } catch (error) {
+      this.logger.warn(
+        `[return-invoice-data] Error al consultar CUFE ${cufe}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private parseInvoiceQueryResponse(
+    payload: unknown,
+  ): NextPymeInvoiceQueryResult | null {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    const root = payload as UnknownRecord;
+    const data =
+      root.data && typeof root.data === 'object'
+        ? (root.data as UnknownRecord)
+        : null;
+
+    if (!data || !data.seller || !data.legal_monetary_totals) {
+      return null;
+    }
+
+    return {
+      ...data,
+      invoice_lines: Array.isArray(data.invoice_lines)
+        ? data.invoice_lines
+        : [],
+    } as unknown as NextPymeInvoiceQueryResult;
+  }
+
+  private getInvoiceQueryUrl(): string {
+    return this.configService
+      .get('nextPyme.invoiceQueryUrl', { infer: true })
+      .trim();
+  }
+
   private preview(value: unknown): string {
     let serialized: string;
 
@@ -358,12 +498,12 @@ export class NextPymeApiClient {
   }
 
   private parseMasterRows(payload: unknown): NextPymeMasterRow[] {
-    const records = this.collectRecords(payload);
+    const records = collectRecords(payload);
     const results: NextPymeMasterRow[] = [];
 
     for (const record of records) {
-      const idValue = this.readValue(record, ['id']);
-      const name = this.readValue(record, ['name', 'nombre', 'description']);
+      const idValue = findInRecord(record, ['id']);
+      const name = findInRecord(record, ['name', 'nombre', 'description']);
 
       if (!idValue || !name) {
         continue;
@@ -378,9 +518,9 @@ export class NextPymeApiClient {
         ...record,
         id,
         name,
-        code: this.readValue(record, ['code', 'codigo']) ?? null,
+        code: findInRecord(record, ['code', 'codigo']) ?? null,
         description:
-          this.readValue(record, ['description', 'descripcion']) ?? null,
+          findInRecord(record, ['description', 'descripcion']) ?? null,
       });
     }
 
@@ -475,69 +615,6 @@ export class NextPymeApiClient {
           .map((item) => String(item))
           .filter(Boolean)
           .join(' | ');
-      }
-    }
-
-    return null;
-  }
-
-  private collectRecords(value: unknown): UnknownRecord[] {
-    const records: UnknownRecord[] = [];
-    const pending: unknown[] = [value];
-    const visited = new Set<object>();
-
-    while (pending.length > 0) {
-      const current = pending.shift();
-
-      if (!current || typeof current !== 'object' || visited.has(current)) {
-        continue;
-      }
-
-      visited.add(current);
-
-      if (Array.isArray(current)) {
-        pending.push(...current);
-        continue;
-      }
-
-      const record = current as UnknownRecord;
-      records.push(record);
-      pending.push(...Object.values(record));
-    }
-
-    return records;
-  }
-
-  private readValue(
-    record: UnknownRecord,
-    keys: string[],
-  ): string | null {
-    const normalizedKeys = new Set(
-      keys.map((key) =>
-        key
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-zA-Z0-9]/g, '')
-          .toLowerCase(),
-      ),
-    );
-
-    for (const [key, value] of Object.entries(record)) {
-      const normalizedKey = key
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-zA-Z0-9]/g, '')
-        .toLowerCase();
-
-      if (!normalizedKeys.has(normalizedKey)) {
-        continue;
-      }
-
-      if (typeof value === 'string' || typeof value === 'number') {
-        const normalized = String(value).trim();
-        if (normalized && normalized.toLowerCase() !== 'null') {
-          return normalized;
-        }
       }
     }
 

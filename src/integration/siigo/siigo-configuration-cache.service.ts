@@ -17,7 +17,6 @@ import {
   SIIGO_PURCHASE_DOCUMENT_TYPE_QUERY,
   SIIGO_SUPPORT_DOCUMENT_TYPE_QUERY,
 } from './constants/siigo.constants';
-import { SIIGO_CONFIGURATION_CACHE_LOG } from './constants/siigo-configuration-cache.constants';
 import { SiigoAccountCatalogItemDto } from './dto/list-siigo-accounts.dto';
 import { SiigoPaymentTypeCatalogItemDto } from './dto/list-siigo-payment-types.dto';
 import { SiigoTaxCatalogItemDto } from './dto/list-siigo-taxes.dto';
@@ -106,7 +105,6 @@ export class SiigoConfigurationCacheService {
       );
     }
 
-    console.log(SIIGO_CONFIGURATION_CACHE_LOG.USING_STORED_SUPPORT_DOCUMENT_TYPE);
     this.logger.log(
       `[companyId=${companyId}] Tipo de documento DS servido desde caché en memoria (id=${cache.supportDocumentId})`,
     );
@@ -123,7 +121,6 @@ export class SiigoConfigurationCacheService {
       );
     }
 
-    console.log(SIIGO_CONFIGURATION_CACHE_LOG.USING_STORED_PURCHASE_DOCUMENT_TYPE);
     this.logger.log(
       `[companyId=${companyId}] Tipo de documento FC servido desde caché en memoria (id=${cache.purchaseDocumentId})`,
     );
@@ -167,7 +164,6 @@ export class SiigoConfigurationCacheService {
       isValidSiigoConfigurationId(cached.supportDocumentId) &&
       isValidSiigoConfigurationId(cached.purchaseDocumentId)
     ) {
-      console.log(SIIGO_CONFIGURATION_CACHE_LOG.USING_STORED);
       this.logger.log(
         `[companyId=${companyId}] Catálogo SIIGO servido desde caché en memoria (lastSync=${cached.catalog.lastSync})`,
       );
@@ -196,7 +192,6 @@ export class SiigoConfigurationCacheService {
   private async performCompanyCacheSync(
     companyId: string,
   ): Promise<SiigoCompanyMemoryCache> {
-    console.log(SIIGO_CONFIGURATION_CACHE_LOG.EXPIRED_SYNCING);
     this.logger.log(
       `[companyId=${companyId}] Caché SIIGO expirada o inexistente. Consultando SIIGO...`,
     );
@@ -242,7 +237,6 @@ export class SiigoConfigurationCacheService {
 
     this.memoryCacheByCompany.set(companyId, memoryCache);
 
-    console.log(SIIGO_CONFIGURATION_CACHE_LOG.UPDATED);
     this.logger.log(
       `[companyId=${companyId}] Caché SIIGO actualizada en memoria (accounts=${accounts.length}, taxes=${taxes.length}, paymentTypes=${Object.keys(paymentTypes).join(', ')}, supportDocumentId=${supportDocumentId}, purchaseDocumentId=${purchaseDocumentId})`,
     );

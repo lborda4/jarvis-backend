@@ -5,6 +5,7 @@ import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
 import { resolveSupportDocumentRetentionPlacement } from '../helpers/siigo-support-document-retention.helper';
 import {
   calculateSiigoSupportDocumentPaymentValue,
+  roundSiigoAmount,
 } from '../helpers/siigo-purchase-total.helper';
 import {
   mapSiigoDocumentSendItem,
@@ -24,6 +25,20 @@ export function mapCreatePurchaseSendRequestToSiigo(
     (request.retentions ?? []).map((retention) => retention.id),
     taxesCatalog,
   );
+  // Igual que Documento Soporte: ReteICA/ReteIVA/Autorretención van en el
+  // campo "retentions" a nivel documento, y Retefuente va como tax del ítem.
+  // SIIGO rechaza (invalid_array) esos tipos de retención dentro de
+  // items[].taxes, así que NO deben mezclarse ahí.
+  const documentRetentionIds = retentionPlacement.documentRetentions.map(
+    (retention) => retention.id,
+  );
+  const allRetentionIds = [
+    ...documentRetentionIds,
+    ...retentionPlacement.itemRetentionIds,
+  ];
+  const retentions = retentionPlacement.documentRetentions.length
+    ? retentionPlacement.documentRetentions
+    : undefined;
   const itemTaxes =
     hasIva && defaultTaxId && defaultTaxId > 0 ? [{ id: defaultTaxId }] : undefined;
   const items = request.items.map((item) => {
@@ -45,10 +60,9 @@ export function mapCreatePurchaseSendRequestToSiigo(
     items,
     taxesCatalog,
     {
-      retentionIds: [
-        ...retentionPlacement.documentRetentions.map((retention) => retention.id),
-        ...retentionPlacement.itemRetentionIds,
-      ],
+      retentionIds: allRetentionIds,
+      // SIIGO valida /v1/purchases contra un total en pesos enteros.
+      roundAmount: roundSiigoAmount,
     },
   );
 
@@ -69,6 +83,7 @@ export function mapCreatePurchaseSendRequestToSiigo(
     ...(request.observations?.trim()
       ? { observations: request.observations.trim() }
       : {}),
+    ...(retentions?.length ? { retentions } : {}),
     items,
     payments: mapSiigoDocumentSendPayments(
       request.payments,

@@ -79,7 +79,7 @@ export function resolveSupportDocumentRetentionPlacement(
     }
 
     throw new BadRequestException(
-      `El impuesto "${tax.name}" (tipo ${tax.type}) no es válido en Documento Soporte. Se permiten ReteICA, ReteIVA, Autorretención (a nivel documento) y Retefuente (a nivel ítem).`,
+      `El impuesto "${tax.name}" (tipo ${tax.type}) no es una retención válida. Se permiten ReteICA, ReteIVA, Autorretención (a nivel documento) y Retefuente (a nivel ítem).`,
     );
   }
 

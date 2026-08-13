@@ -9,8 +9,11 @@ import { firstValueFrom } from 'rxjs';
 import { AppConfiguration } from '../../config/configuration';
 import { LookupJarvisTerceroNitResponseDto } from './dto/jarvis-tercero.dto';
 import { JarvisDocumentType } from './enums/jarvis-document-type.enum';
-
-type UnknownRecord = Record<string, unknown>;
+import {
+  collectRecords,
+  findInRecord,
+  UnknownRecord,
+} from './nextpyme/nextpyme-record-scan.helper';
 
 interface NextPymeDocumentType {
   id: number;
@@ -30,6 +33,8 @@ export class NextPymeRutService {
   private documentTypesCache: NextPymeDocumentType[] | null = null;
   private documentTypesCacheLoadedAt = 0;
   private readonly documentTypesCacheTtlMs = 60 * 60 * 1000;
+  private documentTypesCacheInFlight: Promise<NextPymeDocumentType[]> | null =
+    null;
 
   constructor(
     private readonly httpService: HttpService,
@@ -115,6 +120,29 @@ export class NextPymeRutService {
       return this.documentTypesCache;
     }
 
+    // Si ya hay una carga en curso, todas las llamadas concurrentes esperan
+    // esa misma promesa en vez de disparar una request por cada una
+    // ("thundering herd" cuando el caché está frío/vencido).
+    if (this.documentTypesCacheInFlight) {
+      return this.documentTypesCacheInFlight;
+    }
+
+    this.documentTypesCacheInFlight = this.fetchDocumentTypes(
+      token,
+      baseUrl,
+      now,
+    ).finally(() => {
+      this.documentTypesCacheInFlight = null;
+    });
+
+    return this.documentTypesCacheInFlight;
+  }
+
+  private async fetchDocumentTypes(
+    token: string,
+    baseUrl: string,
+    now: number,
+  ): Promise<NextPymeDocumentType[]> {
     try {
       const response = await firstValueFrom(
         this.httpService.post<unknown>(
@@ -147,19 +175,19 @@ export class NextPymeRutService {
   }
 
   private parseDocumentTypes(payload: unknown): NextPymeDocumentType[] {
-    const records = this.collectRecords(payload);
+    const records = collectRecords(payload, { parseJsonStrings: true });
     const results: NextPymeDocumentType[] = [];
 
     for (const record of records) {
-      const idValue = this.findInRecord(record, [
+      const idValue = findInRecord(record, [
         'id',
         'typeid',
         'typedocumentidentificationid',
       ]);
       const name =
-        this.findInRecord(record, ['name', 'nombre', 'description', 'descripcion']) ??
+        findInRecord(record, ['name', 'nombre', 'description', 'descripcion']) ??
         null;
-      const code = this.findInRecord(record, ['code', 'codigo', 'abbreviation']);
+      const code = findInRecord(record, ['code', 'codigo', 'abbreviation']);
 
       if (!idValue || !name) {
         continue;
@@ -237,9 +265,9 @@ export class NextPymeRutService {
     payload: unknown,
     documentNumber: string,
   ): LookupJarvisTerceroNitResponseDto {
-    const records = this.collectRecords(payload);
+    const records = collectRecords(payload, { parseJsonStrings: true });
     const matchingRecords = records.filter((record) => {
-      const identification = this.findInRecord(record, [
+      const identification = findInRecord(record, [
         'identificationnumber',
         'numberidentification',
         'documentnumber',
@@ -298,52 +326,13 @@ export class NextPymeRutService {
     };
   }
 
-  private collectRecords(value: unknown): UnknownRecord[] {
-    const records: UnknownRecord[] = [];
-    const pending: unknown[] = [value];
-    const visited = new Set<object>();
-
-    while (pending.length > 0) {
-      const current = pending.shift();
-
-      if (typeof current === 'string') {
-        const trimmed = current.trim();
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-          try {
-            pending.push(JSON.parse(trimmed));
-          } catch {
-            // El valor es texto normal, no JSON anidado.
-          }
-        }
-        continue;
-      }
-
-      if (!current || typeof current !== 'object' || visited.has(current)) {
-        continue;
-      }
-
-      visited.add(current);
-
-      if (Array.isArray(current)) {
-        pending.push(...current);
-        continue;
-      }
-
-      const record = current as UnknownRecord;
-      records.push(record);
-      pending.push(...Object.values(record));
-    }
-
-    return records;
-  }
-
   private findValue(
     records: UnknownRecord[],
     candidateKeys: string[],
   ): string | null {
     for (const candidate of candidateKeys) {
       for (const record of records) {
-        const value = this.findInRecord(record, [candidate]);
+        const value = findInRecord(record, [candidate]);
         if (value) {
           return value;
         }
@@ -351,44 +340,5 @@ export class NextPymeRutService {
     }
 
     return null;
-  }
-
-  private findInRecord(
-    record: UnknownRecord,
-    candidateKeys: string[],
-  ): string | null {
-    const candidates = new Set(candidateKeys);
-
-    for (const [key, value] of Object.entries(record)) {
-      if (!candidates.has(this.normalizeKey(key))) {
-        continue;
-      }
-
-      const normalizedValue = this.normalizeValue(value);
-      if (normalizedValue) {
-        return normalizedValue;
-      }
-    }
-
-    return null;
-  }
-
-  private normalizeKey(value: string): string {
-    return value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9]/g, '')
-      .toLowerCase();
-  }
-
-  private normalizeValue(value: unknown): string | null {
-    if (typeof value !== 'string' && typeof value !== 'number') {
-      return null;
-    }
-
-    const normalized = String(value).trim();
-    return normalized && normalized.toLowerCase() !== 'null'
-      ? normalized
-      : null;
   }
 }

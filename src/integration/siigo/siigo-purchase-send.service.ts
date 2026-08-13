@@ -13,17 +13,23 @@ import {
   CreateSiigoPurchaseSendRequestDto,
   CreateSiigoPurchaseSendResponseDto,
 } from './dto/create-siigo-purchase-send.dto';
+import { DeleteSiigoPurchaseResponseDto } from './dto/delete-siigo-purchase.dto';
 import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
 import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
 import { validateSupportDocumentRetentions } from './helpers/siigo-support-document-retention.helper';
-import { buildSupplierPreferenceSnapshotFromSendRequest } from './helpers/siigo-support-document-preference.helper';
+import {
+  buildSupplierPreferenceSnapshotFromSendRequest,
+  persistSupplierPreferencesFromSendRequest,
+} from './helpers/siigo-support-document-preference.helper';
 import { mapCreatePurchaseSendRequestToSiigo } from './mappers/create-siigo-purchase-send-request.mapper';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoConfigurationCacheService } from './siigo-configuration-cache.service';
-import { SiigoPurchaseService } from './siigo-purchase.service';
+import { SiigoHttpClient } from './clients/siigo-http.client';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
+import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 
 @Injectable()
 export class SiigoPurchaseSendService {
@@ -33,16 +39,24 @@ export class SiigoPurchaseSendService {
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
-    private readonly siigoPurchaseService: SiigoPurchaseService,
+    private readonly siigoHttpClient: SiigoHttpClient,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
+    private readonly planSubscriptionService: PlanSubscriptionService,
   ) {}
 
   async sendPurchase(
     request: CreateSiigoPurchaseSendRequestDto,
     companyId: string,
   ): Promise<CreateSiigoPurchaseSendResponseDto> {
+    await this.planSubscriptionService.assertCanCreateDocuments({
+      companyId,
+      provider: IntegrationProvider.SIIGO,
+      documentType: ElectronicDocumentType.PURCHASE_INVOICE,
+      quantity: 1,
+    });
+
     const documentId = request.documentId.trim();
     const electronicDocument =
       await this.electronicDocumentService.requireById(documentId, companyId);
@@ -107,6 +121,36 @@ export class SiigoPurchaseSendService {
       siigoPayload.cost_center = request.cost_center;
     }
 
+    // Se guarda la preferencia del proveedor (cuenta, medio de pago,
+    // retenciones, centro de costo) ANTES de intentar el envío a SIIGO, no
+    // solo si tiene éxito: así la elección del usuario sobrevive aunque el
+    // envío falle (p. ej. un error de negocio de SIIGO) y no se pierde al
+    // cerrar sesión, ya que se guarda en la tabla de preferencias del
+    // proveedor, no solo en el estado en memoria del navegador.
+    const preferenceSnapshot = buildSupplierPreferenceSnapshotFromSendRequest(
+      request as unknown as CreateSiigoSupportDocumentRequestDto,
+      taxesCatalog,
+    );
+
+    if (preferenceSnapshot) {
+      await this.siigoAccountMappingService.persistSupplierPreferenceSnapshot(
+        electronicDocument,
+        companyId,
+        preferenceSnapshot,
+      );
+    }
+
+    if (request.savePreferences) {
+      await persistSupplierPreferencesFromSendRequest(
+        this.siigoAccountMappingService,
+        request,
+        electronicDocument,
+        companyId,
+        taxesCatalog,
+        this.logger,
+      );
+    }
+
     try {
       const createdPurchase = await this.siigoDocumentSendThrottleService.run(
         companyId,
@@ -117,18 +161,13 @@ export class SiigoPurchaseSendService {
             this.logger,
             'crear factura de compra',
             async (accessToken, partnerId) =>
-              this.siigoPurchaseService.createPurchase(
+              this.siigoHttpClient.createPurchase(
                 accessToken,
                 siigoPayload,
                 partnerId,
               ),
             SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
           ),
-      );
-
-      const preferenceSnapshot = buildSupplierPreferenceSnapshotFromSendRequest(
-        request as unknown as CreateSiigoSupportDocumentRequestDto,
-        taxesCatalog,
       );
 
       const updatedDocument =
@@ -144,23 +183,6 @@ export class SiigoPurchaseSendService {
               }
             : undefined,
         );
-
-      if (preferenceSnapshot) {
-        await this.siigoAccountMappingService.persistSupplierPreferenceSnapshot(
-          electronicDocument,
-          companyId,
-          preferenceSnapshot,
-        );
-      }
-
-      if (request.savePreferences) {
-        await this.persistSupplierPreferencesFromRequest(
-          request,
-          electronicDocument,
-          companyId,
-          taxesCatalog,
-        );
-      }
 
       return {
         success: true,
@@ -203,80 +225,91 @@ export class SiigoPurchaseSendService {
     }
   }
 
-  private async persistSupplierPreferencesFromRequest(
-    request: CreateSiigoPurchaseSendRequestDto,
-    electronicDocument: Awaited<
-      ReturnType<ElectronicDocumentService['requireById']>
-    >,
+  async deletePurchase(
+    documentId: string,
     companyId: string,
-    taxesCatalog: Awaited<
-      ReturnType<SiigoTaxesCatalogService['listTaxes']>
-    >,
-  ): Promise<void> {
-    const accountCode = request.items[0]?.code?.trim();
-
-    if (!accountCode) {
-      return;
-    }
-
-    const taxesById = new Map(taxesCatalog.map((tax) => [tax.id, tax]));
-    const snapshot = request.supplierPreferences;
-    const paymentMethod = snapshot?.paymentMethod ?? {
-      id: request.payments[0]?.id,
-      name: '',
-      type: '',
-    };
-    const retentions =
-      snapshot?.retentions ??
-      (request.retentions ?? []).map((retention) => {
-        const tax = taxesById.get(retention.id);
-
-        return {
-          id: retention.id,
-          name: tax?.name ?? `Retención ${retention.id}`,
-          type: retention.type ?? tax?.type ?? '',
-          percentage: tax?.percentage ?? 0,
-        };
-      });
-
-    if (!paymentMethod.id) {
-      return;
-    }
-
-    await this.siigoAccountMappingService.persistSupplierPreferencesForDocument(
-      electronicDocument,
+  ): Promise<DeleteSiigoPurchaseResponseDto> {
+    const trimmedDocumentId = documentId.trim();
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      trimmedDocumentId,
       companyId,
-      {
-        accountCode,
-        accountDescription:
-          snapshot?.accountDescription?.trim() || accountCode,
-        paymentMethod: {
-          id: paymentMethod.id,
-          name: paymentMethod.name?.trim() || `Medio ${paymentMethod.id}`,
-          type: paymentMethod.type?.trim() || '',
-          ...(paymentMethod.dueDate === undefined
-            ? {}
-            : { dueDate: paymentMethod.dueDate }),
-        },
-        retentions,
-        ...(snapshot?.costCenter
-          ? {
-              costCenter: {
-                id: snapshot.costCenter.id,
-                code: snapshot.costCenter.code,
-                name: snapshot.costCenter.name,
-              },
-            }
-          : request.cost_center !== undefined
-            ? {
-                costCenter: {
-                  id: request.cost_center,
-                  code: String(request.cost_center),
-                  name: `Centro ${request.cost_center}`,
-                },
-              }
-            : {}),
-      },
     );
+
+    if (
+      electronicDocument.electronicDocumentType !==
+      ElectronicDocumentType.PURCHASE_INVOICE
+    ) {
+      throw new BadRequestException(
+        'El documento indicado no es una factura de compra.',
+      );
+    }
+
+    if (electronicDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
+      throw new BadRequestException(
+        'La factura de compra no está creada en SIIGO.',
+      );
+    }
+
+    const siigoPurchaseId = electronicDocument.siigoPurchaseId?.trim();
+
+    if (!siigoPurchaseId) {
+      throw new BadRequestException(
+        'El documento no tiene un id de factura de compra en SIIGO.',
+      );
+    }
+
+    try {
+      await this.siigoDocumentSendThrottleService.run(companyId, () =>
+        executeSiigoRequestWithRetries(
+          this.siigoAuthService,
+          companyId,
+          this.logger,
+          'eliminar factura de compra',
+          async (accessToken, partnerId) =>
+            this.siigoHttpClient.deletePurchase(
+              accessToken,
+              siigoPurchaseId,
+              partnerId,
+            ),
+          SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
+        ),
+      );
+
+      const updatedDocument =
+        await this.electronicDocumentService.clearPurchaseCreated(
+          trimmedDocumentId,
+          companyId,
+        );
+
+      this.logger.log(
+        `[documentId=${trimmedDocumentId}] Factura de compra eliminada en SIIGO (siigoId=${siigoPurchaseId})`,
+      );
+
+      return {
+        success: true,
+        siigoPurchaseId,
+        document: mapElectronicDocumentToResponse(updatedDocument),
+      };
+    } catch (error) {
+      this.logger.error(
+        `[documentId=${trimmedDocumentId}] Error al eliminar factura de compra en SIIGO (siigoId=${siigoPurchaseId})`,
+        error instanceof Error ? error.stack : String(error),
+      );
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
+
+      throw new BadGatewayException(
+        error instanceof Error
+          ? error.message
+          : 'Error inesperado al eliminar factura de compra en SIIGO',
+      );
+    }
   }
+
 }

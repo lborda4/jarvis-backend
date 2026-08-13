@@ -26,6 +26,7 @@ import {
   CreateAdminCompanyResponseDto,
   ListAdminCompaniesResponseDto,
   ListAdminPlansResponseDto,
+  RegenerateCompanyInviteCodeResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
   UpdateIntegrationSubscriptionResponseDto,
 } from './dto/admin-company.dto';
@@ -96,6 +97,19 @@ export class AdminController {
     @Body() request: CreateAdminCompanyRequestDto,
   ): Promise<CreateAdminCompanyResponseDto> {
     return this.adminService.createCompany(request, user.userId);
+  }
+
+  @Post('companies/:companyId/invite-code/regenerate')
+  @ApiOperation({
+    summary: 'Regenerar código de invitación',
+    description:
+      'Genera un nuevo código de invitación para la empresa (invalida el anterior). Úsalo si el código se filtró o quieres rotarlo.',
+  })
+  regenerateInviteCode(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('companyId') companyId: string,
+  ): Promise<RegenerateCompanyInviteCodeResponseDto> {
+    return this.adminService.regenerateInviteCode(companyId, user.userId);
   }
 
   @Patch('companies/:companyId/integrations/:provider/subscription')

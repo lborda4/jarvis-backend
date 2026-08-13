@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { normalizeSupportDocumentType } from '../../invoices/helpers/support-document-type.helper';
+import { normalizeJarvisDocumentNumber } from './helpers/jarvis-document-number.helper';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import {
@@ -66,7 +67,7 @@ export class JarvisTercerosService {
       );
     }
 
-    const documentNumber = this.normalizeDocumentNumber(
+    const documentNumber = normalizeJarvisDocumentNumber(
       request.document_number,
     );
     if (!documentNumber) {
@@ -205,13 +206,6 @@ export class JarvisTercerosService {
     }
 
     return integration;
-  }
-
-  private normalizeDocumentNumber(value?: string): string {
-    return (value ?? '')
-      .replace(/[^\dA-Za-z]/g, '')
-      .trim()
-      .toUpperCase();
   }
 
   private toDto(tercero: JarvisTercero): JarvisTerceroDto {

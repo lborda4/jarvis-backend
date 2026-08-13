@@ -4,7 +4,6 @@ import {
   Get,
   Header,
   Post,
-  Query,
   StreamableFile,
   UploadedFile,
   UseInterceptors,
@@ -40,11 +39,9 @@ export class InvoicesController {
     'Content-Type',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   )
-  downloadSupportDocumentTemplate(
-    @Query('provider') provider?: string,
-  ): StreamableFile {
+  downloadSupportDocumentTemplate(): StreamableFile {
     const { buffer, filename } =
-      this.invoicesService.getSupportDocumentTemplate(provider);
+      this.invoicesService.getSupportDocumentTemplate();
 
     return new StreamableFile(buffer, {
       disposition: `attachment; filename="${filename}"`,

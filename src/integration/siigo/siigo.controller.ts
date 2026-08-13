@@ -13,6 +13,7 @@ import {
   CreateSiigoSupportDocumentResponseDto,
 } from './dto/create-siigo-support-document.dto';
 import { DeleteSiigoSupportDocumentResponseDto } from './dto/delete-siigo-support-document.dto';
+import { DeleteSiigoPurchaseResponseDto } from './dto/delete-siigo-purchase.dto';
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
 import {
@@ -316,6 +317,22 @@ export class SiigoController {
   ): Promise<CreateSiigoPurchaseSendResponseDto> {
     return this.siigoPurchaseSendService.sendPurchase(
       request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Delete('purchases/:documentId')
+  @ApiOperation({
+    summary: 'Eliminar factura de compra en SIIGO',
+    description:
+      'Elimina en SIIGO la factura de compra asociada al electronic-document local usando el siigoPurchaseId guardado.',
+  })
+  deletePurchase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('documentId') documentId: string,
+  ): Promise<DeleteSiigoPurchaseResponseDto> {
+    return this.siigoPurchaseSendService.deletePurchase(
+      documentId,
       getAuthenticatedCompanyId(user),
     );
   }

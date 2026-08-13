@@ -4,6 +4,7 @@ import {
   DianInvoiceItem,
   DianInvoiceResult,
 } from './interfaces/dian-invoice-result.interface';
+import { matchIsoDate } from '../common/helpers/date-normalization.helper';
 
 type XmlValue = string | number | boolean | XmlObject | XmlValue[];
 type XmlObject = { [key: string]: XmlValue | undefined };
@@ -482,17 +483,7 @@ export class DianParserService {
       return '';
     }
 
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-      return trimmed;
-    }
-
-    const isoDateMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
-
-    if (isoDateMatch) {
-      return isoDateMatch[1];
-    }
-
-    return trimmed;
+    return matchIsoDate(trimmed) ?? trimmed;
   }
 
   private getPartyAddress(party: XmlObject | null): string {

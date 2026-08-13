@@ -15,26 +15,12 @@ export class SiigoSupplierService {
   ): Promise<SiigoCustomer | null> {
     const normalizedNit = nit.replace(/[^\d]/g, '');
 
-    console.log('[SIIGO supplier] findSupplierByNit', {
-      inputNit: nit,
-      normalizedNit,
-      branchOffice,
-    });
-
-    const result = await this.siigoHttpClient.findCustomerByIdentificationAndBranch(
+    return this.siigoHttpClient.findCustomerByIdentificationAndBranch(
       accessToken,
       normalizedNit,
       branchOffice,
       partnerId,
     );
-
-    console.log('[SIIGO supplier] findSupplierByNit - result', {
-      normalizedNit,
-      found: Boolean(result),
-      supplierName: result?.commercial_name ?? result?.name?.[0],
-    });
-
-    return result;
   }
 
   async createSupplier(

@@ -314,6 +314,15 @@ export interface CalculateSiigoSupportDocumentTotalOptions
     'discountType' | 'globalDiscount' | 'taxRate' | 'subtotal' | 'taxAmount'
   > {
   retentionIds?: number[];
+  /**
+   * Por defecto redondea a centavos (roundMoney). SIIGO valida el total de
+   * /v1/purchases en pesos colombianos enteros — cuando el precio del ítem
+   * no es un número redondo (ej. viene calculado desde el IVA de la factura
+   * original), redondear a centavos deja un residuo de centavos que SIIGO
+   * rechaza con invalid_total_payments. Pasar roundSiigoAmount para esos
+   * casos.
+   */
+  roundAmount?: (value: number) => number;
 }
 
 export function calculateSiigoSupportDocumentPaymentValue(
@@ -321,7 +330,7 @@ export function calculateSiigoSupportDocumentPaymentValue(
   taxesCatalog: SiigoTaxCatalogItemDto[],
   options: CalculateSiigoSupportDocumentTotalOptions = {},
 ): number {
-  const roundAmount = roundMoney;
+  const roundAmount = options.roundAmount ?? roundMoney;
   const documentOptions: CalculateSiigoDocumentTotalOptions = {
     ...options,
     taxesById: buildSiigoTaxesByIdMap(taxesCatalog),

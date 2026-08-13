@@ -5,6 +5,7 @@ export const AUTH_ERROR_CODE = {
   NO_ACTIVE_COMPANY: 'NO_ACTIVE_COMPANY',
   COMPANY_NOT_LINKED: 'COMPANY_NOT_LINKED',
   COMPANY_NOT_REGISTERED: 'COMPANY_NOT_REGISTERED',
+  INVALID_INVITE_CODE: 'INVALID_INVITE_CODE',
   USER_ALREADY_LINKED_TO_COMPANY: 'USER_ALREADY_LINKED_TO_COMPANY',
 } as const;
 
@@ -19,6 +20,8 @@ export const AUTH_ERROR_MESSAGE = {
   COMPANY_NOT_LINKED: 'No tienes acceso a una empresa con ese NIT.',
   COMPANY_NOT_REGISTERED:
     'No existe una empresa registrada con ese NIT. La empresa debe crearse previamente.',
+  INVALID_INVITE_CODE:
+    'El código de invitación no es válido para esa empresa. Pídeselo a quien administra tu cuenta en Jarvis.',
   USER_ALREADY_LINKED_TO_COMPANY:
     'Este usuario ya está vinculado a la empresa con ese NIT.',
 } as const;

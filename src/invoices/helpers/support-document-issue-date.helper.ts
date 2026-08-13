@@ -1,5 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { GroupedSupportDocument } from '../../electronic-document/interfaces/support-document-import.interface';
+import {
+  convertDayMonthYearToIso,
+  matchIsoDate,
+} from '../../common/helpers/date-normalization.helper';
 
 /**
  * Normaliza fechas de Documento soporte a YYYY-MM-DD (interno).
@@ -12,25 +16,18 @@ export function normalizeSupportDocumentIssueDate(value?: string): string {
     return '';
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed;
+  const isoDate = matchIsoDate(trimmed);
+
+  if (isoDate) {
+    return isoDate;
   }
 
-  const isoMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  const converted = convertDayMonthYearToIso(trimmed, {
+    allowDotSeparator: true,
+  });
 
-  if (isoMatch) {
-    return isoMatch[1];
-  }
-
-  const dayMonthYearMatch = trimmed.match(
-    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/,
-  );
-
-  if (dayMonthYearMatch) {
-    const day = dayMonthYearMatch[1].padStart(2, '0');
-    const month = dayMonthYearMatch[2].padStart(2, '0');
-    const year = dayMonthYearMatch[3];
-    return `${year}-${month}-${day}`;
+  if (converted) {
+    return converted;
   }
 
   throw new BadRequestException(

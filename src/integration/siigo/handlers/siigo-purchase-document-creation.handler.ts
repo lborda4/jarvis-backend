@@ -14,7 +14,7 @@ import { executeSiigoRequestWithRetries } from '../helpers/siigo-request-retry.h
 import { SiigoDocumentCreationHandler } from '../interfaces/siigo-document-creation.handler';
 import { mapElectronicDocumentToSiigoPurchase } from '../mappers/electronic-document-to-siigo-purchase.mapper';
 import { SiigoAuthService } from '../siigo-auth.service';
-import { SiigoPurchaseService } from '../siigo-purchase.service';
+import { SiigoHttpClient } from '../clients/siigo-http.client';
 import { SiigoConfigurationCacheService } from '../siigo-configuration-cache.service';
 import { AppConfiguration } from '../../../config/configuration';
 
@@ -33,7 +33,7 @@ export class SiigoPurchaseDocumentCreationHandler
 
   constructor(
     private readonly siigoAuthService: SiigoAuthService,
-    private readonly siigoPurchaseService: SiigoPurchaseService,
+    private readonly siigoHttpClient: SiigoHttpClient,
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
     private readonly configService: ConfigService<AppConfiguration, true>,
@@ -80,7 +80,7 @@ export class SiigoPurchaseDocumentCreationHandler
         this.logger,
         'crear factura de compra',
         (accessToken, partnerId) =>
-          this.siigoPurchaseService.createPurchase(
+          this.siigoHttpClient.createPurchase(
             accessToken,
             purchasePayload,
             partnerId,

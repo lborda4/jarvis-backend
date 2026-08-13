@@ -22,6 +22,7 @@ import { SubscriptionStatus } from '../plan/enums/subscription-status.enum';
 import { PlanSubscriptionService } from '../plan/plan-subscription.service';
 import { PlansRepository } from '../plan/repositories/plans.repository';
 import type { CompanyResponsible } from '../company/interfaces/company-responsible.interface';
+import { generateCompanyInviteCode } from '../company/helpers/company-invite-code.helper';
 import {
   AdminCompanyListItemDto,
   AdminIntegrationItemDto,
@@ -31,6 +32,7 @@ import {
   JarvisCredentialsSeedDto,
   ListAdminCompaniesResponseDto,
   ListAdminPlansResponseDto,
+  RegenerateCompanyInviteCodeResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
   UpdateIntegrationSubscriptionResponseDto,
 } from './dto/admin-company.dto';
@@ -143,6 +145,7 @@ export class AdminService {
           name,
           personType,
           responsible,
+          inviteCode: generateCompanyInviteCode(),
         }),
       );
 
@@ -211,6 +214,24 @@ export class AdminService {
 
     return {
       company: this.mapCompany(company),
+    };
+  }
+
+  async regenerateInviteCode(
+    companyId: string,
+    _adminUserId: string,
+  ): Promise<RegenerateCompanyInviteCodeResponseDto> {
+    const company = await this.companiesRepository.findById(companyId);
+
+    if (!company) {
+      throw new NotFoundException('Empresa no encontrada.');
+    }
+
+    company.inviteCode = generateCompanyInviteCode();
+    const saved = await this.companiesRepository.save(company);
+
+    return {
+      company: this.mapCompany(saved),
     };
   }
 
@@ -359,6 +380,7 @@ export class AdminService {
       personType: company.personType,
       responsible: company.responsible,
       createdAt: company.createdAt.toISOString(),
+      inviteCode: company.inviteCode,
       integrations: (company.integrations ?? [])
         .filter((integration) => integration.active)
         .map((integration) => this.mapIntegration(integration))

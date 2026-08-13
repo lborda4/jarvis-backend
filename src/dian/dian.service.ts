@@ -13,6 +13,15 @@ import {
 import { SearchDianRequestDto } from './dto/search-dian-request.dto';
 import { SearchDianResponseDto } from './dto/search-dian-response.dto';
 import { DianInvoiceResult } from './interfaces/dian-invoice-result.interface';
+import { mapWithConcurrency } from '../common/helpers/concurrency.helper';
+
+// La DIAN comparte una sola cookie de sesión entre todas las descargas;
+// mantenemos la concurrencia moderada para no parecer abuso ni saturarla.
+const DIAN_CUFE_SEARCH_CONCURRENCY = 4;
+
+type DianCufeOutcome =
+  | { cufe: string; ok: true; resultado: DianInvoiceResult }
+  | { cufe: string; ok: false; mensaje: string };
 
 @Injectable()
 export class DianService {
@@ -31,18 +40,27 @@ export class DianService {
     await this.resolveCompany(companyId);
     const dianCookie = this.getDianCookie();
 
+    const outcomes = await mapWithConcurrency<string, DianCufeOutcome>(
+      cufes,
+      DIAN_CUFE_SEARCH_CONCURRENCY,
+      async (cufe) => {
+        try {
+          const resultado = await this.processCufe(cufe, dianCookie);
+          return { cufe, ok: true, resultado };
+        } catch (error) {
+          return { cufe, ok: false, mensaje: this.getErrorMessage(error) };
+        }
+      },
+    );
+
     const resultados: DianInvoiceResult[] = [];
     const errores: SearchDianResponseDto['errores'] = [];
 
-    for (const cufe of cufes) {
-      try {
-        const resultado = await this.processCufe(cufe, dianCookie);
-        resultados.push(resultado);
-      } catch (error) {
-        errores.push({
-          cufe,
-          mensaje: this.getErrorMessage(error),
-        });
+    for (const outcome of outcomes) {
+      if (outcome.ok) {
+        resultados.push(outcome.resultado);
+      } else {
+        errores.push({ cufe: outcome.cufe, mensaje: outcome.mensaje });
       }
     }
 

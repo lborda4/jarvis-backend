@@ -114,7 +114,7 @@ export function mapSiigoDocumentSendItem(
   const taxes = item.taxes?.filter((tax) => Number.isFinite(tax.id) && tax.id > 0);
   const discount =
     item.discount !== undefined && Number.isFinite(item.discount) && item.discount > 0
-      ? item.discount
+      ? roundMoney(item.discount)
       : undefined;
   const existingTaxIds = new Set((taxes ?? []).map((tax) => tax.id));
   const itemRetentions = itemRetentionIds
@@ -127,7 +127,10 @@ export function mapSiigoDocumentSendItem(
     code: item.code.trim(),
     description: item.description?.trim() || 'Ítem importado',
     quantity: item.quantity > 0 ? item.quantity : 1,
-    price: item.price,
+    // SIIGO rechaza precios con más de 2 decimales (invalid_amount). Los
+    // datos importados desde NextPyme/DIAN a veces traen residuo de punto
+    // flotante (ej. 3564706.3499999996 en vez de 3564706.35).
+    price: roundMoney(item.price),
     ...(discount !== undefined ? { discount } : {}),
     ...(mergedTaxes.length ? { taxes: mergedTaxes } : {}),
   };

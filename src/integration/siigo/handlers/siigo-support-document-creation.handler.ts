@@ -13,7 +13,7 @@ import { executeSiigoRequestWithRetries } from '../helpers/siigo-request-retry.h
 import { SiigoDocumentCreationHandler } from '../interfaces/siigo-document-creation.handler';
 import { mapElectronicDocumentToSiigoSupportDocument } from '../mappers/electronic-document-to-siigo-support-document.mapper';
 import { SiigoAuthService } from '../siigo-auth.service';
-import { SiigoSupportDocumentService } from '../siigo-support-document.service';
+import { SiigoHttpClient } from '../clients/siigo-http.client';
 import { SiigoConfigurationCacheService } from '../siigo-configuration-cache.service';
 
 const ALLOWED_STATUSES = new Set<ElectronicDocumentStatus>([
@@ -31,7 +31,7 @@ export class SiigoSupportDocumentCreationHandler
 
   constructor(
     private readonly siigoAuthService: SiigoAuthService,
-    private readonly siigoSupportDocumentService: SiigoSupportDocumentService,
+    private readonly siigoHttpClient: SiigoHttpClient,
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
   ) {}
@@ -74,7 +74,7 @@ export class SiigoSupportDocumentCreationHandler
         this.logger,
         'crear Documento Soporte',
         (accessToken, partnerId) =>
-          this.siigoSupportDocumentService.createSupportDocument(
+          this.siigoHttpClient.createSupportDocument(
             accessToken,
             supportDocumentPayload,
             partnerId,

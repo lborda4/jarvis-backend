@@ -3,6 +3,7 @@ export class RegisterRequestDto {
   email: string;
   password: string;
   nit: string;
+  inviteCode: string;
 }
 
 export class LoginRequestDto {

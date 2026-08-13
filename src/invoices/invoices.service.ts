@@ -11,7 +11,6 @@ import {
   MissingFileException,
   XmlParserException,
 } from '../common/exceptions/excel.exceptions';
-import { ElectronicDocumentType } from '../electronic-document/enums/electronic-document-type.enum';
 import { parseElectronicDocumentType } from '../electronic-document/helpers/electronic-document-type.helper';
 import { ElectronicDocumentService } from '../electronic-document/electronic-document.service';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
@@ -19,6 +18,7 @@ import { JarvisDocumentPreparationService } from '../integration/jarvis/jarvis-d
 import { SiigoDocumentPreparationService } from '../integration/siigo/siigo-document-preparation.service';
 import { ImportSessionService } from '../import-session/import-session.service';
 import { ExcelService } from '../common/services/excel.service';
+import { mapWithConcurrency } from '../common/helpers/concurrency.helper';
 import { ExtractInvoicesResponseDto } from './dto/extract-invoices-response.dto';
 import { ParseXmlResponseDto } from './dto/parse-xml-response.dto';
 import {
@@ -29,9 +29,12 @@ import {
 import { UploadXmlRequestDto } from './dto/upload-xml-request.dto';
 import { parseSupportDocumentExcel } from './helpers/support-document-excel.helper';
 import {
+  DianSalesInvoiceRow,
   mapDianSalesInvoiceRowToPayload,
   parseDianSalesInvoiceExcel,
 } from './helpers/sales-invoice-excel.helper';
+import { NextPymeApiClient } from '../integration/jarvis/nextpyme/nextpyme-api.client';
+import { mapNextPymeInvoiceQueryToElectronicDocumentPayload } from '../electronic-document/mappers/nextpyme-invoice-query-to-payload.mapper';
 import { applySupportDocumentIssueDate } from './helpers/support-document-issue-date.helper';
 import {
   buildSupportDocumentTemplateExcel,
@@ -44,6 +47,9 @@ import {
 } from './mappers/invoice-preview.mapper';
 import { mapGroupedSupportDocumentToPreview } from './mappers/support-document-preview.mapper';
 
+// Consultas simultáneas a NextPyme al enriquecer facturas de compra importadas.
+const PURCHASE_INVOICE_IMPORT_CONCURRENCY = 8;
+
 @Injectable()
 export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
@@ -55,6 +61,7 @@ export class InvoicesService {
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoDocumentPreparationService: SiigoDocumentPreparationService,
     private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
+    private readonly nextPymeApiClient: NextPymeApiClient,
   ) {}
 
   async previewSupportDocumentsFromExcel(
@@ -147,16 +154,11 @@ export class InvoicesService {
       companyId ?? '',
     );
 
-    const supplierNamesByNit =
-      await this.electronicDocumentService.buildSupplierNameLookupForGroups(
-        groups,
-        companyId ?? '',
-      );
     const records = groups.map((group, index) =>
       mapGroupedSupportDocumentToPreview(
         group,
         result.documentIds[index] ?? group.groupKey,
-        supplierNamesByNit,
+        result.supplierNamesByNit,
       ),
     );
 
@@ -166,10 +168,7 @@ export class InvoicesService {
 
     const resolvedCompanyId = companyId?.trim();
     if (resolvedCompanyId && result.documentIds.length > 0) {
-      const provider =
-        await this.electronicDocumentService.resolveDocumentProvider(
-          resolvedCompanyId,
-        );
+      const provider = result.provider;
 
       if (provider === IntegrationProvider.JARVIS) {
         this.jarvisDocumentPreparationService.prepareDocumentsInBackground(
@@ -211,13 +210,19 @@ export class InvoicesService {
       `Facturas de compra DIAN: filasLeídas=${processedRows}, facturasRecibidas=${rows.length}`,
     );
 
+    const rowsWithPayload = await mapWithConcurrency(
+      rows,
+      PURCHASE_INVOICE_IMPORT_CONCURRENCY,
+      async (row) => ({
+        issuerNit: row.issuerNit,
+        issuerName: row.issuerName,
+        payload: await this.buildPurchaseInvoicePayload(row),
+      }),
+    );
+
     const result =
       await this.electronicDocumentService.createFromPurchaseInvoiceRows(
-        rows.map((row) => ({
-          issuerNit: row.issuerNit,
-          issuerName: row.issuerName,
-          payload: mapDianSalesInvoiceRowToPayload(row),
-        })),
+        rowsWithPayload,
         companyId ?? '',
       );
 
@@ -264,6 +269,36 @@ export class InvoicesService {
       documentIds: result.documentIds,
       records,
     };
+  }
+
+  private async buildPurchaseInvoicePayload(
+    row: DianSalesInvoiceRow,
+  ): Promise<ReturnType<typeof mapDianSalesInvoiceRowToPayload>> {
+    if (!row.cufe) {
+      return mapDianSalesInvoiceRowToPayload(row);
+    }
+
+    const invoiceQueryResult = await this.nextPymeApiClient.getInvoiceByCufe(
+      row.cufe,
+    );
+
+    if (!invoiceQueryResult) {
+      return mapDianSalesInvoiceRowToPayload(row);
+    }
+
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      invoiceQueryResult,
+      row.cufe,
+    );
+
+    if (!(payload.totals.total > 0)) {
+      this.logger.warn(
+        `[cufe=${row.cufe}] La respuesta de NextPyme no trae montos válidos; se usa el resumen del Excel de la DIAN.`,
+      );
+      return mapDianSalesInvoiceRowToPayload(row);
+    }
+
+    return payload;
   }
 
   async extractInvoicesFromXml(
@@ -316,14 +351,6 @@ export class InvoicesService {
       );
       const rquid = session.rquid;
 
-      console.log('[XML import] factura de compra almacenada', {
-        rquid,
-        electronicDocumentId: electronicDocument.id,
-        electronicDocumentType,
-        buyerNit: parsedData.receptor.nit,
-        vendorNit: parsedData.emisor.nit,
-      });
-
       this.logger.log(
         `[rquid=${rquid}] XML procesado (buyerNit=${parsedData.receptor.nit}, vendorNit=${parsedData.emisor.nit})`,
       );
@@ -347,7 +374,6 @@ export class InvoicesService {
         'Error al parsear XML de factura',
         error instanceof Error ? error.stack : String(error),
       );
-      console.error(error);
 
       if (error instanceof InvalidXmlFormatException) {
         throw error;
@@ -385,15 +411,12 @@ export class InvoicesService {
     };
   }
 
-  getSupportDocumentTemplate(provider?: string): {
+  getSupportDocumentTemplate(): {
     buffer: Buffer;
     filename: string;
   } {
-    void provider;
-
-    // El nombre del tercero se resuelve por NIT (BD → SIIGO), no va en el Excel.
     return {
-      buffer: buildSupportDocumentTemplateExcel(false),
+      buffer: buildSupportDocumentTemplateExcel(),
       filename: SUPPORT_DOCUMENT_TEMPLATE_FILENAME,
     };
   }

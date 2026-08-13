@@ -67,23 +67,16 @@ function buildTemplateExampleRows(): string[][] {
   ];
 }
 
-export function buildSupportDocumentTemplateExcel(
-  includeSupplierName = true,
-): Buffer {
+export function buildSupportDocumentTemplateExcel(): Buffer {
+  // El nombre del tercero se resuelve por NIT (BD → SIIGO), no va en el Excel.
   const supplierNameIndex = TEMPLATE_HEADERS.indexOf('Nombre tercero');
-  const headers = includeSupplierName
-    ? [...TEMPLATE_HEADERS]
-    : TEMPLATE_HEADERS.filter((_, index) => index !== supplierNameIndex);
-  const exampleRows = buildTemplateExampleRows();
-  const rows = includeSupplierName
-    ? exampleRows
-    : exampleRows.map((row) =>
-        row.filter((_, index) => index !== supplierNameIndex),
-      );
-  const worksheet = XLSX.utils.aoa_to_sheet([
-    headers,
-    ...rows,
-  ]);
+  const headers = TEMPLATE_HEADERS.filter(
+    (_, index) => index !== supplierNameIndex,
+  );
+  const rows = buildTemplateExampleRows().map((row) =>
+    row.filter((_, index) => index !== supplierNameIndex),
+  );
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
 
   const columns = [
     { wch: 12 },
@@ -97,9 +90,9 @@ export function buildSupportDocumentTemplateExcel(
     { wch: 14 },
     { wch: 36 },
   ];
-  worksheet['!cols'] = includeSupplierName
-    ? columns
-    : columns.filter((_, index) => index !== supplierNameIndex);
+  worksheet['!cols'] = columns.filter(
+    (_, index) => index !== supplierNameIndex,
+  );
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Documentos soporte');

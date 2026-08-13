@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { AxiosRequestConfig } from 'axios';
 import { firstValueFrom } from 'rxjs';
@@ -34,16 +34,15 @@ import {
   SiigoTestBalanceReportResponse,
 } from '../interfaces/siigo-api.interface';
 
+const LOG_BODY_PREVIEW_LIMIT = 2000;
+
 @Injectable()
 export class SiigoHttpClient {
+  private readonly logger = new Logger(SiigoHttpClient.name);
+
   constructor(private readonly httpService: HttpService) {}
 
   async authenticate(payload: SiigoAuthRequestDto): Promise<SiigoAuthResponse> {
-    console.log('[SIIGO HTTP] POST /auth', {
-      username: payload.username,
-      hasAccessKey: Boolean(payload.access_key),
-    });
-
     return this.request<SiigoAuthResponse>({
       method: 'POST',
       url: `${SIIGO_API_BASE_URL}${SIIGO_AUTH_PATH}`,
@@ -60,12 +59,6 @@ export class SiigoHttpClient {
     branchOffice = 0,
     partnerId?: string,
   ): Promise<SiigoCustomer | null> {
-    console.log('[SIIGO HTTP] findCustomerByIdentificationAndBranch - params', {
-      identification,
-      branchOffice,
-      hasPartnerId: Boolean(partnerId),
-    });
-
     const response = await this.request<SiigoCustomersListResponse>({
       method: 'GET',
       url: `${SIIGO_API_BASE_URL}${SIIGO_CUSTOMERS_PATH}`,
@@ -76,19 +69,7 @@ export class SiigoHttpClient {
       },
     });
 
-    const customer = response.results?.[0] ?? null;
-
-    console.log('[SIIGO HTTP] findCustomerByIdentificationAndBranch - response', {
-      identification,
-      branchOffice,
-      resultsCount: response.results?.length ?? 0,
-      found: Boolean(customer),
-      customerId: customer?.id,
-      customerIdentification: customer?.identification,
-      customerCommercialName: customer?.commercial_name,
-    });
-
-    return customer;
+    return response.results?.[0] ?? null;
   }
 
   async createCustomer(
@@ -109,26 +90,6 @@ export class SiigoHttpClient {
     payload: SiigoPurchaseRequestDto,
     partnerId?: string,
   ): Promise<SiigoPurchaseResponse> {
-    console.log('[SIIGO purchase] ===== body POST /v1/purchases =====');
-    console.log('[SIIGO purchase] document:', JSON.stringify(payload.document, null, 2));
-    console.log('[SIIGO purchase] date:', payload.date);
-    console.log('[SIIGO purchase] supplier:', JSON.stringify(payload.supplier, null, 2));
-    if (payload.cost_center !== undefined) {
-      console.log('[SIIGO purchase] cost_center:', payload.cost_center);
-    }
-    console.log(
-      '[SIIGO purchase] provider_invoice:',
-      JSON.stringify(payload.provider_invoice, null, 2),
-    );
-    console.log('[SIIGO purchase] observations:', payload.observations ?? null);
-    console.log('[SIIGO purchase] items:', JSON.stringify(payload.items, null, 2));
-    console.log(
-      '[SIIGO purchase] payments:',
-      JSON.stringify(payload.payments, null, 2),
-    );
-    console.log('[SIIGO purchase] body completo:', JSON.stringify(payload, null, 2));
-    console.log('[SIIGO purchase] ====================================');
-
     return this.request<SiigoPurchaseResponse>({
       method: 'POST',
       url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASES_PATH}`,
@@ -137,26 +98,23 @@ export class SiigoHttpClient {
     });
   }
 
+  async deletePurchase(
+    accessToken: string,
+    siigoPurchaseId: string,
+    partnerId?: string,
+  ): Promise<SiigoSupportDocumentDeleteResponse> {
+    return this.request<SiigoSupportDocumentDeleteResponse>({
+      method: 'DELETE',
+      url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASES_PATH}/${encodeURIComponent(siigoPurchaseId)}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+    });
+  }
+
   async createSupportDocument(
     accessToken: string,
     payload: SiigoSupportDocumentRequestDto,
     partnerId?: string,
   ): Promise<SiigoSupportDocumentResponse> {
-    console.log(
-      '[SIIGO support-document] ===== body POST /v1/purchase-support-documents =====',
-    );
-    console.log('[SIIGO support-document] supplier:', JSON.stringify(payload.supplier, null, 2));
-    if (payload.cost_center !== undefined) {
-      console.log('[SIIGO support-document] cost_center:', payload.cost_center);
-    }
-    console.log(
-      '[SIIGO support-document] body completo:',
-      JSON.stringify(payload, null, 2),
-    );
-    console.log(
-      '[SIIGO support-document] ====================================',
-    );
-
     return this.request<SiigoSupportDocumentResponse>({
       method: 'POST',
       url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH}`,
@@ -170,10 +128,6 @@ export class SiigoHttpClient {
     siigoSupportDocumentId: string,
     partnerId?: string,
   ): Promise<SiigoSupportDocumentDeleteResponse> {
-    console.log(
-      `[SIIGO support-document] DELETE ${SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH}/${siigoSupportDocumentId}`,
-    );
-
     return this.request<SiigoSupportDocumentDeleteResponse>({
       method: 'DELETE',
       url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH}/${encodeURIComponent(siigoSupportDocumentId)}`,
@@ -293,20 +247,13 @@ export class SiigoHttpClient {
   }
 
   private async request<T>(config: AxiosRequestConfig): Promise<T> {
-    console.log('[SIIGO HTTP] ANTES request', {
-      method: config.method,
-      url: config.url,
-      params: config.params,
-    });
+    const requestPreview = this.preview(config.data);
 
-    if (config.data !== undefined) {
-      console.log('[SIIGO HTTP] request body');
-      console.log(
-        typeof config.data === 'string'
-          ? config.data
-          : JSON.stringify(config.data, null, 2),
-      );
-    }
+    this.logger.debug(
+      `[SIIGO HTTP] ${config.method} ${config.url}${
+        requestPreview ? ` body=${requestPreview}` : ''
+      }`,
+    );
 
     const response = await firstValueFrom(
       this.httpService.request<T>({
@@ -315,40 +262,36 @@ export class SiigoHttpClient {
       }),
     );
 
-    const responsePreview =
-      typeof response.data === 'object'
-        ? JSON.stringify(response.data)
-        : String(response.data);
-
-    console.log('[SIIGO HTTP] DESPUÉS request', {
-      method: config.method,
-      url: config.url,
-      status: response.status,
-      bodyPreview: responsePreview.slice(0, 2000),
-    });
-
     if (response.status < 200 || response.status >= 300) {
-      const errorBody =
-        typeof response.data === 'object'
-          ? JSON.stringify(response.data)
-          : String(response.data);
+      const errorBody = this.preview(response.data);
 
-      console.error('[SIIGO HTTP] error response', {
-        method: config.method,
-        url: config.url,
-        status: response.status,
-        requestBody:
-          config.data !== undefined
-            ? JSON.stringify(config.data, null, 2)
-            : null,
-        responseBody: response.data ?? errorBody,
-      });
+      this.logger.error(
+        `[SIIGO HTTP] ${config.method} ${config.url} respondió con estado ${response.status}: ${errorBody}` +
+          (requestPreview ? ` | body enviado=${requestPreview}` : ''),
+      );
 
       throw new Error(
         `SIIGO respondió con estado ${response.status}: ${errorBody}`,
       );
     }
 
+    this.logger.debug(
+      `[SIIGO HTTP] ${config.method} ${config.url} -> ${response.status} ${this.preview(response.data)}`,
+    );
+
     return response.data;
+  }
+
+  private preview(value: unknown): string {
+    if (value === undefined) {
+      return '';
+    }
+
+    const serialized =
+      typeof value === 'string' ? value : JSON.stringify(value);
+
+    return serialized.length > LOG_BODY_PREVIEW_LIMIT
+      ? `${serialized.slice(0, LOG_BODY_PREVIEW_LIMIT)}… (${serialized.length} chars)`
+      : serialized;
   }
 }

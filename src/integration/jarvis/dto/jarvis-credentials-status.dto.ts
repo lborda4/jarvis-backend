@@ -39,6 +39,9 @@ export class JarvisSubscriptionStatusDto {
   @ApiProperty()
   documentsUsed: number;
 
+  @ApiPropertyOptional({ nullable: true })
+  remaining: number | null;
+
   @ApiProperty({
     enum: ElectronicDocumentType,
     isArray: true,

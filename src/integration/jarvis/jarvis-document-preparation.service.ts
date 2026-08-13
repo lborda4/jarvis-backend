@@ -4,8 +4,11 @@ import { mapElectronicDocumentToListItem } from '../../electronic-document/mappe
 import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
-import { JarvisDocumentType } from './enums/jarvis-document-type.enum';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
+import {
+  normalizeJarvisDocumentNumber,
+  normalizeJarvisDocumentType,
+} from './helpers/jarvis-document-number.helper';
 
 @Injectable()
 export class JarvisDocumentPreparationService {
@@ -93,12 +96,12 @@ export class JarvisDocumentPreparationService {
       companyId,
     );
 
-    const documentNumber = this.normalizeDocument(
+    const documentNumber = normalizeJarvisDocumentNumber(
       document.payload.supplier.documentNumber ||
         document.documentNumberThird ||
         '',
     );
-    const documentType = this.normalizeDocumentType(
+    const documentType = normalizeJarvisDocumentType(
       document.payload.supplier.documentType || document.documentTypeThird,
     );
 
@@ -164,27 +167,4 @@ export class JarvisDocumentPreparationService {
     };
   }
 
-  private normalizeDocument(value: string): string {
-    return value.replace(/[^\dA-Za-z]/g, '').trim().toUpperCase();
-  }
-
-  private normalizeDocumentType(value?: string | null): string {
-    const normalized = String(value ?? '')
-      .trim()
-      .toUpperCase();
-
-    if (normalized.includes('CC') || normalized.includes('CEDULA')) {
-      return JarvisDocumentType.CC;
-    }
-
-    if (normalized.includes('CE') || normalized.includes('EXTRANJ')) {
-      return JarvisDocumentType.CE;
-    }
-
-    if (normalized.includes('PA') || normalized.includes('PASAPORTE')) {
-      return JarvisDocumentType.PA;
-    }
-
-    return JarvisDocumentType.NIT;
-  }
 }

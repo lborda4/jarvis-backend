@@ -35,6 +35,9 @@ export class SiigoSubscriptionStatusDto {
   @ApiProperty()
   documentsUsed: number;
 
+  @ApiPropertyOptional({ nullable: true })
+  remaining: number | null;
+
   @ApiProperty({
     enum: ElectronicDocumentType,
     isArray: true,

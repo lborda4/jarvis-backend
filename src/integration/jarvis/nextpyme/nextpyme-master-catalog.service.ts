@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   NextPymeApiClient,
   NextPymeMasterRow,
@@ -22,7 +22,12 @@ interface CacheEntry<T> {
 @Injectable()
 export class NextPymeMasterCatalogService {
   private readonly cache = new Map<string, CacheEntry<NextPymeMasterRow[]>>();
+  private readonly tableInFlight = new Map<
+    string,
+    Promise<NextPymeMasterRow[]>
+  >();
   private resolutionsCache: CacheEntry<NextPymeResolution[]> | null = null;
+  private resolutionsInFlight: Promise<NextPymeResolution[]> | null = null;
 
   constructor(private readonly nextPymeApiClient: NextPymeApiClient) {}
 
@@ -34,26 +39,12 @@ export class NextPymeMasterCatalogService {
     return ELECTRONIC_INVOICE_TYPE_ID;
   }
 
-  getDefaultMunicipalityId(): number {
-    return DEFAULT_MUNICIPALITY_ID;
-  }
-
   invalidateResolutionsCache(): void {
     this.resolutionsCache = null;
   }
 
   async listResolutions(): Promise<NextPymeResolution[]> {
     return this.getResolutions();
-  }
-
-  async findResolutionByTypeDocumentId(
-    typeDocumentId: number,
-  ): Promise<NextPymeResolution | null> {
-    const resolutions = await this.getResolutions();
-    return (
-      resolutions.find((item) => item.type_document_id === typeDocumentId) ??
-      null
-    );
   }
 
   getDefaultUnitMeasureId(): number {
@@ -119,41 +110,6 @@ export class NextPymeMasterCatalogService {
 
   async getTypeRegimes(): Promise<NextPymeMasterRow[]> {
     return this.getTable('type_regimes');
-  }
-
-  async getTypeOrganizations(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('type_organizations');
-  }
-
-  async getTypeDocumentIdentifications(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('type_document_identifications');
-  }
-
-  async resolveSupportDocumentNumber(): Promise<{
-    number: number;
-    prefix: string;
-    resolution: NextPymeResolution;
-  }> {
-    const resolutions = await this.getResolutions();
-    const supportResolutions = resolutions.filter(
-      (item) => item.type_document_id === SUPPORT_DOCUMENT_TYPE_ID,
-    );
-
-    const selected =
-      supportResolutions.find((item) => Number.isFinite(item.number)) ??
-      supportResolutions[0];
-
-    if (!selected) {
-      throw new BadRequestException(
-        'No hay resolución de Documento Soporte configurada. Configúrela antes de emitir.',
-      );
-    }
-
-    return {
-      number: selected.number,
-      prefix: selected.prefix || 'DS',
-      resolution: selected,
-    };
   }
 
   async resolveMunicipalityId(
@@ -262,9 +218,23 @@ export class NextPymeMasterCatalogService {
       return this.resolutionsCache.value;
     }
 
-    const value = await this.nextPymeApiClient.listResolutions();
-    this.resolutionsCache = { loadedAt: now, value };
-    return value;
+    // Comparte la misma promesa entre llamadas concurrentes en vez de
+    // disparar una request por cada una mientras el caché está frío.
+    if (this.resolutionsInFlight) {
+      return this.resolutionsInFlight;
+    }
+
+    this.resolutionsInFlight = this.nextPymeApiClient
+      .listResolutions()
+      .then((value) => {
+        this.resolutionsCache = { loadedAt: now, value };
+        return value;
+      })
+      .finally(() => {
+        this.resolutionsInFlight = null;
+      });
+
+    return this.resolutionsInFlight;
   }
 
   private async getTable(table: string): Promise<NextPymeMasterRow[]> {
@@ -275,9 +245,23 @@ export class NextPymeMasterCatalogService {
       return cached.value;
     }
 
-    const value = await this.nextPymeApiClient.fetchMasterTable(table);
-    this.cache.set(table, { loadedAt: now, value });
-    return value;
+    const inFlight = this.tableInFlight.get(table);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = this.nextPymeApiClient
+      .fetchMasterTable(table)
+      .then((value) => {
+        this.cache.set(table, { loadedAt: now, value });
+        return value;
+      })
+      .finally(() => {
+        this.tableInFlight.delete(table);
+      });
+
+    this.tableInFlight.set(table, request);
+    return request;
   }
 
   private normalizeText(value?: string | null): string {

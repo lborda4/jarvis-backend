@@ -12,13 +12,6 @@ export function handleSiigoApiError(
 
   const parsedDetail = parseSiigoErrorDetail(rawMessage);
 
-  console.error('[SIIGO] error API', {
-    action,
-    rawMessage,
-    parsedDetail,
-    stack: error instanceof Error ? error.stack : undefined,
-  });
-
   logger.error(
     `Error al ${action} en SIIGO: ${formatSiigoErrorMessage(parsedDetail, rawMessage)}`,
     error instanceof Error ? error.stack : String(error),

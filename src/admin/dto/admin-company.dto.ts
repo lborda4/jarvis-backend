@@ -88,6 +88,13 @@ export class AdminCompanyListItemDto {
   @ApiProperty()
   createdAt: string;
 
+  @ApiProperty({
+    description:
+      'Código que deben ingresar los nuevos usuarios junto con el NIT para vincularse a esta empresa.',
+    example: 'AB3DEFGH2K',
+  })
+  inviteCode: string;
+
   @ApiProperty({ type: [AdminIntegrationItemDto] })
   integrations: AdminIntegrationItemDto[];
 }
@@ -194,4 +201,9 @@ export class ListAdminCompaniesResponseDto {
 export class ListAdminPlansResponseDto {
   @ApiProperty({ type: [AdminPlanDto] })
   items: AdminPlanDto[];
+}
+
+export class RegenerateCompanyInviteCodeResponseDto {
+  @ApiProperty({ type: AdminCompanyListItemDto })
+  company: AdminCompanyListItemDto;
 }

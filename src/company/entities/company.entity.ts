@@ -23,6 +23,9 @@ export class Company {
   @Column()
   name: string;
 
+  @Column({ name: 'invite_code', unique: true, length: 20 })
+  inviteCode: string;
+
   @Column({
     name: 'person_type',
     type: 'varchar',
