@@ -181,6 +181,29 @@ export class ElectronicDocumentService {
     return updated;
   }
 
+  /**
+   * Otros documentos de la misma empresa y proveedor (mismo NIT) que
+   * quedaron en SUPPLIER_NOT_FOUND — usado para propagar la creación de un
+   * tercero a todos los documentos pendientes de ese proveedor, no solo al
+   * que disparó la creación.
+   */
+  findSupplierNotFoundSiblings(
+    companyId: string,
+    documentNumberThird: string,
+    excludeId: string,
+  ): Promise<ElectronicDocument[]> {
+    if (!documentNumberThird.trim()) {
+      return Promise.resolve([]);
+    }
+
+    return this.electronicDocumentsRepository.findByCompanySupplierAndStatus(
+      companyId,
+      documentNumberThird.trim(),
+      ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
+      excludeId,
+    );
+  }
+
   async markPurchaseCreated(
     documentId: string,
     siigoPurchaseId: string,

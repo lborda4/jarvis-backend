@@ -161,10 +161,70 @@ export class JarvisDocumentPreparationService {
       companyId,
     );
 
+    await this.resolvePendingSiblings(
+      trimmedId,
+      companyId,
+      documentNumber,
+      tercero.name,
+    );
+
     return {
       documentId: trimmedId,
       nextStep: 'READY',
     };
+  }
+
+  /**
+   * Al crear/encontrar el tercero para un documento, otros documentos ya
+   * importados del mismo proveedor (mismo NIT) que quedaron esperando a que
+   * el tercero existiera no se enteran solos — se actualizan aquí también,
+   * en vez de quedar en "Requiere proveedor" hasta que alguien reintente
+   * uno por uno.
+   */
+  private async resolvePendingSiblings(
+    resolvedDocumentId: string,
+    companyId: string,
+    documentNumberThird: string,
+    supplierName: string,
+  ): Promise<void> {
+    const siblings = await this.electronicDocumentService.findSupplierNotFoundSiblings(
+      companyId,
+      documentNumberThird,
+      resolvedDocumentId,
+    );
+
+    await Promise.all(
+      siblings.map(async (sibling) => {
+        try {
+          await this.electronicDocumentService.updatePayloadAndStatus(
+            sibling.id,
+            {
+              ...sibling.payload,
+              supplier: {
+                ...sibling.payload.supplier,
+                name: supplierName,
+                commercialName: supplierName,
+              },
+            },
+            ElectronicDocumentStatus.ACCOUNT_MAPPED,
+            companyId,
+          );
+          await this.electronicDocumentService.updateProcessingMetadata(
+            sibling.id,
+            {
+              supplierExistsInSiigo: true,
+              processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED,
+            },
+            companyId,
+          );
+        } catch (error) {
+          this.logger.error(
+            `[documentId=${sibling.id}] Error al propagar tercero resuelto`,
+            error instanceof Error ? error.stack : String(error),
+          );
+        }
+      }),
+    );
   }
 
 }

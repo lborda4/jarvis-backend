@@ -8,6 +8,7 @@ export class SiigoSupplierRequestDto {
   commercial_name?: string;
   active?: boolean;
   vat_responsible?: boolean;
+  fiscal_responsibilities: Array<{ code: string; name?: string }>;
   address?: {
     address: string;
     city: {

@@ -23,6 +23,13 @@ export const SIIGO_NIT_ID_TYPE = '31';
 export const SIIGO_CEDULA_ID_TYPE = '13';
 export const SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT = 'Account';
 
+// DIAN: código de responsabilidad fiscal por defecto ("No aplica – Otros"),
+// usado cuando no se conoce la responsabilidad real del tercero. SIIGO exige
+// fiscal_responsibilities como campo obligatorio al crear un tercero.
+export const SIIGO_DEFAULT_FISCAL_RESPONSIBILITY_CODE = 'R-99-PN';
+export const SIIGO_DEFAULT_FISCAL_RESPONSIBILITY_NAME = 'No aplica – Otros';
+export const SIIGO_CONTACT_NAME_MAX_LENGTH = 50;
+
 export const SIIGO_DOCUMENT_SEND_INTERVAL_MS = 1000;
 export const SIIGO_DOCUMENT_SEND_MAX_RETRIES = 3;
 export const SIIGO_DOCUMENT_SEND_RETRY_DELAY_MS = 1000;

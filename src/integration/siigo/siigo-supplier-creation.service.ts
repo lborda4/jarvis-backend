@@ -213,6 +213,13 @@ export class SiigoSupplierCreationService {
       companyId,
     );
 
+    await this.resolvePendingSiblings(
+      documentId,
+      companyId,
+      normalizedDocumentNumber,
+      supplierName,
+    );
+
     return {
       success: true,
       supplier: mapSiigoCustomerToCreatedSupplierResponse(
@@ -220,6 +227,60 @@ export class SiigoSupplierCreationService {
         electronicDocument.payload,
       ),
     };
+  }
+
+  /**
+   * Otros documentos ya importados del mismo proveedor (mismo NIT) que
+   * quedaron en SUPPLIER_NOT_FOUND no se enteran solos de que el tercero ya
+   * se creó en SIIGO — se actualizan aquí también, en vez de quedar en
+   * "Requiere proveedor" hasta que alguien reintente uno por uno.
+   */
+  private async resolvePendingSiblings(
+    resolvedDocumentId: string,
+    companyId: string,
+    normalizedDocumentNumber: string,
+    supplierName: string,
+  ): Promise<void> {
+    const siblings =
+      await this.electronicDocumentService.findSupplierNotFoundSiblings(
+        companyId,
+        normalizedDocumentNumber,
+        resolvedDocumentId,
+      );
+
+    await Promise.all(
+      siblings.map(async (sibling) => {
+        try {
+          await this.electronicDocumentService.updatePayloadAndStatus(
+            sibling.id,
+            {
+              ...sibling.payload,
+              supplier: {
+                ...sibling.payload.supplier,
+                name: supplierName,
+                commercialName: supplierName,
+              },
+            },
+            ElectronicDocumentStatus.ACCOUNT_REQUIRED,
+            companyId,
+          );
+          await this.electronicDocumentService.updateProcessingMetadata(
+            sibling.id,
+            {
+              supplierExistsInSiigo: true,
+              processingStatus:
+                ElectronicDocumentProcessingStatus.ACCOUNT_REQUIRED,
+            },
+            companyId,
+          );
+        } catch (error) {
+          this.logger.error(
+            `[documentId=${sibling.id}] Error al propagar tercero SIIGO resuelto`,
+            error instanceof Error ? error.stack : String(error),
+          );
+        }
+      }),
+    );
   }
 
   private async findSupplierInSiigoWithRetries(

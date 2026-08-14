@@ -13,6 +13,7 @@ import {
 const REQUIRED_COLUMNS_MESSAGE =
   'Fecha, Tipo de documento, Numero de documento, Prefijo, Consecutivo, Descripcion';
 
+
 const COLUMN_ALIASES = {
   issueDate: ['fecha', 'fecha emision'],
   supplierDocumentType: [
@@ -71,7 +72,9 @@ export function parseSupportDocumentExcel(
   let workbook: XLSX.WorkBook;
 
   try {
-    workbook = XLSX.read(buffer, { type: 'buffer' });
+    // cellDates:true hace que las celdas de fecha se parseen como Date real
+    // (cell.v) en vez de un código numérico de serie de Excel.
+    workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   } catch {
     throw new InvalidExcelFormatException(
       'No se pudo leer el archivo Excel de Documentos Soporte.',
@@ -85,10 +88,18 @@ export function parseSupportDocumentExcel(
   }
 
   const sheet = workbook.Sheets[sheetName];
-  const matrix = XLSX.utils.sheet_to_json<Array<string | number>>(sheet, {
+  // raw:true es obligatorio para que sheet_to_json use cell.v (el Date real)
+  // en vez de cell.w — el texto ya formateado por SheetJS usando el formato
+  // numérico embebido en el archivo, casi siempre m/d/aaaa (EE. UU.) aunque
+  // Excel lo muestre como d/m/aaaa. Con raw:false, sheet_to_json ignora
+  // cellDates y devuelve ese texto ambiguo tal cual — probado directamente
+  // contra SheetJS, dateNF NO alcanza a corregirlo porque cell.w ya viene
+  // calculado desde la lectura del workbook. getCellValue formatea el Date
+  // real como dd/mm/aaaa de forma determinista (ver formatCellDate).
+  const matrix = XLSX.utils.sheet_to_json<Array<string | number | Date>>(sheet, {
     header: 1,
     defval: '',
-    raw: false,
+    raw: true,
     blankrows: false,
   });
 
@@ -110,7 +121,7 @@ export function parseSupportDocumentExcel(
 }
 
 function parseSupportDocumentMatrix(
-  matrix: Array<Array<string | number>>,
+  matrix: Array<Array<string | number | Date>>,
 ): GroupedSupportDocument[] | null {
   const headerRowIndex = findHeaderRowIndex(matrix);
 
@@ -132,7 +143,7 @@ function parseSupportDocumentObjects(
 ): GroupedSupportDocument[] | null {
   const objectRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: '',
-    raw: false,
+    raw: true,
     blankrows: false,
   });
 
@@ -162,7 +173,7 @@ function parseSupportDocumentObjects(
         return '';
       }
 
-      return value as string | number;
+      return value as string | number | Date;
     });
     const parsedRow = mapSupportDocumentRow(matrixRow, columnIndexes);
 
@@ -179,7 +190,7 @@ function parseSupportDocumentObjects(
 }
 
 function parseRowsFromMatrix(
-  matrix: Array<Array<string | number>>,
+  matrix: Array<Array<string | number | Date>>,
   headerRowIndex: number,
   columnIndexes: Record<RequiredSupportDocumentColumnKey, number> &
     Partial<Record<SupportDocumentColumnKey, number>>,
@@ -265,7 +276,7 @@ export function buildSupportDocumentGroupKey(
   ].join('|');
 }
 
-function findHeaderRowIndex(matrix: Array<Array<string | number>>): number {
+function findHeaderRowIndex(matrix: Array<Array<string | number | Date>>): number {
   for (let rowIndex = 0; rowIndex < matrix.length; rowIndex++) {
     if (mapColumnIndexes(matrix[rowIndex] ?? [])) {
       return rowIndex;
@@ -276,7 +287,7 @@ function findHeaderRowIndex(matrix: Array<Array<string | number>>): number {
 }
 
 function mapColumnIndexes(
-  headerRow: Array<string | number>,
+  headerRow: Array<string | number | Date>,
 ): (Record<RequiredSupportDocumentColumnKey, number> &
   Partial<Record<SupportDocumentColumnKey, number>>) | null {
   const normalizedHeaders = headerRow.map((cell) => normalizeHeader(cell));
@@ -362,7 +373,7 @@ function headerMatches(header: string, aliases: readonly string[]): boolean {
 }
 
 function mapSupportDocumentRow(
-  row: Array<string | number>,
+  row: Array<string | number | Date>,
   columnIndexes: Record<RequiredSupportDocumentColumnKey, number> &
     Partial<Record<SupportDocumentColumnKey, number>>,
 ): SupportDocumentExcelRow | null {
@@ -433,7 +444,7 @@ function mapSupportDocumentRow(
   };
 }
 
-function describeDetectedHeaders(matrix: Array<Array<string | number>>): string {
+function describeDetectedHeaders(matrix: Array<Array<string | number | Date>>): string {
   const samples = matrix
     .slice(0, 5)
     .map((row, rowIndex) => {
@@ -453,7 +464,7 @@ function describeDetectedHeaders(matrix: Array<Array<string | number>>): string 
 }
 
 function getCellValue(
-  row: Array<string | number>,
+  row: Array<string | number | Date>,
   columnIndex?: number,
 ): string {
   if (columnIndex === undefined) {
@@ -466,11 +477,29 @@ function getCellValue(
     return '';
   }
 
+  if (value instanceof Date) {
+    return formatCellDate(value);
+  }
+
   return String(value).trim();
 }
 
+/**
+ * Formatea una celda de fecha (Date real, gracias a cellDates:true +
+ * raw:true) como dd/mm/aaaa usando componentes locales — nunca depende del
+ * formato numérico embebido en el archivo ni de toISOString() (que puede
+ * correr el día por la conversión a UTC).
+ */
+function formatCellDate(value: Date): string {
+  const day = String(value.getDate()).padStart(2, '0');
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const year = value.getFullYear();
+
+  return `${day}/${month}/${year}`;
+}
+
 function getNumberValue(
-  row: Array<string | number>,
+  row: Array<string | number | Date>,
   columnIndex: number | undefined,
   fallback: number,
 ): number {
@@ -490,7 +519,7 @@ function normalizeIdentification(value: string): string {
   return value.replace(/[^\dA-Za-z]/g, '').trim().toUpperCase();
 }
 
-function normalizeHeader(value: string | number): string {
+function normalizeHeader(value: string | number | Date): string {
   return String(value)
     .replace(/^\uFEFF/, '')
     .replace(/\u00A0/g, ' ')

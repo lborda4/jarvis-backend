@@ -238,6 +238,23 @@ export class ElectronicDocumentsRepository {
     };
   }
 
+  findByCompanySupplierAndStatus(
+    companyId: string,
+    documentNumberThird: string,
+    status: ElectronicDocumentStatus,
+    excludeId: string,
+  ): Promise<ElectronicDocument[]> {
+    return this.repository
+      .createQueryBuilder('document')
+      .where('document.companyId = :companyId', { companyId })
+      .andWhere('document.documentNumberThird = :documentNumberThird', {
+        documentNumberThird,
+      })
+      .andWhere('document.status = :status', { status })
+      .andWhere('document.id != :excludeId', { excludeId })
+      .getMany();
+  }
+
   async findDistinctCompanies(): Promise<
     Array<{ id: string; name: string; nit: string }>
   > {
