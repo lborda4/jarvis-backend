@@ -7,6 +7,11 @@ import {
   SupplierRetentionPreference,
 } from '../../integration/interfaces/supplier-mapping-value.interface';
 import { SuggestedItemTax } from '../../integration/siigo/helpers/siigo-item-tax-suggestion.helper';
+import {
+  SuggestedItemAccount,
+  SuggestedProduct,
+  SuggestedPurchaseItemConfig,
+} from '../../integration/helpers/supplier-preference.helper';
 
 export function mapElectronicDocumentToListItem(
   document: ElectronicDocument,
@@ -15,6 +20,9 @@ export function mapElectronicDocumentToListItem(
   suggestedRetentions: SupplierRetentionPreference[] = [],
   suggestedCostCenter: SupplierCostCenterPreference | null = null,
   itemTaxSuggestions: Array<SuggestedItemTax | null> = [],
+  suggestedItemConfig: SuggestedPurchaseItemConfig | null = null,
+  itemAccountSuggestions: Array<SuggestedItemAccount | null> = [],
+  suggestedProduct: SuggestedProduct | null = null,
 ): ElectronicDocumentListItemDto {
   return {
     id: document.id,
@@ -23,6 +31,9 @@ export function mapElectronicDocumentToListItem(
     cufe: document.cufe,
     invoiceNumber: document.payload?.invoice?.number ?? null,
     issueDate: document.payload?.invoice?.issueDate ?? null,
+    dueDate: document.payload?.invoice?.dueDate ?? null,
+    paymentDurationMeasure: document.payload?.invoice?.durationMeasure ?? null,
+    documentDiscount: document.payload?.totals?.discount ?? null,
     supplierName: document.payload?.supplier?.name ?? null,
     supplierNit:
       document.documentNumberThird ??
@@ -32,18 +43,26 @@ export function mapElectronicDocumentToListItem(
       document.documentTypeThird ??
       document.payload?.supplier?.documentType ??
       null,
+    documentSubtotal: Number(document.payload?.totals?.subtotal ?? 0),
+    documentIva: Number(document.payload?.totals?.iva ?? 0),
     total: Number(document.payload?.totals?.total ?? 0),
     status: document.status,
     electronicDocumentType: document.electronicDocumentType,
     siigoDocumentNumber: document.siigoDocumentNumber,
     supplierExistsInSiigo: document.supplierExistsInSiigo,
     suggestedAccount,
+    suggestedProduct,
     suggestedPaymentMethod,
     suggestedRetentions,
     suggestedCostCenter,
+    suggestedItemConfig,
     processingStatus: document.processingStatus,
     observations: document.payload?.observations?.trim() || null,
-    items: mapDocumentItems(document, itemTaxSuggestions),
+    items: mapDocumentItems(
+      document,
+      itemTaxSuggestions,
+      itemAccountSuggestions,
+    ),
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
   };
@@ -52,6 +71,7 @@ export function mapElectronicDocumentToListItem(
 function mapDocumentItems(
   document: ElectronicDocument,
   itemTaxSuggestions: Array<SuggestedItemTax | null>,
+  itemAccountSuggestions: Array<SuggestedItemAccount | null>,
 ): ElectronicDocumentListItemDto['items'] {
   const items = document.payload?.items;
 
@@ -64,6 +84,9 @@ function mapDocumentItems(
     quantity: item.cantidad > 0 ? item.cantidad : 1,
     unitValue: item.valorUnitario > 0 ? item.valorUnitario : item.total,
     total: item.total,
+    ...(item.codigo?.trim() ? { code: item.codigo.trim() } : {}),
+    ...(item.discount ? { discount: item.discount } : {}),
     suggestedTax: itemTaxSuggestions[index] ?? null,
+    suggestedAccount: itemAccountSuggestions[index] ?? null,
   }));
 }

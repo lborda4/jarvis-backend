@@ -4,6 +4,7 @@ import { SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT } from '../constants/siigo.constants';
 import { SiigoSupportDocumentRequestDto } from '../dto/siigo-support-document-request.dto';
 import { SiigoSupportDocumentConfig } from '../helpers/siigo-runtime-config.helper';
 import { splitNitAndCheckDigit } from '../helpers/siigo-nit.helper';
+import { truncateSiigoObservations } from '../helpers/siigo-observations.helper';
 import { buildSiigoSupportDocumentPayment } from '../helpers/siigo-purchase-total.helper';
 
 export function mapElectronicDocumentToSiigoSupportDocument(
@@ -38,11 +39,12 @@ export function mapElectronicDocumentToSiigoSupportDocument(
     };
   });
 
-  const observations =
+  const observations = truncateSiigoObservations(
     payload.observations?.trim() ||
-    (payload.invoice.cufe?.trim()
-      ? `CUFE: ${payload.invoice.cufe.trim()}`
-      : `Documento Soporte ${supplierReceiptNumber.prefix}-${supplierReceiptNumber.number}`);
+      (payload.invoice.cufe?.trim()
+        ? `CUFE: ${payload.invoice.cufe.trim()}`
+        : `Documento Soporte ${supplierReceiptNumber.prefix}-${supplierReceiptNumber.number}`),
+  );
 
   const request: SiigoSupportDocumentRequestDto = {
     document: { id: config.documentId },
@@ -108,10 +110,7 @@ function buildSupplierReceiptNumber(payload: ElectronicDocumentPayload): {
   const prefix = payload.invoice.prefix?.trim() || 'DS';
   const fullNumber = payload.invoice.number?.trim() || '';
 
-  if (
-    prefix &&
-    fullNumber.toUpperCase().startsWith(prefix.toUpperCase())
-  ) {
+  if (prefix && fullNumber.toUpperCase().startsWith(prefix.toUpperCase())) {
     const numberPart = fullNumber.slice(prefix.length).trim();
     const digitsOnly = numberPart.replace(/\D/g, '');
 

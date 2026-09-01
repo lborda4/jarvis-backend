@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Company } from '../../company/entities/company.entity';
+import type { SupplierFieldVariability } from '../interfaces/supplier-field-variability.interface';
 import type { SupplierPreferenceSnapshot } from '../interfaces/supplier-preference.interface';
 import { Integration } from './integration.entity';
 
@@ -36,6 +37,28 @@ export class SupplierConfiguration {
 
   @Column({ type: 'jsonb', nullable: true })
   preference: SupplierPreferenceSnapshot | null;
+
+  /**
+   * Señal general de estabilidad de la CUENTA CONTABLE únicamente (≥70% del
+   * historial de líneas en la misma cuenta ⇒ false); true = varía; null =
+   * aún no se calculó. Se mantiene como indicador rápido/de uso puntual
+   * (ej. SiigoPurchaseAiClassificationService decide si vale la pena llamar
+   * IA), pero YA NO es el gate de las sugerencias automáticas — ver
+   * `campoVariabilidad`, que evalúa cada campo (cuenta, impuestos, medio de
+   * pago...) de forma independiente, porque un proveedor puede ser 100%
+   * constante en cuenta contable y variar en medio de pago (o viceversa) sin
+   * que eso deba apagar TODAS las sugerencias.
+   */
+  @Column({ name: 'tiene_variabilidad', type: 'boolean', nullable: true })
+  tieneVariabilidad: boolean | null;
+
+  /** Variabilidad calculada por campo (cuentaPuc, tipoItem, medioPago, iva,
+   * retefuente, reteica, autorretencion) — ver SupplierFieldVariability. */
+  @Column({ name: 'campo_variabilidad', type: 'jsonb', nullable: true })
+  campoVariabilidad: SupplierFieldVariability | null;
+
+  @Column({ name: 'ultima_actualizacion', type: 'timestamptz', nullable: true })
+  ultimaActualizacion: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

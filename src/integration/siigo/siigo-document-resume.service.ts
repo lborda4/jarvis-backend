@@ -1,8 +1,4 @@
-import {
-  BadGatewayException,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { mapElectronicDocumentToListItem } from '../../electronic-document/mappers/electronic-document-list-item.mapper';
@@ -31,7 +27,9 @@ export class SiigoDocumentResumeService {
     options?: { prepareOnly?: boolean },
   ): Promise<ResumeElectronicDocumentsBatchResponseDto> {
     const uniqueIds = [
-      ...new Set(documentIds.map((documentId) => documentId?.trim()).filter(Boolean)),
+      ...new Set(
+        documentIds.map((documentId) => documentId?.trim()).filter(Boolean),
+      ),
     ];
 
     if (uniqueIds.length === 0) {
@@ -67,7 +65,8 @@ export class SiigoDocumentResumeService {
 
     if (
       (document.status === ElectronicDocumentStatus.ACCOUNT_REQUIRED ||
-        document.status === ElectronicDocumentStatus.ACCOUNT_MAPPING_REQUIRED) &&
+        document.status ===
+          ElectronicDocumentStatus.ACCOUNT_MAPPING_REQUIRED) &&
       document.supplierExistsInSiigo === true
     ) {
       return this.buildResponse('ACCOUNT_REQUIRED', document.id, companyId);
@@ -75,6 +74,29 @@ export class SiigoDocumentResumeService {
 
     if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
       return this.buildResponse('COMPLETED', document.id, companyId);
+    }
+
+    // Por defecto SOLO prepara (valida proveedor/cuenta) — nunca crea la
+    // factura en SIIGO a menos que el llamador pida explícitamente lo
+    // contrario (ver comentario más abajo). Se calcula acá, ANTES de tocar
+    // el documento, para el chequeo de PURCHASE_FAILED de abajo.
+    const prepareOnly = options?.prepareOnly ?? true;
+
+    if (
+      document.status === ElectronicDocumentStatus.PURCHASE_FAILED &&
+      prepareOnly
+    ) {
+      // Proveedor y cuenta ya estaban bien (si no, el documento nunca habría
+      // llegado a intentar crearse en SIIGO) — volver a correr
+      // prepareSupplierAndAccounts acá no reintenta nada de verdad, solo
+      // tiene el efecto colateral de limpiar el status de error (vía
+      // validateAccountMapping, que sobrescribe el status a ACCOUNT_MAPPED
+      // sin importar cuál era antes). Bug real reportado en producción: el
+      // botón "Reintentar" (que llama a este resume individual en modo
+      // prepareOnly) dejaba estas filas en "Pendiente" sin haber reenviado
+      // nada. Si en el futuro se quiere reintentar el envío real, debe
+      // llamarse con prepareOnly=false explícito.
+      return this.buildResponse('FAILED', document.id, companyId);
     }
 
     try {
@@ -93,12 +115,16 @@ export class SiigoDocumentResumeService {
         return this.buildResponse('ACCOUNT_REQUIRED', document.id, companyId);
       }
 
-      const refreshedDocument = await this.electronicDocumentService.requireById(
-        trimmedId,
-        companyId,
-      );
+      const refreshedDocument =
+        await this.electronicDocumentService.requireById(trimmedId, companyId);
+      // Antes esto quedaba habilitado por defecto para el resume
+      // individual (a diferencia de resumeBatch, que ya defaultea a
+      // prepareOnly=true), y como ESTE resume es justo el que se dispara
+      // solo después de importar un Excel, un documento que llegaba con la
+      // cuenta ya resuelta (por preferencia guardada o sugerencia de IA) se
+      // enviaba a SIIGO sin que el usuario tocara "Enviar".
       const shouldCreateInSiigo =
-        !options?.prepareOnly &&
+        !prepareOnly &&
         refreshedDocument.electronicDocumentType !==
           ElectronicDocumentType.SUPPORT_DOCUMENT;
 
@@ -129,14 +155,24 @@ export class SiigoDocumentResumeService {
       );
 
       if (refreshed.status === ElectronicDocumentStatus.SUPPLIER_NOT_FOUND) {
-        return this.buildResponse('SUPPLIER_REQUIRED', document.id, companyId, message);
+        return this.buildResponse(
+          'SUPPLIER_REQUIRED',
+          document.id,
+          companyId,
+          message,
+        );
       }
 
       if (
         refreshed.status === ElectronicDocumentStatus.ACCOUNT_REQUIRED ||
         refreshed.status === ElectronicDocumentStatus.ACCOUNT_MAPPING_REQUIRED
       ) {
-        return this.buildResponse('ACCOUNT_REQUIRED', document.id, companyId, message);
+        return this.buildResponse(
+          'ACCOUNT_REQUIRED',
+          document.id,
+          companyId,
+          message,
+        );
       }
 
       return this.buildResponse('FAILED', document.id, companyId, message);
@@ -161,7 +197,9 @@ export class SiigoDocumentResumeService {
     };
   }
 
-  private async createBatchContext(companyId: string): Promise<SiigoBatchContext> {
+  private async createBatchContext(
+    companyId: string,
+  ): Promise<SiigoBatchContext> {
     return {
       authContext: await this.siigoAuthService.getValidAuthContext(companyId),
       localSupplierNamesByNit: new Map(),

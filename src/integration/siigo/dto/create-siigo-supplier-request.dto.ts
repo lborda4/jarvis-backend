@@ -1,8 +1,10 @@
 export class CreateSiigoSupplierRequestDto {
   documentId: string;
 
-  /** person | company — obligatorio para SIIGO */
-  person_type: string;
+  /** person | company. Si no viene (ej. creación automática en segundo
+   * plano), se infiere del documentType del proveedor (NIT -> company,
+   * cédula -> person). */
+  person_type?: string;
 
   /** Datos del modal (autocomplete NextPyme / captura manual). */
   name?: string;

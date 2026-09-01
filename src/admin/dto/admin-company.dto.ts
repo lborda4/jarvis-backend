@@ -95,6 +95,24 @@ export class AdminCompanyListItemDto {
   })
   inviteCode: string;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Token Bearer propio de la empresa para NextPyme. Si es null, la consulta de factura de compra por CUFE usa el token global (NEXTPYME_API_TOKEN).',
+  })
+  nextPymeToken: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Código DANE de la ciudad de la empresa. Se usa como default de ciudad al crear un tercero en SIIGO cuando el proveedor no trae dirección propia.',
+    example: '11001',
+  })
+  cityCode: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Bogotá, D.C.' })
+  cityName: string | null;
+
   @ApiProperty({ type: [AdminIntegrationItemDto] })
   integrations: AdminIntegrationItemDto[];
 }
@@ -154,6 +172,21 @@ export class CreateAdminCompanyRequestDto {
       'Datos tributarios extraídos del RUT para prellenar la configuración Jarvis.',
   })
   jarvisCredentials?: JarvisCredentialsSeedDto;
+
+  @ApiPropertyOptional({
+    description: 'Código DANE de la ciudad de la empresa.',
+    example: '11001',
+  })
+  cityCode?: string;
+
+  @ApiPropertyOptional({ example: 'Bogotá, D.C.' })
+  cityName?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Token Bearer propio de la empresa para NextPyme. Si se omite, la consulta de factura de compra por CUFE usa el token global (NEXTPYME_API_TOKEN).',
+  })
+  nextPymeToken?: string;
 }
 
 export class UpdateIntegrationSubscriptionRequestDto {
@@ -206,4 +239,59 @@ export class ListAdminPlansResponseDto {
 export class RegenerateCompanyInviteCodeResponseDto {
   @ApiProperty({ type: AdminCompanyListItemDto })
   company: AdminCompanyListItemDto;
+}
+
+export class UpdateCompanyNextPymeTokenRequestDto {
+  @ApiProperty({
+    description:
+      'Token Bearer de NextPyme para esta empresa. Enviar vacío/null para volver a usar el token global.',
+    example: 'e7f162aab2e81ec13840102d744c31eb6504f5d7a94cc8ca5709acdcaef16c30',
+  })
+  nextPymeToken: string | null;
+}
+
+export class UpdateCompanyNextPymeTokenResponseDto {
+  @ApiProperty({ type: AdminCompanyListItemDto })
+  company: AdminCompanyListItemDto;
+}
+
+export class UpdateCompanyCityRequestDto {
+  @ApiPropertyOptional({
+    description:
+      'Código DANE de la ciudad. Enviar vacío/null para quitar la ciudad configurada.',
+    example: '11001',
+    nullable: true,
+  })
+  cityCode: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Bogotá, D.C.' })
+  cityName: string | null;
+}
+
+export class UpdateCompanyCityResponseDto {
+  @ApiProperty({ type: AdminCompanyListItemDto })
+  company: AdminCompanyListItemDto;
+}
+
+export class AdminCityOptionDto {
+  @ApiProperty({ description: 'Código DANE de la ciudad.', example: '11001' })
+  code: string;
+
+  @ApiProperty({ example: 'Bogotá, D.C.' })
+  name: string;
+}
+
+export class ListAdminCitiesResponseDto {
+  @ApiProperty({ type: [AdminCityOptionDto] })
+  items: AdminCityOptionDto[];
+}
+
+export class LookupAdminCompanyNameResponseDto {
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Empresa Ejemplo SAS',
+    description:
+      'Razón social encontrada en el RUT/RUES de la DIAN. Null si no se encontró.',
+  })
+  name: string | null;
 }

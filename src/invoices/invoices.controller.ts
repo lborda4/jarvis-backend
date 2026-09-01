@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Header,
+  Param,
   Post,
   StreamableFile,
   UploadedFile,
@@ -19,6 +20,11 @@ import {
   ImportSupportDocumentsResponseDto,
 } from './dto/import-support-documents.dto';
 import { ParseXmlResponseDto } from './dto/parse-xml-response.dto';
+import {
+  PurchaseInvoiceImportStatusResponseDto,
+  StartPurchaseInvoiceImportResponseDto,
+} from './dto/purchase-invoice-import-job.dto';
+import { PurchaseInvoiceValidationReportDto } from './dto/purchase-invoice-import-validation.dto';
 import { UploadXmlRequestDto } from './dto/upload-xml-request.dto';
 import { InvoicesService } from './invoices.service';
 
@@ -76,14 +82,54 @@ export class InvoicesController {
     );
   }
 
+  @Post('purchase-invoices/validate')
+  @UseInterceptors(FileInterceptor('file'))
+  validatePurchaseInvoices(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<PurchaseInvoiceValidationReportDto> {
+    return this.invoicesService.validatePurchaseInvoicesExcel(file);
+  }
+
   @Post('purchase-invoices/import')
   @UseInterceptors(FileInterceptor('file'))
   importPurchaseInvoices(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File,
-  ): Promise<ImportSupportDocumentsResponseDto> {
+  ): Promise<StartPurchaseInvoiceImportResponseDto> {
     return this.invoicesService.importPurchaseInvoicesFromExcel(
       file,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('purchase-invoices/import-jobs/:jobId/status')
+  getPurchaseInvoiceImportJobStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('jobId') jobId: string,
+  ): Promise<PurchaseInvoiceImportStatusResponseDto> {
+    return this.invoicesService.getPurchaseInvoiceImportJobStatus(
+      jobId,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('purchase-invoices/import-jobs/:jobId/retry-failed')
+  retryFailedPurchaseInvoiceImportRows(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('jobId') jobId: string,
+  ): Promise<PurchaseInvoiceImportStatusResponseDto> {
+    return this.invoicesService.retryFailedPurchaseInvoiceImportRows(
+      jobId,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  /** @deprecated usar GET purchase-invoices/import-jobs/:jobId/status con el jobId devuelto por el POST de import. Se deja por compatibilidad. */
+  @Get('purchase-invoices/import-status')
+  getLatestPurchaseInvoiceImportStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PurchaseInvoiceImportStatusResponseDto> {
+    return this.invoicesService.getLatestPurchaseInvoiceImportStatus(
       getAuthenticatedCompanyId(user),
     );
   }

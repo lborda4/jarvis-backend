@@ -8,6 +8,7 @@ export const SIIGO_PURCHASE_SUPPORT_DOCUMENTS_PATH =
 export const SIIGO_PAYMENT_TYPES_PATH = '/v1/payment-types';
 export const SIIGO_TAXES_PATH = '/v1/taxes';
 export const SIIGO_COST_CENTERS_PATH = '/v1/cost-centers';
+export const SIIGO_PRODUCTS_PATH = '/v1/products';
 export const SIIGO_TEST_BALANCE_PATH = '/v1/test-balance-report';
 
 export const SIIGO_PAYMENT_DOCUMENT_TYPE_PURCHASE = 'FC';

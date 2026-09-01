@@ -13,6 +13,7 @@ import {
   SIIGO_TAXES_PATH,
   SIIGO_COST_CENTERS_PATH,
   SIIGO_TEST_BALANCE_PATH,
+  SIIGO_PRODUCTS_PATH,
 } from '../constants/siigo.constants';
 import { SiigoAuthRequestDto } from '../dto/siigo-auth-request.dto';
 import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
@@ -26,7 +27,9 @@ import {
   SiigoCostCenter,
   SiigoDocumentType,
   SiigoPaymentType,
+  SiigoProductsListResponse,
   SiigoPurchaseResponse,
+  SiigoPurchasesListResponse,
   SiigoSupportDocumentDeleteResponse,
   SiigoSupportDocumentResponse,
   SiigoTax,
@@ -95,6 +98,23 @@ export class SiigoHttpClient {
       url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASES_PATH}`,
       headers: this.buildAuthHeaders(accessToken, partnerId),
       data: payload,
+    });
+  }
+
+  async listPurchases(
+    accessToken: string,
+    page: number,
+    pageSize: number,
+    partnerId?: string,
+  ): Promise<SiigoPurchasesListResponse> {
+    return this.request<SiigoPurchasesListResponse>({
+      method: 'GET',
+      url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASES_PATH}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+      params: {
+        page,
+        page_size: pageSize,
+      },
     });
   }
 
@@ -197,6 +217,23 @@ export class SiigoHttpClient {
     });
 
     return Array.isArray(response) ? response : [];
+  }
+
+  async listProducts(
+    accessToken: string,
+    page: number,
+    pageSize: number,
+    partnerId?: string,
+  ): Promise<SiigoProductsListResponse> {
+    return this.request<SiigoProductsListResponse>({
+      method: 'GET',
+      url: `${SIIGO_API_BASE_URL}${SIIGO_PRODUCTS_PATH}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+      params: {
+        page,
+        page_size: pageSize,
+      },
+    });
   }
 
   async createTestBalanceReport(

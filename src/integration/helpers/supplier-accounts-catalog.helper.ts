@@ -7,6 +7,49 @@ export {
   resolveSuggestedRetentionsForDocument,
 } from './supplier-preferences.helper';
 
+/**
+ * Mapa code → name del catálogo REAL de cuentas SIIGO de una empresa
+ * (`siigo_accounts`) — la única fuente de verdad para el nombre de una
+ * cuenta. Cualquier sugerencia de cuenta (del historial de compras, de una
+ * regla item-level, de una preferencia guardada) solo conoce el código; el
+ * nombre SIEMPRE debe resolverse contra este catálogo antes de mostrarse,
+ * nunca asumirse ni usar el código como si fuera el nombre.
+ */
+export function buildAccountNameByCode(
+  accounts: Array<Pick<SiigoAccount, 'code' | 'name'>>,
+): Map<string, string> {
+  const byCode = new Map<string, string>();
+
+  for (const account of accounts) {
+    const code = account.code?.trim();
+    const name = account.name?.trim();
+
+    if (code && name) {
+      byCode.set(code, name);
+    }
+  }
+
+  return byCode;
+}
+
+/**
+ * Resuelve el nombre real de una cuenta contra el catálogo — si el código
+ * no está en el catálogo (proveedor nuevo, cuenta borrada en SIIGO desde
+ * entonces, etc.) cae a `fallbackName`, pero el catálogo SIEMPRE gana
+ * cuando tiene el código. Esto es lo que evita que una sugerencia
+ * "aprendida" del historial (que solo guarda el código, nunca un nombre
+ * confiable) termine mostrando el código repetido como si fuera el nombre
+ * de la cuenta — bug real reportado en producción (ver
+ * supplier-accounts-catalog.helper.spec.ts).
+ */
+export function resolveAccountNameFromCatalog(
+  code: string,
+  fallbackName: string | null,
+  accountNameByCode: Map<string, string>,
+): string | null {
+  return accountNameByCode.get(code.trim()) ?? fallbackName;
+}
+
 export function buildSupplierNameLookup(
   configurations: Array<
     Pick<SupplierConfiguration, 'supplierDocument' | 'supplierName'>

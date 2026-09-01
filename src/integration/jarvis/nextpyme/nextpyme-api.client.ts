@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import { firstValueFrom } from 'rxjs';
 import { AppConfiguration } from '../../../config/configuration';
 import {
@@ -148,6 +149,14 @@ export interface NextPymeInvoiceQueryLineTax {
   percent?: string | number;
 }
 
+export interface NextPymeInvoiceQueryLineAllowanceCharge {
+  discount_id?: string;
+  charge_indicator?: string | boolean;
+  allowance_charge_reason?: string;
+  amount?: string | number;
+  base_amount?: string | number;
+}
+
 export interface NextPymeInvoiceQueryLine {
   invoiced_quantity?: string | number;
   line_extension_amount?: string | number;
@@ -157,6 +166,7 @@ export interface NextPymeInvoiceQueryLine {
   price_amount?: string | number;
   base_quantity?: string | number;
   tax_totals?: NextPymeInvoiceQueryLineTax[];
+  allowance_charges?: NextPymeInvoiceQueryLineAllowanceCharge[];
 }
 
 export interface NextPymeInvoiceQueryResult {
@@ -183,10 +193,51 @@ export interface NextPymeInvoiceQueryResult {
     charge_total_amount?: string | number;
     payable_amount?: string | number;
   };
+  /** Impuestos totales a nivel de factura (no por línea) — la fuente
+   * correcta para el IVA del documento, evita duplicar cuando hay
+   * varias líneas. */
+  tax_totals?: NextPymeInvoiceQueryLineTax[];
   invoice_lines: NextPymeInvoiceQueryLine[];
 }
 
+type NextPymeAttemptOutcome =
+  | { outcome: 'found'; data: NextPymeInvoiceQueryResult }
+  | { outcome: 'not_found' }
+  | { outcome: 'error'; message: string; status?: number; retryable: boolean };
+
+/** `attempts`/`retryDelayMs` van en las tres variantes (no solo 'error')
+ * porque una fila puede fallar en el intento 1 pero encontrarse recién en
+ * el 3 — para medir cuánto del tiempo de la fase NextPyme de un lote es
+ * trabajo real vs. espera de backoff, hace falta saberlo también cuando el
+ * resultado final fue 'found'/'not_found'. */
+interface NextPymeLookupMetrics {
+  /** Intentos HTTP realizados (1 = sin reintentos). */
+  attempts: number;
+  /** Tiempo total dormido en backoff entre reintentos — no incluye el
+   * tiempo de la llamada HTTP en sí. */
+  retryDelayMs: number;
+}
+
+export type NextPymeInvoiceLookupResult = NextPymeLookupMetrics &
+  NextPymeAttemptOutcome;
+
 const LOG_PREVIEW_LIMIT = 4000;
+
+/** Códigos que indican un problema con la solicitud misma (CUFE no
+ * existente, request mal formado, token inválido) — reintentar no cambia
+ * el resultado, así que se falla directo en vez de gastar tiempo en
+ * reintentos que van a volver a fallar igual. */
+const NON_RETRYABLE_HTTP_STATUS = new Set([400, 401, 404]);
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Backoff exponencial para los reintentos de una consulta a NextPyme:
+ * intento 1 → 1s, intento 2 → 3s, intento 3 → 9s, etc. */
+function computeRetryDelayMs(attempt: number): number {
+  return 1000 * 3 ** (attempt - 1);
+}
 
 @Injectable()
 export class NextPymeApiClient {
@@ -317,15 +368,11 @@ export class NextPymeApiClient {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.put<unknown>(
-          `${baseUrl}/config/resolution`,
-          payload,
-          {
-            headers: this.buildAuthHeaders(token),
-            timeout: 30000,
-            validateStatus: () => true,
-          },
-        ),
+        this.httpService.put<unknown>(`${baseUrl}/config/resolution`, payload, {
+          headers: this.buildAuthHeaders(token),
+          timeout: 30000,
+          validateStatus: () => true,
+        }),
       );
 
       this.logger.log(
@@ -373,15 +420,11 @@ export class NextPymeApiClient {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.post<unknown>(
-          `${baseUrl}/support-document`,
-          payload,
-          {
-            headers: this.buildAuthHeaders(token),
-            timeout: 60000,
-            validateStatus: () => true,
-          },
-        ),
+        this.httpService.post<unknown>(`${baseUrl}/support-document`, payload, {
+          headers: this.buildAuthHeaders(token),
+          timeout: 60000,
+          validateStatus: () => true,
+        }),
       );
 
       this.logger.log(
@@ -413,10 +456,76 @@ export class NextPymeApiClient {
     }
   }
 
+  /**
+   * Distingue "consultado con éxito pero la factura no existe" (`not_found`
+   * — se omite la fila) de "no se pudo consultar" (`error`: timeout, rate
+   * limit, 5xx, red). Ante `error`, solo reintenta si `retryable` es
+   * `true` — un 400/401/404 significa que la solicitud misma está mal (CUFE
+   * inexistente, token inválido), y reintentarla no cambia el resultado;
+   * un 429/5xx/timeout sí puede resolverse solo. El resultado final sigue
+   * siendo siempre la respuesta real de NextPyme, nunca un reemplazo del
+   * Excel.
+   */
   async getInvoiceByCufe(
     cufe: string,
-  ): Promise<NextPymeInvoiceQueryResult | null> {
-    const token = this.requireToken();
+    tokenOverride?: string,
+  ): Promise<NextPymeInvoiceLookupResult> {
+    const maxRetries = this.configService.get(
+      'purchaseInvoiceImport.maxRetries',
+      { infer: true },
+    );
+    let lastOutcome: NextPymeAttemptOutcome = {
+      outcome: 'error',
+      message: 'No se pudo consultar NextPyme.',
+      retryable: true,
+    };
+    let totalRetryDelayMs = 0;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      if (attempt > 0) {
+        const delayMs = computeRetryDelayMs(attempt);
+        totalRetryDelayMs += delayMs;
+        this.logger.warn(
+          `[cufe=${cufe}] Reintento ${attempt}/${maxRetries} en ${delayMs}ms tras: ${lastOutcome.message}`,
+        );
+        await delay(delayMs);
+      }
+
+      const outcome = await this.attemptGetInvoiceByCufe(cufe, tokenOverride);
+
+      if (outcome.outcome !== 'error') {
+        return {
+          ...outcome,
+          attempts: attempt + 1,
+          retryDelayMs: totalRetryDelayMs,
+        };
+      }
+
+      lastOutcome = outcome;
+
+      if (!outcome.retryable) {
+        return {
+          ...outcome,
+          attempts: attempt + 1,
+          retryDelayMs: totalRetryDelayMs,
+        };
+      }
+    }
+
+    return {
+      ...lastOutcome,
+      attempts: maxRetries + 1,
+      retryDelayMs: totalRetryDelayMs,
+    };
+  }
+
+  private async attemptGetInvoiceByCufe(
+    cufe: string,
+    tokenOverride?: string,
+  ): Promise<NextPymeAttemptOutcome> {
+    // Prioriza el token propio de la empresa (companies.next_pyme_token); si
+    // no tiene uno configurado, cae al NEXTPYME_API_TOKEN global.
+    const token = tokenOverride?.trim() || this.requireToken();
     const url = this.getInvoiceQueryUrl();
 
     try {
@@ -438,17 +547,37 @@ export class NextPymeApiClient {
       );
 
       if (response.status < 200 || response.status >= 300) {
-        return null;
+        return {
+          outcome: 'error',
+          message: `NextPyme respondió con estado ${response.status}.`,
+          status: response.status,
+          retryable: !NON_RETRYABLE_HTTP_STATUS.has(response.status),
+        };
       }
 
-      return this.parseInvoiceQueryResponse(response.data);
+      const parsed = this.parseInvoiceQueryResponse(response.data);
+
+      if (!parsed) {
+        return { outcome: 'not_found' };
+      }
+
+      return { outcome: 'found', data: parsed };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Un error de red/timeout de axios (sin response) es por definición
+      // transitorio — nunca es un 400/401/404, esos SÍ llegan como response
+      // arriba. isAxiosError(error) && !error.response cubre tanto timeout
+      // (ECONNABORTED) como caídas de conexión.
+      const retryable =
+        !axios.isAxiosError(error) || !error.response
+          ? true
+          : !NON_RETRYABLE_HTTP_STATUS.has(error.response.status);
+
       this.logger.warn(
-        `[return-invoice-data] Error al consultar CUFE ${cufe}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `[return-invoice-data] Error al consultar CUFE ${cufe}: ${message}`,
       );
-      return null;
+
+      return { outcome: 'error', message, retryable };
     }
   }
 
@@ -536,7 +665,10 @@ export class NextPymeApiClient {
         : [];
 
     return data
-      .filter((item): item is UnknownRecord => Boolean(item) && typeof item === 'object')
+      .filter(
+        (item): item is UnknownRecord =>
+          Boolean(item) && typeof item === 'object',
+      )
       .map((item) => {
         const typeDocument =
           item.type_document && typeof item.type_document === 'object'
@@ -561,9 +693,7 @@ export class NextPymeApiClient {
               ? String(item.resolution_date)
               : undefined,
           technical_key:
-            item.technical_key != null
-              ? String(item.technical_key)
-              : undefined,
+            item.technical_key != null ? String(item.technical_key) : undefined,
           date_from:
             item.date_from != null ? String(item.date_from) : undefined,
           date_to: item.date_to != null ? String(item.date_to) : undefined,

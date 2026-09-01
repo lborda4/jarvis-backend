@@ -24,8 +24,12 @@ import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { validateSupportDocumentRetentions } from './helpers/siigo-support-document-retention.helper';
 import {
   buildSupplierPreferenceSnapshotFromSendRequest,
+  persistHistorialFacturaFromSendRequest,
   persistSupplierPreferencesFromSendRequest,
 } from './helpers/siigo-support-document-preference.helper';
+import { getSiigoIntegration } from './helpers/siigo-context.helper';
+import { HistorialFacturasRepository } from '../repositories/historial-facturas.repository';
+import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
 import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
@@ -44,6 +48,8 @@ export class SiigoSupportDocumentSendService {
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
     private readonly planSubscriptionService: PlanSubscriptionService,
+    private readonly integrationsRepository: IntegrationsRepository,
+    private readonly historialFacturasRepository: HistorialFacturasRepository,
   ) {}
 
   async sendSupportDocument(
@@ -58,8 +64,10 @@ export class SiigoSupportDocumentSendService {
     });
 
     const documentId = request.documentId.trim();
-    const electronicDocument =
-      await this.electronicDocumentService.requireById(documentId, companyId);
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
 
     if (
       electronicDocument.electronicDocumentType !==
@@ -70,7 +78,9 @@ export class SiigoSupportDocumentSendService {
       );
     }
 
-    if (electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (
+      electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED
+    ) {
       throw new BadRequestException(
         'El Documento Soporte ya fue creado en SIIGO para este registro.',
       );
@@ -140,66 +150,88 @@ export class SiigoSupportDocumentSendService {
       );
     }
 
-    if (request.savePreferences) {
-      await persistSupplierPreferencesFromSendRequest(
-        this.siigoAccountMappingService,
-        request,
-        electronicDocument,
-        companyId,
-        taxesCatalog,
-        this.logger,
-      );
-    }
+    // Se guarda siempre — la clasificación confirmada al enviar alimenta
+    // tanto la preferencia del proveedor (autocompletar la próxima factura)
+    // como el historial que usa la IA como ejemplo, sin depender de que el
+    // usuario recuerde marcar nada.
+    await persistSupplierPreferencesFromSendRequest(
+      this.siigoAccountMappingService,
+      request,
+      electronicDocument,
+      companyId,
+      taxesCatalog,
+      this.logger,
+    );
+
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+    await persistHistorialFacturaFromSendRequest(
+      this.historialFacturasRepository,
+      request,
+      electronicDocument,
+      companyId,
+      integration.id,
+      taxesCatalog,
+      this.logger,
+    );
 
     try {
-      const createdSupportDocument =
-        await this.siigoDocumentSendThrottleService.run(companyId, () =>
-          executeSiigoRequestWithRetries(
-            this.siigoAuthService,
-            companyId,
-            this.logger,
-            'crear Documento Soporte',
-            async (accessToken, partnerId) =>
-              this.siigoHttpClient.createSupportDocument(
-                accessToken,
-                siigoPayload,
-                partnerId,
+      return await this.electronicDocumentService.runExclusiveForDocumentCreation(
+        documentId,
+        companyId,
+        async () => {
+          const createdSupportDocument =
+            await this.siigoDocumentSendThrottleService.run(companyId, () =>
+              executeSiigoRequestWithRetries(
+                this.siigoAuthService,
+                companyId,
+                this.logger,
+                'crear Documento Soporte',
+                async (accessToken, partnerId) =>
+                  this.siigoHttpClient.createSupportDocument(
+                    accessToken,
+                    siigoPayload,
+                    partnerId,
+                  ),
+                SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
               ),
-            SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
-          ),
-        );
+            );
 
-      const updatedDocument =
-        await this.electronicDocumentService.markPurchaseCreated(
-          documentId,
-          createdSupportDocument.id,
-          companyId,
-          createdSupportDocument.number != null
-            ? String(createdSupportDocument.number)
-            : null,
-          preferenceSnapshot
-            ? {
-                ...electronicDocument.payload,
-                siigoSendConfiguration: preferenceSnapshot,
-              }
-            : undefined,
-        );
+          const updatedDocument =
+            await this.electronicDocumentService.markPurchaseCreated(
+              documentId,
+              createdSupportDocument.id,
+              companyId,
+              createdSupportDocument.number != null
+                ? String(createdSupportDocument.number)
+                : null,
+              preferenceSnapshot
+                ? {
+                    ...electronicDocument.payload,
+                    siigoSendConfiguration: preferenceSnapshot,
+                  }
+                : undefined,
+            );
 
-      return {
-        success: true,
-        supportDocument: {
-          id: createdSupportDocument.id,
-          number: createdSupportDocument.number,
-          name: createdSupportDocument.name,
-          date: createdSupportDocument.date,
-          total: createdSupportDocument.total,
-          receiptPrefix:
-            createdSupportDocument.supplier_receipt_number?.prefix,
-          receiptNumber:
-            createdSupportDocument.supplier_receipt_number?.number,
+          return {
+            success: true,
+            supportDocument: {
+              id: createdSupportDocument.id,
+              number: createdSupportDocument.number,
+              name: createdSupportDocument.name,
+              date: createdSupportDocument.date,
+              total: createdSupportDocument.total,
+              receiptPrefix:
+                createdSupportDocument.supplier_receipt_number?.prefix,
+              receiptNumber:
+                createdSupportDocument.supplier_receipt_number?.number,
+            },
+            document: mapElectronicDocumentToResponse(updatedDocument),
+          };
         },
-        document: mapElectronicDocumentToResponse(updatedDocument),
-      };
+      );
     } catch (error) {
       await this.electronicDocumentService.updateStatus(
         documentId,
@@ -233,11 +265,10 @@ export class SiigoSupportDocumentSendService {
     companyId: string,
   ): Promise<DeleteSiigoSupportDocumentResponseDto> {
     const trimmedDocumentId = documentId.trim();
-    const electronicDocument =
-      await this.electronicDocumentService.requireById(
-        trimmedDocumentId,
-        companyId,
-      );
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      trimmedDocumentId,
+      companyId,
+    );
 
     if (
       electronicDocument.electronicDocumentType !==
@@ -248,7 +279,9 @@ export class SiigoSupportDocumentSendService {
       );
     }
 
-    if (electronicDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (
+      electronicDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED
+    ) {
       throw new BadRequestException(
         'El Documento Soporte no está creado en SIIGO.',
       );
@@ -315,5 +348,4 @@ export class SiigoSupportDocumentSendService {
       );
     }
   }
-
 }

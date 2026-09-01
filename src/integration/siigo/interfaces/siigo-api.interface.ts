@@ -89,6 +89,44 @@ export interface SiigoCostCenter {
   active: boolean;
 }
 
+export interface SiigoPurchaseResponseTax {
+  id: number;
+  name: string;
+  type: string;
+  percentage: number;
+  value: number;
+}
+
+export interface SiigoPurchaseResponseItem {
+  id: string;
+  type: string;
+  code: string;
+  quantity: number;
+  price: number;
+  discount: number;
+  description: string;
+  total: number;
+  taxes: SiigoPurchaseResponseTax[];
+}
+
+export interface SiigoPurchaseResponseRetention {
+  id: number;
+  name: string;
+  /** Código numérico interno de SIIGO para el tipo de retención (no confundir con SiigoTax.type). */
+  type: number;
+  percentage: number;
+  value: number;
+}
+
+/** Medio de pago usado en la compra — `id` es el mismo id del catálogo de
+ * formas de pago de SIIGO (`/v1/payment-types`). */
+export interface SiigoPurchaseResponsePayment {
+  id: number;
+  name: string;
+  value: number;
+  due_date?: string;
+}
+
 export interface SiigoPurchaseResponse {
   id: string;
   document: { id: number };
@@ -96,14 +134,48 @@ export interface SiigoPurchaseResponse {
   name: string;
   date: string;
   supplier: {
+    id?: string;
     identification: string;
     branch_office: number;
   };
   total: number;
+  balance?: number;
   provider_invoice: {
     prefix: string;
     number: string;
   };
+  observations?: string;
+  items?: SiigoPurchaseResponseItem[];
+  retentions?: SiigoPurchaseResponseRetention[];
+  payments?: SiigoPurchaseResponsePayment[];
+}
+
+export interface SiigoPurchasesListResponse {
+  pagination: {
+    page: number;
+    page_size: number;
+    total_results: number;
+  };
+  results: SiigoPurchaseResponse[];
+}
+
+/** Ítem del catálogo de productos SIIGO (GET /v1/products). Solo se
+ * declaran los campos que realmente consumimos — la respuesta real trae
+ * bastantes más (precios, impuestos, grupo de cuenta, etc.). */
+export interface SiigoProduct {
+  id: string;
+  code: string;
+  name: string;
+  active?: boolean;
+}
+
+export interface SiigoProductsListResponse {
+  pagination: {
+    page: number;
+    page_size: number;
+    total_results: number;
+  };
+  results: SiigoProduct[];
 }
 
 export interface SiigoSupportDocumentResponse {

@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { DianParserService } from '../dian/dian-parser.service';
 import {
   extractInvoiceXmlFromZip,
@@ -16,9 +21,9 @@ import { ElectronicDocumentService } from '../electronic-document/electronic-doc
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
 import { JarvisDocumentPreparationService } from '../integration/jarvis/jarvis-document-preparation.service';
 import { SiigoDocumentPreparationService } from '../integration/siigo/siigo-document-preparation.service';
+import { SiigoPurchaseAiClassificationService } from '../integration/siigo/siigo-purchase-ai-classification.service';
 import { ImportSessionService } from '../import-session/import-session.service';
 import { ExcelService } from '../common/services/excel.service';
-import { mapWithConcurrency } from '../common/helpers/concurrency.helper';
 import { ExtractInvoicesResponseDto } from './dto/extract-invoices-response.dto';
 import { ParseXmlResponseDto } from './dto/parse-xml-response.dto';
 import {
@@ -28,13 +33,17 @@ import {
 } from './dto/import-support-documents.dto';
 import { UploadXmlRequestDto } from './dto/upload-xml-request.dto';
 import { parseSupportDocumentExcel } from './helpers/support-document-excel.helper';
+import { parseDianSalesInvoiceExcel } from './helpers/sales-invoice-excel.helper';
+import { PurchaseInvoiceImportJobStatus } from './enums/purchase-invoice-import-job-status.enum';
+import { PurchaseInvoiceImportJobsRepository } from './repositories/purchase-invoice-import-jobs.repository';
+import { PurchaseInvoiceImportJobRowsRepository } from './repositories/purchase-invoice-import-job-rows.repository';
+import { PurchaseInvoiceImportStatusService } from './services/purchase-invoice-import-status.service';
 import {
-  DianSalesInvoiceRow,
-  mapDianSalesInvoiceRowToPayload,
-  parseDianSalesInvoiceExcel,
-} from './helpers/sales-invoice-excel.helper';
-import { NextPymeApiClient } from '../integration/jarvis/nextpyme/nextpyme-api.client';
-import { mapNextPymeInvoiceQueryToElectronicDocumentPayload } from '../electronic-document/mappers/nextpyme-invoice-query-to-payload.mapper';
+  PurchaseInvoiceImportStatusResponseDto,
+  StartPurchaseInvoiceImportResponseDto,
+} from './dto/purchase-invoice-import-job.dto';
+import { PurchaseInvoiceValidationReportDto } from './dto/purchase-invoice-import-validation.dto';
+import { validatePurchaseInvoiceExcelRows } from './helpers/purchase-invoice-import-validation.helper';
 import { applySupportDocumentIssueDate } from './helpers/support-document-issue-date.helper';
 import {
   buildSupportDocumentTemplateExcel,
@@ -47,9 +56,6 @@ import {
 } from './mappers/invoice-preview.mapper';
 import { mapGroupedSupportDocumentToPreview } from './mappers/support-document-preview.mapper';
 
-// Consultas simultáneas a NextPyme al enriquecer facturas de compra importadas.
-const PURCHASE_INVOICE_IMPORT_CONCURRENCY = 8;
-
 @Injectable()
 export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
@@ -60,8 +66,11 @@ export class InvoicesService {
     private readonly importSessionService: ImportSessionService,
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoDocumentPreparationService: SiigoDocumentPreparationService,
+    private readonly siigoPurchaseAiClassificationService: SiigoPurchaseAiClassificationService,
     private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
-    private readonly nextPymeApiClient: NextPymeApiClient,
+    private readonly purchaseInvoiceImportJobsRepository: PurchaseInvoiceImportJobsRepository,
+    private readonly purchaseInvoiceImportJobRowsRepository: PurchaseInvoiceImportJobRowsRepository,
+    private readonly purchaseInvoiceImportStatusService: PurchaseInvoiceImportStatusService,
   ) {}
 
   async previewSupportDocumentsFromExcel(
@@ -149,10 +158,11 @@ export class InvoicesService {
       `Documentos Soporte detectados: groups=${groups.length}, rows=${processedRows}`,
     );
 
-    const result = await this.electronicDocumentService.createFromSupportDocumentGroups(
-      groups,
-      companyId ?? '',
-    );
+    const result =
+      await this.electronicDocumentService.createFromSupportDocumentGroups(
+        groups,
+        companyId ?? '',
+      );
 
     const records = groups.map((group, index) =>
       mapGroupedSupportDocumentToPreview(
@@ -180,6 +190,10 @@ export class InvoicesService {
           result.documentIds,
           resolvedCompanyId,
         );
+        this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground(
+          result.documentIds,
+          resolvedCompanyId,
+        );
       }
     }
 
@@ -192,10 +206,40 @@ export class InvoicesService {
     };
   }
 
+  /**
+   * Pasada de validación rápida (sin tocar NextPyme/SIIGO) sobre el Excel:
+   * campos faltantes, CUFEs duplicados, formato de NIT. Se llama ANTES de
+   * confirmar la importación, para que el usuario pueda revisar el reporte
+   * y corregir el archivo si hace falta antes de disparar ninguna llamada
+   * real. `importPurchaseInvoicesFromExcel` vuelve a correr esta misma
+   * validación por si el archivo cambió entre esta llamada y la
+   * confirmación — recién si pasa esa segunda vez se insertan filas.
+   */
+  async validatePurchaseInvoicesExcel(
+    file?: Express.Multer.File,
+  ): Promise<PurchaseInvoiceValidationReportDto> {
+    if (!file) {
+      throw new MissingFileException();
+    }
+
+    const { rows } = parseDianSalesInvoiceExcel(file.buffer);
+
+    return validatePurchaseInvoiceExcelRows(rows);
+  }
+
+  /**
+   * Parsea el Excel (rápido, en memoria) y arranca la importación real en
+   * segundo plano — consultar el CUFE de cada fila en NextPyme puede tardar
+   * minutos con 500+ filas, más de lo que aguanta cualquier timeout de
+   * cliente HTTP. El job arranca en estado "pending" (todavía no se tocó
+   * nada); el frontend consulta el progreso/resultado en
+   * GET purchase-invoices/import-jobs/:jobId/status en vez de esperar esta
+   * respuesta.
+   */
   async importPurchaseInvoicesFromExcel(
     file?: Express.Multer.File,
     companyId?: string,
-  ): Promise<ImportSupportDocumentsResponseDto> {
+  ): Promise<StartPurchaseInvoiceImportResponseDto> {
     if (!file) {
       throw new MissingFileException();
     }
@@ -210,95 +254,110 @@ export class InvoicesService {
       `Facturas de compra DIAN: filasLeídas=${processedRows}, facturasRecibidas=${rows.length}`,
     );
 
-    const rowsWithPayload = await mapWithConcurrency(
-      rows,
-      PURCHASE_INVOICE_IMPORT_CONCURRENCY,
-      async (row) => ({
-        issuerNit: row.issuerNit,
-        issuerName: row.issuerName,
-        payload: await this.buildPurchaseInvoicePayload(row),
+    const job = await this.purchaseInvoiceImportJobsRepository.save(
+      this.purchaseInvoiceImportJobsRepository.create({
+        companyId: companyId ?? '',
+        fileName: file.originalname ?? null,
+        totalRows: rows.length,
+        status: PurchaseInvoiceImportJobStatus.PENDING,
       }),
     );
 
-    const result =
-      await this.electronicDocumentService.createFromPurchaseInvoiceRows(
-        rowsWithPayload,
-        companyId ?? '',
+    // VALIDACIÓN PREVIA: si hay filas inválidas se aborta acá, antes de
+    // insertar una sola PurchaseInvoiceImportJobRow — el jobId ya existe así
+    // que el frontend puede consultar el motivo por GET .../status igual
+    // que si hubiera fallado en segundo plano.
+    const validation = validatePurchaseInvoiceExcelRows(rows);
+
+    if (validation.invalidRows > 0) {
+      this.logger.warn(
+        `Facturas de compra DIAN: ${validation.invalidRows} fila(s) inválida(s) detectada(s) en la validación previa; se aborta el import sin consultar NextPyme/SIIGO.`,
       );
 
-    const records = rows.map((row) => ({
-      cufe: row.cufe,
-      documentType: row.documentType,
-      issueDate: row.issueDate,
-      receptionDate: row.receptionDate,
-      issuerNit: row.issuerNit,
-      issuerName: row.issuerName,
-      receiverNit: row.receiverNit,
-      receiverName: row.receiverName,
-      currency: row.currency,
-      paymentMethod: row.paymentForm || row.paymentMethod,
-      total: row.total,
-      status: row.status,
-      group: row.group,
-    }));
+      await this.purchaseInvoiceImportJobsRepository.patch(job.id, {
+        status: PurchaseInvoiceImportJobStatus.ERROR,
+        errorMessage: `El Excel tiene ${validation.invalidRows} fila(s) inválida(s). Corrígelas y vuelve a importar.`,
+        validationReport: validation,
+        completedAt: new Date(),
+      });
 
-    const resolvedCompanyId = companyId?.trim();
-    if (resolvedCompanyId && result.documentIds.length > 0) {
-      const provider =
-        await this.electronicDocumentService.resolveDocumentProvider(
-          resolvedCompanyId,
-        );
-
-      if (provider === IntegrationProvider.JARVIS) {
-        this.jarvisDocumentPreparationService.prepareDocumentsInBackground(
-          result.documentIds,
-          resolvedCompanyId,
-        );
-      } else {
-        this.siigoDocumentPreparationService.prepareDocumentsInBackground(
-          result.documentIds,
-          resolvedCompanyId,
-        );
-      }
+      return { jobId: job.id, totalRows: rows.length };
     }
 
-    return {
-      processedRows,
-      itemsTotal: result.itemsTotal,
-      documentsCreated: result.documentsCreated,
-      documentIds: result.documentIds,
-      records,
-    };
+    // TOLERANCIA A FALLOS: se insertan TODAS las filas como "pending",
+    // incluyendo la fila original completa (rawRow) — la tabla misma actúa
+    // de cola (ver PurchaseInvoiceImportWorkerService), sin depender de
+    // encolar nada explícitamente: el worker descubre este job solo en su
+    // próximo tick de polling.
+    await this.purchaseInvoiceImportJobRowsRepository.saveMany(
+      rows.map((row, index) =>
+        this.purchaseInvoiceImportJobRowsRepository.create({
+          jobId: job.id,
+          rowIndex: index + 1,
+          cufe: row.cufe,
+          issuerNit: row.issuerNit,
+          issuerName: row.issuerName,
+          rawRow: row,
+        }),
+      ),
+    );
+
+    return { jobId: job.id, totalRows: rows.length };
   }
 
-  private async buildPurchaseInvoicePayload(
-    row: DianSalesInvoiceRow,
-  ): Promise<ReturnType<typeof mapDianSalesInvoiceRowToPayload>> {
-    if (!row.cufe) {
-      return mapDianSalesInvoiceRowToPayload(row);
+  async getPurchaseInvoiceImportJobStatus(
+    jobId: string,
+    companyId: string,
+  ): Promise<PurchaseInvoiceImportStatusResponseDto> {
+    return this.purchaseInvoiceImportStatusService.getStatus(jobId, companyId);
+  }
+
+  async getLatestPurchaseInvoiceImportStatus(
+    companyId: string,
+  ): Promise<PurchaseInvoiceImportStatusResponseDto> {
+    return this.purchaseInvoiceImportStatusService.getLatestStatus(companyId);
+  }
+
+  /**
+   * Vuelve a 'pending' solo las filas 'failed' de un job ya terminado
+   * (conservan su rawRow) — el worker las recoge solas en su próximo tick,
+   * como si fueran las únicas pendientes, sin tocar las que ya están
+   * 'success'.
+   */
+  async retryFailedPurchaseInvoiceImportRows(
+    jobId: string,
+    companyId: string,
+  ): Promise<PurchaseInvoiceImportStatusResponseDto> {
+    const job = await this.purchaseInvoiceImportJobsRepository.findById(jobId);
+
+    if (!job || job.companyId !== companyId) {
+      return this.purchaseInvoiceImportStatusService.buildEmptyImportStatusResponse();
     }
 
-    const invoiceQueryResult = await this.nextPymeApiClient.getInvoiceByCufe(
-      row.cufe,
-    );
-
-    if (!invoiceQueryResult) {
-      return mapDianSalesInvoiceRowToPayload(row);
-    }
-
-    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
-      invoiceQueryResult,
-      row.cufe,
-    );
-
-    if (!(payload.totals.total > 0)) {
-      this.logger.warn(
-        `[cufe=${row.cufe}] La respuesta de NextPyme no trae montos válidos; se usa el resumen del Excel de la DIAN.`,
+    if (job.status === PurchaseInvoiceImportJobStatus.RUNNING) {
+      throw new ConflictException(
+        'El job todavía se está procesando; esperá a que termine antes de reintentar.',
       );
-      return mapDianSalesInvoiceRowToPayload(row);
     }
 
-    return payload;
+    const resetCount =
+      await this.purchaseInvoiceImportJobRowsRepository.resetFailedRowsToPending(
+        jobId,
+      );
+
+    if (resetCount === 0) {
+      throw new BadRequestException(
+        'No hay filas fallidas para reintentar en este job.',
+      );
+    }
+
+    await this.purchaseInvoiceImportJobsRepository.patch(jobId, {
+      status: PurchaseInvoiceImportJobStatus.RUNNING,
+      errorMessage: null,
+      completedAt: null,
+    });
+
+    return this.purchaseInvoiceImportStatusService.getStatus(jobId, companyId);
   }
 
   async extractInvoicesFromXml(
@@ -358,6 +417,10 @@ export class InvoicesService {
       const resolvedCompanyId = companyId?.trim();
       if (resolvedCompanyId) {
         this.siigoDocumentPreparationService.prepareDocumentsInBackground(
+          [electronicDocument.id],
+          resolvedCompanyId,
+        );
+        this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground(
           [electronicDocument.id],
           resolvedCompanyId,
         );

@@ -1,4 +1,5 @@
 import {
+  applySiigoCorrectedPaymentsTotal,
   calculateSiigoDocumentPaymentValue,
   calculateSiigoDocumentRetentionTotal,
   calculateSiigoPurchasePaymentValue,
@@ -162,5 +163,43 @@ describe('siigo-purchase-total.helper', () => {
     );
 
     expect(retentionTotal).toBe(2850);
+  });
+});
+
+describe('applySiigoCorrectedPaymentsTotal', () => {
+  it('ajusta el único pago al total exacto que SIIGO reportó (caso real: con centavos)', () => {
+    const payments = [{ id: 5056, value: 5059932, due_date: '2026-03-06' }];
+
+    const corrected = applySiigoCorrectedPaymentsTotal(payments, 5059932.36);
+
+    expect(corrected).toEqual([
+      { id: 5056, value: 5059932.36, due_date: '2026-03-06' },
+    ]);
+  });
+
+  it('ajusta el único pago a un total exacto en pesos enteros', () => {
+    const payments = [{ id: 5056, value: 111176.45 }];
+
+    const corrected = applySiigoCorrectedPaymentsTotal(payments, 111176);
+
+    expect(corrected).toEqual([{ id: 5056, value: 111176 }]);
+  });
+
+  it('con varios pagos, solo ajusta el último y deja los demás intactos', () => {
+    const payments = [
+      { id: 1, value: 40000 },
+      { id: 2, value: 30000 },
+    ];
+
+    const corrected = applySiigoCorrectedPaymentsTotal(payments, 70050.5);
+
+    expect(corrected).toEqual([
+      { id: 1, value: 40000 },
+      { id: 2, value: 30050.5 },
+    ]);
+  });
+
+  it('devuelve el array vacío sin lanzar si no hay pagos', () => {
+    expect(applySiigoCorrectedPaymentsTotal([], 100)).toEqual([]);
   });
 });

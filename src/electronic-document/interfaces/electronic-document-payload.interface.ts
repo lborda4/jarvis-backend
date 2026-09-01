@@ -1,6 +1,22 @@
 import type { DianInvoiceTotals } from '../../dian/interfaces/dian-invoice-result.interface';
 import type { SupplierPreferenceSnapshot } from '../../integration/interfaces/supplier-preference.interface';
+import type { SupplierRetentionPreference } from '../../integration/interfaces/supplier-mapping-value.interface';
 import type { ElectronicDocumentItem } from './electronic-document-item.interface';
+
+/**
+ * A diferencia de `SupplierPreferenceSnapshot` (preferencia CONFIRMADA del
+ * proveedor, siempre con cuenta PUC — ver `normalizeSupplierPreferenceSnapshot`),
+ * esta es la sugerencia de la clasificación automática con IA
+ * (SiigoPurchaseAiClassificationService): trae `account` cuando el ítem
+ * clasificó como 'Account', o `product` cuando clasificó como 'Product' —
+ * nunca ambos a la vez, y cualquiera de los dos puede faltar si la IA no
+ * encontró una opción segura en el catálogo correspondiente.
+ */
+export interface AiSuggestionSnapshot {
+  account?: { code: string; name: string } | null;
+  product?: { code: string; name: string } | null;
+  retentions: SupplierRetentionPreference[];
+}
 
 export interface ElectronicDocumentSupplier {
   documentNumber: string;
@@ -24,6 +40,11 @@ export interface ElectronicDocumentInvoice {
   number: string;
   issueDate: string;
   dueDate?: string;
+  /** DIAN tabla 9.5 (forma de pago): true = Crédito, false = Contado, undefined = desconocido. */
+  isCreditPayment?: boolean;
+  /** Días de plazo explícitos del emisor (payment_form.duration_measure) —
+   * fuente más confiable que derivar dueDate - issueDate cuando está presente. */
+  durationMeasure?: number;
   currency: string;
 }
 
@@ -40,4 +61,11 @@ export interface ElectronicDocumentPayload {
   totals: DianInvoiceTotals;
   observations?: string;
   siigoSendConfiguration?: SupplierPreferenceSnapshot | null;
+  /**
+   * Sugerencia de IA calculada en segundo plano al importar (solo para
+   * proveedores con tiene_variabilidad=true o sin historial). Se usa como
+   * fallback de sugerencia cuando no hay preferencia genérica del proveedor
+   * — ver resolveSuggestedAccountForDocument/resolveSuggestedRetentionsForDocument.
+   */
+  aiSuggestion?: AiSuggestionSnapshot | null;
 }

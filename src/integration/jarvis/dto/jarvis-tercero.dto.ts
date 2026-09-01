@@ -121,4 +121,13 @@ export class LookupJarvisTerceroNitResponseDto {
 
   @ApiPropertyOptional({ nullable: true })
   address: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  cityCode: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  cityName: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  stateCode: string | null;
 }

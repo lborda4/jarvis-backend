@@ -12,4 +12,6 @@ export interface ElectronicDocumentItem {
   accountMapping?: ElectronicDocumentItemAccountMapping;
   /** % de IVA del ítem tal como viene en la factura original (DIAN/NextPyme). */
   ivaPercentage?: number;
+  /** Descuento propio de la línea (DIAN allowance_charges), si trae. */
+  discount?: number;
 }

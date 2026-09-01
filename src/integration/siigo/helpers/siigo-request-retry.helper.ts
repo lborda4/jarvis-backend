@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import {
   isSiigoDuplicatedDocumentError,
   isSiigoRateLimitError,
+  isSiigoServiceUnavailableError,
   isSiigoSupportDocumentNumberAlreadyExistsError,
   isSiigoUnauthorizedError,
   sleep,
@@ -11,6 +12,14 @@ import { SiigoAuthService } from '../siigo-auth.service';
 import { SiigoAuthContext } from '../interfaces/siigo-auth-context.interface';
 
 const MAX_UNAUTHORIZED_RETRIES = 2;
+/** 429 (rate limit): backoff exponencial con techo, no un delay fijo — cada
+ * reintento espera el doble que el anterior (1s, 2s, 4s, 8s) hasta el techo,
+ * para no seguir golpeando a SIIGO al mismo ritmo que causó el 429. */
+const MAX_RATE_LIMIT_RETRIES = 4;
+const RATE_LIMIT_BASE_DELAY_MS = 1000;
+const RATE_LIMIT_MAX_DELAY_MS = 16000;
+const MAX_SERVICE_UNAVAILABLE_RETRIES = 2;
+const SERVICE_UNAVAILABLE_RETRY_DELAY_MS = 3000;
 const MAX_SUPPORT_DOCUMENT_NUMBER_RETRIES = 1;
 const SUPPORT_DOCUMENT_NUMBER_RETRY_DELAY_MS = 3000;
 const DEFAULT_DUPLICATED_DOCUMENT_RETRIES = 2;
@@ -69,8 +78,39 @@ export async function executeSiigoRequestWithRetries<T>(
       );
     }
 
-    if (isSiigoRateLimitError(error) && attempt < 2) {
-      await sleep(1500);
+    if (isSiigoRateLimitError(error) && attempt < MAX_RATE_LIMIT_RETRIES) {
+      const delayMs = Math.min(
+        RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt,
+        RATE_LIMIT_MAX_DELAY_MS,
+      );
+
+      logger.warn(
+        `[companyId=${companyId}] SIIGO respondió 429 (rate limit) al ${operationLabel}. Reintentando en ${delayMs}ms (intento ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES}).`,
+      );
+
+      await sleep(delayMs);
+
+      return executeSiigoRequestWithRetries(
+        authService,
+        companyId,
+        logger,
+        operationLabel,
+        request,
+        options,
+        attempt + 1,
+        authContext,
+      );
+    }
+
+    if (
+      isSiigoServiceUnavailableError(error) &&
+      attempt < MAX_SERVICE_UNAVAILABLE_RETRIES
+    ) {
+      logger.warn(
+        `[companyId=${companyId}] SIIGO respondió 503 (servicio no disponible) al ${operationLabel}. Reintentando en ${SERVICE_UNAVAILABLE_RETRY_DELAY_MS}ms (intento ${attempt + 1}/${MAX_SERVICE_UNAVAILABLE_RETRIES}).`,
+      );
+
+      await sleep(SERVICE_UNAVAILABLE_RETRY_DELAY_MS);
 
       return executeSiigoRequestWithRetries(
         authService,

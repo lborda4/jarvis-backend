@@ -29,8 +29,21 @@ export interface RedisConfig {
   importSessionTtlSeconds: number;
 }
 
-export interface DianConfig {
-  cookie?: string;
+export interface PurchaseInvoiceImportConfig {
+  /** Filas procesadas y persistidas juntas por el worker en cada pasada. */
+  batchSize: number;
+  /** Consultas simultáneas a NextPyme dentro de un mismo lote. */
+  concurrency: number;
+  /** Reintentos adicionales (además del intento original) para errores
+   * clasificados como transitorios al consultar NextPyme. */
+  maxRetries: number;
+  /** Minutos que puede pasar una fila en 'processing' antes de
+   * considerarse abandonada (worker caído a mitad de proceso) y volver a
+   * 'pending'. */
+  processingTimeoutMinutes: number;
+  /** Cada cuánto el worker revisa si hay trabajo pendiente cuando no tiene
+   * nada para procesar. */
+  workerPollIntervalMs: number;
 }
 
 export interface NextPymeConfig {
@@ -39,14 +52,24 @@ export interface NextPymeConfig {
   invoiceQueryUrl: string;
 }
 
+/** Reemplaza la integración anterior con OpenAI directo — mismo formato
+ * OpenAI-compatible (chat/completions), pero a través de OpenRouter, que
+ * enruta a distintos modelos con una sola API key. */
+export interface OpenRouterConfig {
+  apiKey?: string;
+  model: string;
+  baseUrl: string;
+}
+
 export interface AppConfiguration {
   app: AppConfig;
   database: DatabaseConfig;
   jwt: JwtConfig;
   siigo: SiigoConfig;
   redis: RedisConfig;
-  dian: DianConfig;
   nextPyme: NextPymeConfig;
+  openRouter: OpenRouterConfig;
+  purchaseInvoiceImport: PurchaseInvoiceImportConfig;
 }
 
 function parseBoolean(
@@ -138,9 +161,6 @@ export default (): AppConfiguration => ({
       3600,
     ),
   },
-  dian: {
-    cookie: trimOptional(process.env.DIAN_COOKIE),
-  },
   nextPyme: {
     baseUrl:
       trimOptional(process.env.NEXTPYME_BASE_URL) ??
@@ -149,5 +169,34 @@ export default (): AppConfiguration => ({
     invoiceQueryUrl:
       trimOptional(process.env.NEXTPYME_INVOICE_QUERY_URL) ??
       'https://api.nextpyme.plus/api/return-invoice-data',
+  },
+  openRouter: {
+    apiKey: trimOptional(process.env.OPENROUTER_API_KEY),
+    model: trimOptional(process.env.OPENROUTER_MODEL) ?? 'openai/gpt-4o-mini',
+    baseUrl:
+      trimOptional(process.env.OPENROUTER_BASE_URL) ??
+      'https://openrouter.ai/api/v1',
+  },
+  purchaseInvoiceImport: {
+    batchSize: parsePositiveInteger(
+      process.env.PURCHASE_INVOICE_IMPORT_BATCH_SIZE,
+      20,
+    ),
+    concurrency: parsePositiveInteger(
+      process.env.PURCHASE_INVOICE_IMPORT_CONCURRENCY,
+      4,
+    ),
+    maxRetries: parsePositiveInteger(
+      process.env.PURCHASE_INVOICE_IMPORT_MAX_RETRIES,
+      2,
+    ),
+    processingTimeoutMinutes: parsePositiveInteger(
+      process.env.PURCHASE_INVOICE_PROCESSING_TIMEOUT_MINUTES,
+      10,
+    ),
+    workerPollIntervalMs: parsePositiveInteger(
+      process.env.PURCHASE_INVOICE_WORKER_POLL_INTERVAL_MS,
+      2000,
+    ),
   },
 });

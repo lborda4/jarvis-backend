@@ -12,6 +12,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { UserCompaniesRepository } from './repositories/user-companies.repository';
 import { UsersRepository } from './repositories/users.repository';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { AuthenticatedUserResolverService } from './services/authenticated-user-resolver.service';
+import { WsAuthService } from './services/ws-auth.service';
 import { AppConfiguration } from '../config/configuration';
 import { RutParserService } from '../admin/rut-parser.service';
 
@@ -33,11 +35,20 @@ import { RutParserService } from '../admin/rut-parser.service';
     UserCompaniesRepository,
     RutParserService,
     JwtStrategy,
+    AuthenticatedUserResolverService,
+    WsAuthService,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
   ],
-  exports: [AuthService, UsersRepository, UserCompaniesRepository],
+  exports: [
+    AuthService,
+    UsersRepository,
+    UserCompaniesRepository,
+    JwtModule,
+    AuthenticatedUserResolverService,
+    WsAuthService,
+  ],
 })
 export class AuthModule {}

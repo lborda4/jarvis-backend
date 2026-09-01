@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
 import { ElectronicDocument } from '../entities/electronic-document.entity';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 import {
@@ -19,6 +19,8 @@ export interface FindElectronicDocumentsFilters {
   search?: string;
   supplierNits?: string[];
   issueDates?: string[];
+  issueDateFrom?: string;
+  issueDateTo?: string;
   siigoDocumentNumbers?: string[];
   importStatuses?: ImportRowStatusFilter[];
   page: number;
@@ -142,6 +144,20 @@ export class ElectronicDocumentsRepository {
       );
     }
 
+    if (filters.issueDateFrom) {
+      query.andWhere(
+        "document.payload->'invoice'->>'issueDate' >= :issueDateFrom",
+        { issueDateFrom: filters.issueDateFrom },
+      );
+    }
+
+    if (filters.issueDateTo) {
+      query.andWhere(
+        "document.payload->'invoice'->>'issueDate' <= :issueDateTo",
+        { issueDateTo: filters.issueDateTo },
+      );
+    }
+
     if (filters.siigoDocumentNumbers?.length) {
       query.andWhere(
         'document.siigoDocumentNumber IN (:...siigoDocumentNumbers)',
@@ -253,6 +269,32 @@ export class ElectronicDocumentsRepository {
       .andWhere('document.status = :status', { status })
       .andWhere('document.id != :excludeId', { excludeId })
       .getMany();
+  }
+
+  /** Documentos ya existentes para esas CUFEs en esa empresa — usado para no
+   * duplicar un documento si una fila de import se reprocesa (ej. worker
+   * caído justo después de crear el documento pero antes de guardar su id
+   * en la fila del job). Devuelve un Map<cufe, documentId> para lookup O(1). */
+  async findByCompanyAndCufes(
+    companyId: string,
+    cufes: string[],
+  ): Promise<Map<string, string>> {
+    if (cufes.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.repository.find({
+      where: { companyId, cufe: In(cufes) },
+      select: { id: true, cufe: true },
+    });
+
+    return new Map(
+      rows
+        .filter((row): row is ElectronicDocument & { cufe: string } =>
+          Boolean(row.cufe),
+        )
+        .map((row) => [row.cufe, row.id]),
+    );
   }
 
   async findDistinctCompanies(): Promise<

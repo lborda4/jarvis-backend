@@ -21,7 +21,10 @@ import {
   isSiigoUnauthorizedError,
   sleep,
 } from './helpers/siigo-auth.helper';
-import { getSiigoIntegration, normalizeSupplierDocument } from './helpers/siigo-context.helper';
+import {
+  getSiigoIntegration,
+  normalizeSupplierDocument,
+} from './helpers/siigo-context.helper';
 import { handleSiigoApiError } from './helpers/siigo-error.helper';
 import { buildSiigoImportResponse } from './helpers/siigo-import-response.helper';
 import { getSiigoSupplierName } from './helpers/siigo-supplier.helper';
@@ -47,6 +50,7 @@ export class SiigoValidationService {
     request: ValidateSiigoImportRequestDto,
     companyId: string,
     batchContext?: SiigoBatchContext,
+    options?: { skipNotFoundStatusWrite?: boolean },
   ): Promise<ValidateSiigoImportResponseDto> {
     const documentId = request?.documentId?.trim();
 
@@ -99,11 +103,17 @@ export class SiigoValidationService {
       );
 
       if (!siigoSupplier) {
-        await this.electronicDocumentService.updateStatus(
-          documentId,
-          ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
-          companyId,
-        );
+        // El llamador puede pedir NO marcar SUPPLIER_NOT_FOUND todavía (ej.
+        // preparación en segundo plano, que va a intentar crear el tercero
+        // automático a continuación) — evita que la fila parpadee a "Crear
+        // tercero" en el frontend un instante antes de resolverse sola.
+        if (!options?.skipNotFoundStatusWrite) {
+          await this.electronicDocumentService.updateStatus(
+            documentId,
+            ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
+            companyId,
+          );
+        }
 
         return buildSiigoImportResponse({
           status: SiigoImportValidationStatus.THIRD_PARTY_REQUIRED,
@@ -283,7 +293,10 @@ export class SiigoValidationService {
       return result;
     });
 
-    batchContext?.supplierRequestsInFlight.set(supplierDocument, supplierRequest);
+    batchContext?.supplierRequestsInFlight.set(
+      supplierDocument,
+      supplierRequest,
+    );
 
     return supplierRequest;
   }

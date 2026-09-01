@@ -21,24 +21,46 @@ function truncateContactName(value: string): string {
   return value.trim().slice(0, SIIGO_CONTACT_NAME_MAX_LENGTH);
 }
 
+/** Ciudad propia de la empresa (companies.city_code), usada como default
+ * cuando el proveedor no trae ciudad — en vez de un Bogotá fijo sin
+ * relación con la empresa que está creando el tercero. */
+export interface SiigoSupplierAddressFallback {
+  cityCode?: string | null;
+  stateCode?: string | null;
+}
+
+function resolveStateCodeFromCity(cityCode: string): string {
+  // El código DANE de departamento son los primeros 2 dígitos del código de
+  // ciudad (ej. 11001 -> 11).
+  return cityCode.slice(0, 2) || '11';
+}
+
 function buildAddress(
   supplier: ElectronicDocumentSupplier,
+  companyFallback?: SiigoSupplierAddressFallback,
 ): SiigoSupplierRequestDto['address'] {
   const addressText = supplier.address?.trim();
   const stateCode = supplier.stateCode?.trim();
   const cityCode = supplier.cityCode?.trim();
   const countryCode = supplier.countryCode?.trim();
+  const fallbackCityCode = companyFallback?.cityCode?.trim();
+  const fallbackStateCode =
+    companyFallback?.stateCode?.trim() ||
+    (fallbackCityCode ? resolveStateCodeFromCity(fallbackCityCode) : undefined);
 
   // SIIGO exige el bloque address para crear terceros. Cuando la DIAN/NextPyme
   // no trae ningún dato de dirección (ej. asociaciones/entidades pequeñas),
-  // se envía igual con valores por defecto (Bogotá) en vez de omitirlo, porque
-  // omitir el campo produce un 400 genérico de SIIGO.
+  // se envía igual con valores por defecto en vez de omitirlo, porque omitir
+  // el campo produce un 400 genérico de SIIGO. La ciudad por defecto es la de
+  // la empresa que está creando el tercero (si la configuró un admin);
+  // Bogotá queda como último recurso si ni el proveedor ni la empresa la
+  // tienen.
   return {
-    address: addressText || 'Sin dirección',
+    address: addressText || '0000',
     city: {
       country_code: countryCode || 'Co',
-      state_code: stateCode || '11',
-      city_code: cityCode || '11001',
+      state_code: stateCode || fallbackStateCode || '11',
+      city_code: cityCode || fallbackCityCode || '11001',
     },
   };
 }
@@ -46,6 +68,7 @@ function buildAddress(
 export function mapElectronicDocumentPayloadToSiigoSupplier(
   payload: ElectronicDocumentPayload,
   personTypeOverride?: string | null,
+  companyAddressFallback?: SiigoSupplierAddressFallback,
 ): SiigoSupplierRequestDto {
   const supplier = payload.supplier;
   const identity = resolveSiigoSupplierIdentity({
@@ -99,7 +122,7 @@ export function mapElectronicDocumentPayloadToSiigoSupplier(
     siigoPayload.check_digit = checkDigit;
   }
 
-  siigoPayload.address = buildAddress(supplier);
+  siigoPayload.address = buildAddress(supplier, companyAddressFallback);
 
   if (supplier.phone?.trim()) {
     siigoPayload.phones = [{ number: supplier.phone.trim() }];

@@ -102,6 +102,121 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     expect(payload.items[0].ivaPercentage).toBeUndefined();
   });
 
+  it('resta el descuento general del total pero no del IVA (caso reportado: descuento de $50.000)', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        legal_monetary_totals: {
+          line_extension_amount: '1000000.00',
+          tax_exclusive_amount: '1000000.00',
+          tax_inclusive_amount: '1190000.00',
+          allowance_total_amount: '50000.00',
+          charge_total_amount: '0.00',
+          payable_amount: '1140000.00',
+        },
+      }),
+      'cufe-123',
+    );
+
+    // El IVA real (190.000) no debe "comerse" el descuento — antes daba 140.000
+    // porque se calculaba como payable (ya con el descuento restado) - subtotal.
+    expect(payload.totals).toEqual({
+      subtotal: 1000000,
+      total: 1140000,
+      iva: 190000,
+      discount: 50000,
+    });
+  });
+
+  it('no incluye discount en totals cuando no hay descuento general', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        legal_monetary_totals: {
+          line_extension_amount: '100000.00',
+          tax_exclusive_amount: '100000.00',
+          tax_inclusive_amount: '119000.00',
+          payable_amount: '119000.00',
+        },
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.totals).toEqual({ subtotal: 100000, total: 119000, iva: 19000 });
+  });
+
+  it('caso 1: usa tax_totals de factura para el IVA aunque el valor unitario ya lo incluya (no duplica)', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        legal_monetary_totals: {
+          tax_exclusive_amount: '13445.38',
+          tax_inclusive_amount: '16000.00',
+          payable_amount: '16000.00',
+        },
+        tax_totals: [
+          { tax_id: 1, tax_amount: '2554.62', taxable_amount: '13445.38', percent: '19.00' },
+        ],
+        invoice_lines: [
+          {
+            invoiced_quantity: '2',
+            description: 'PRODUCTO CON IVA INCLUIDO',
+            price_amount: '8000.00',
+          },
+        ],
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.totals).toEqual({
+      subtotal: 13445.38,
+      total: 16000,
+      iva: 2554.62,
+    });
+  });
+
+  it('caso 2: factura de muestra sin valor comercial — el total sale de payable_amount, no de tax_inclusive_amount', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        legal_monetary_totals: {
+          tax_exclusive_amount: '44850.00',
+          tax_inclusive_amount: '8521.50',
+          payable_amount: '8521.50',
+        },
+        tax_totals: [
+          { tax_id: 1, tax_amount: '8521.50', taxable_amount: '44850.00', percent: '19.00' },
+        ],
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.totals).toEqual({
+      subtotal: 44850,
+      total: 8521.5,
+      iva: 8521.5,
+    });
+  });
+
+  it('caso 3: factura sin IVA — sigue funcionando cuando no hay tax_totals de factura', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        legal_monetary_totals: {
+          tax_exclusive_amount: '0.00',
+          tax_inclusive_amount: '16000.00',
+          payable_amount: '16000.00',
+        },
+        invoice_lines: [
+          {
+            invoiced_quantity: '1',
+            line_extension_amount: '16000.00',
+            description: 'Recarga celular',
+            price_amount: '16000.00',
+          },
+        ],
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.totals).toEqual({ subtotal: 16000, total: 16000, iva: 0 });
+  });
+
   it('returns a zero total when the monetary fields are missing/garbled', () => {
     const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       buildResult({

@@ -185,8 +185,12 @@ export class NextPymeRutService {
         'typedocumentidentificationid',
       ]);
       const name =
-        findInRecord(record, ['name', 'nombre', 'description', 'descripcion']) ??
-        null;
+        findInRecord(record, [
+          'name',
+          'nombre',
+          'description',
+          'descripcion',
+        ]) ?? null;
       const code = findInRecord(record, ['code', 'codigo', 'abbreviation']);
 
       if (!idValue || !name) {
@@ -314,6 +318,30 @@ export class NextPymeRutService {
       'direccioncomercial',
       'addressline',
     ]);
+    // Código DANE de ciudad/departamento — no siempre viene en la respuesta
+    // de RUT/RUES (depende de qué tan completo esté el registro), por eso
+    // se busca con varias llaves posibles igual que los demás campos, y se
+    // deja en null si no aparece (el llamador cae a su propio default).
+    const cityCode = this.findValue(orderedRecords, [
+      'citycode',
+      'municipalitycode',
+      'codemunicipality',
+      'codigomunicipio',
+      'idmunicipality',
+      'municipalityid',
+    ]);
+    const cityName = this.findValue(orderedRecords, [
+      'city',
+      'municipality',
+      'municipio',
+      'ciudad',
+    ]);
+    const stateCode = this.findValue(orderedRecords, [
+      'statecode',
+      'departmentcode',
+      'codigodepartamento',
+      'departmentid',
+    ]);
 
     return {
       found: Boolean(checkDigit || name || email || phone || address),
@@ -323,6 +351,9 @@ export class NextPymeRutService {
       email,
       phone,
       address,
+      cityCode,
+      cityName,
+      stateCode,
     };
   }
 

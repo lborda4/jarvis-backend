@@ -47,6 +47,8 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     JarvisDocumentPreparationService,
     JarvisSupportDocumentSendService,
     NextPymeApiClient,
+    NextPymeMasterCatalogService,
+    NextPymeRutService,
   ],
 })
 export class JarvisModule {}

@@ -4,6 +4,7 @@ import { CompanyModule } from '../../company/company.module';
 import { ElectronicDocumentModule } from '../../electronic-document/electronic-document.module';
 import { PlanModule } from '../../plan/plan.module';
 import { IntegrationModule } from '../integration.module';
+import { JarvisModule } from '../jarvis/jarvis.module';
 import { SiigoHttpClient } from './clients/siigo-http.client';
 import { SiigoController } from './siigo.controller';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
@@ -26,10 +27,15 @@ import { SiigoPurchaseDocumentCreationHandler } from './handlers/siigo-purchase-
 import { SiigoSupportDocumentCreationHandler } from './handlers/siigo-support-document-creation.handler';
 import { SiigoPaymentTypesCatalogService } from './siigo-payment-types-catalog.service';
 import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
+import { SiigoProductsCatalogService } from './siigo-products-catalog.service';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoConfigurationCacheService } from './siigo-configuration-cache.service';
 import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
 import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
+import { SiigoAiAccountSuggestionService } from './siigo-ai-account-suggestion.service';
+import { SiigoPurchaseHistorySyncService } from './siigo-purchase-history-sync.service';
+import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classification.service';
+import { OpenRouterModule } from '../openrouter/openrouter.module';
 
 @Module({
   imports: [
@@ -38,6 +44,8 @@ import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),
     PlanModule,
+    OpenRouterModule,
+    JarvisModule,
   ],
   controllers: [SiigoController],
   providers: [
@@ -57,8 +65,7 @@ import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
       useFactory: (
         purchaseHandler: SiigoPurchaseDocumentCreationHandler,
         supportHandler: SiigoSupportDocumentCreationHandler,
-      ) =>
-        new SiigoDocumentCreationRegistry([purchaseHandler, supportHandler]),
+      ) => new SiigoDocumentCreationRegistry([purchaseHandler, supportHandler]),
       inject: [
         SiigoPurchaseDocumentCreationHandler,
         SiigoSupportDocumentCreationHandler,
@@ -74,9 +81,13 @@ import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
     SiigoDocumentSendThrottleService,
     SiigoPaymentTypesCatalogService,
     SiigoCostCentersCatalogService,
+    SiigoProductsCatalogService,
     SiigoTaxesCatalogService,
     SiigoBalanceTrialImportService,
     SiigoAccountsBalanceSyncService,
+    SiigoAiAccountSuggestionService,
+    SiigoPurchaseHistorySyncService,
+    SiigoPurchaseAiClassificationService,
   ],
   exports: [
     SiigoValidationService,
@@ -87,6 +98,9 @@ import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
     SiigoDocumentPreparationService,
     SiigoAccountsCatalogService,
     SiigoTaxesCatalogService,
+    SiigoPaymentTypesCatalogService,
+    SiigoProductsCatalogService,
+    SiigoPurchaseAiClassificationService,
   ],
 })
 export class SiigoModule {}

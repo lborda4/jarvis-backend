@@ -3,6 +3,7 @@ import { CreateSiigoPurchaseSendRequestDto } from '../dto/create-siigo-purchase-
 import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
 import { resolveSupportDocumentRetentionPlacement } from '../helpers/siigo-support-document-retention.helper';
+import { truncateSiigoObservations } from '../helpers/siigo-observations.helper';
 import {
   calculateSiigoSupportDocumentPaymentValue,
   roundSiigoAmount,
@@ -40,7 +41,9 @@ export function mapCreatePurchaseSendRequestToSiigo(
     ? retentionPlacement.documentRetentions
     : undefined;
   const itemTaxes =
-    hasIva && defaultTaxId && defaultTaxId > 0 ? [{ id: defaultTaxId }] : undefined;
+    hasIva && defaultTaxId && defaultTaxId > 0
+      ? [{ id: defaultTaxId }]
+      : undefined;
   const items = request.items.map((item) => {
     const mappedItem = mapSiigoDocumentSendItem(
       item,
@@ -81,7 +84,7 @@ export function mapCreatePurchaseSendRequestToSiigo(
       number: request.provider_invoice.number.trim(),
     },
     ...(request.observations?.trim()
-      ? { observations: request.observations.trim() }
+      ? { observations: truncateSiigoObservations(request.observations.trim()) }
       : {}),
     ...(retentions?.length ? { retentions } : {}),
     items,
@@ -104,9 +107,7 @@ function validateCreatePurchaseSendRequest(
   }
 
   if (!request.supplier?.identification?.trim()) {
-    throw new BadRequestException(
-      'El proveedor debe incluir identification.',
-    );
+    throw new BadRequestException('El proveedor debe incluir identification.');
   }
 
   if (!request.provider_invoice?.prefix?.trim()) {

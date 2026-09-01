@@ -75,4 +75,10 @@ export class SupplierConfigurationsRepository {
   save(configuration: SupplierConfiguration): Promise<SupplierConfiguration> {
     return this.repository.save(configuration);
   }
+
+  saveMany(
+    configurations: SupplierConfiguration[],
+  ): Promise<SupplierConfiguration[]> {
+    return this.repository.save(configurations);
+  }
 }

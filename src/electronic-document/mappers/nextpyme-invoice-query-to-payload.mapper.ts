@@ -36,6 +36,23 @@ function resolveDocumentType(
   return DIAN_DOCUMENT_TYPE_BY_CODE[normalized] ?? 'NIT';
 }
 
+// DIAN tabla 9.5 (forma de pago): 1 = Contado, 2 = Crédito.
+function resolveIsCreditPayment(
+  paymentFormId: string | number | undefined,
+): boolean | undefined {
+  const normalized = String(paymentFormId ?? '').trim();
+
+  if (normalized === '1') {
+    return false;
+  }
+
+  if (normalized === '2') {
+    return true;
+  }
+
+  return undefined;
+}
+
 export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
   result: NextPymeInvoiceQueryResult,
   cufe: string,
@@ -43,11 +60,44 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
   const seller = result.seller;
   const totals = result.legal_monetary_totals;
   const lineExtension = toNumber(totals.line_extension_amount);
+  const taxExclusive = toNumber(totals.tax_exclusive_amount);
+  const taxInclusive = toNumber(totals.tax_inclusive_amount);
   const payable = toNumber(totals.payable_amount);
-  const subtotal = lineExtension > 0 ? lineExtension : payable;
-  const iva = Math.max(payable - subtotal, 0);
+  // Descuento general a nivel de documento (no atribuible a una línea
+  // puntual) — SIIGO ya lo tiene restado en payable_amount, pero antes de
+  // este fix se perdía por completo: no llegaba a ningún lado del payload,
+  // así que el resumen que arma el frontend (Subtotal + IVA − Retenciones)
+  // no tenía cómo saber que existía y el "Total neto" mostrado ignoraba el
+  // descuento.
+  const discount = toNumber(totals.allowance_total_amount);
+  // El Subtotal es tax_exclusive_amount (el campo certificado por la DIAN
+  // para la base gravable) — line_extension_amount y payable_amount solo se
+  // usan como respaldo cuando tax_exclusive_amount viene en 0 (ej. facturas
+  // sin IVA de algunos proveedores, donde ese campo no se diligencia).
+  const subtotal = taxExclusive > 0 ? taxExclusive : lineExtension > 0 ? lineExtension : payable;
+  // El IVA sale de la suma de tax_totals a nivel de factura (no por línea,
+  // para no duplicar cuando hay varias líneas) — es el dato certificado por
+  // la DIAN. Si el proveedor no lo envía, se cae al cálculo anterior
+  // (tax_inclusive - tax_exclusive) como respaldo: no se usa payable - subtotal
+  // porque payable ya tiene el descuento general restado, y esa resta se
+  // "comía" el descuento como si fuera parte del IVA.
+  const invoiceTaxTotals = result.tax_totals ?? [];
+  const taxTotalsSum = invoiceTaxTotals.reduce(
+    (sum, tax) => sum + toNumber(tax.tax_amount),
+    0,
+  );
+  const iva =
+    invoiceTaxTotals.length > 0
+      ? taxTotalsSum
+      : taxExclusive > 0 && taxInclusive > taxExclusive
+        ? taxInclusive - taxExclusive
+        : Math.max(payable + discount - subtotal, 0);
   const invoiceNumber =
     `${result.prefix ?? ''}${result.number ?? ''}`.trim() || cufe.slice(0, 12);
+  const isCreditPayment = resolveIsCreditPayment(
+    result.payment_form?.payment_form_id,
+  );
+  const durationMeasure = toNumber(result.payment_form?.duration_measure);
 
   const items = result.invoice_lines.length
     ? result.invoice_lines.map((line) => {
@@ -61,13 +111,22 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
           firstTax?.percent !== undefined
             ? toNumber(firstTax.percent)
             : undefined;
+        // Descuento propio de la línea (allowance_charges). Un descuento
+        // general a nivel de documento, no atribuible a una línea puntual,
+        // no se reparte acá — se deja tal cual viene por línea.
+        const discount = (line.allowance_charges ?? []).reduce(
+          (sum, charge) => sum + toNumber(charge.amount),
+          0,
+        );
 
         return {
           descripcion: line.description?.trim() || 'Ítem importado',
           cantidad: quantity > 0 ? quantity : 1,
           valorUnitario: price > 0 ? price : total,
           total: total > 0 ? total : price,
+          ...(line.code?.trim() ? { codigo: line.code.trim() } : {}),
           ...(ivaPercentage !== undefined ? { ivaPercentage } : {}),
+          ...(discount > 0 ? { discount } : {}),
         };
       })
     : [
@@ -92,8 +151,7 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       phone: seller.phone?.trim() || '',
       email: seller.email?.trim() || '',
       stateCode: seller.municipality?.department?.code?.trim() || '',
-      cityCode:
-        seller.municipality?.code?.trim() || seller.code?.trim() || '',
+      cityCode: seller.municipality?.code?.trim() || seller.code?.trim() || '',
       countryCode: 'Co',
     },
     invoice: {
@@ -104,6 +162,8 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       ...(result.payment_form?.payment_due_date?.trim()
         ? { dueDate: result.payment_form.payment_due_date.trim() }
         : {}),
+      ...(isCreditPayment !== undefined ? { isCreditPayment } : {}),
+      ...(durationMeasure > 0 ? { durationMeasure } : {}),
       currency: 'COP',
     },
     items,
@@ -112,6 +172,7 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       subtotal,
       total: payable,
       iva,
+      ...(discount > 0 ? { discount } : {}),
     },
     ...(result.notes?.trim() ? { observations: result.notes.trim() } : {}),
   };

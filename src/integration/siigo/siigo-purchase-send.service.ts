@@ -15,13 +15,24 @@ import {
 } from './dto/create-siigo-purchase-send.dto';
 import { DeleteSiigoPurchaseResponseDto } from './dto/delete-siigo-purchase.dto';
 import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
+import {
+  extractSiigoCalculatedTotalFromApiError,
+  isSiigoInvalidTotalPaymentsApiError,
+} from './helpers/siigo-error.helper';
+import { applySiigoCorrectedPaymentsTotal } from './helpers/siigo-purchase-total.helper';
 import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
+import { SiigoPurchaseRequestDto } from './dto/siigo-purchase-request.dto';
+import { SiigoPurchaseResponse } from './interfaces/siigo-api.interface';
 import { validateSupportDocumentRetentions } from './helpers/siigo-support-document-retention.helper';
 import {
   buildSupplierPreferenceSnapshotFromSendRequest,
+  persistHistorialFacturaFromSendRequest,
   persistSupplierPreferencesFromSendRequest,
 } from './helpers/siigo-support-document-preference.helper';
+import { getSiigoIntegration } from './helpers/siigo-context.helper';
 import { mapCreatePurchaseSendRequestToSiigo } from './mappers/create-siigo-purchase-send-request.mapper';
+import { HistorialFacturasRepository } from '../repositories/historial-facturas.repository';
+import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoConfigurationCacheService } from './siigo-configuration-cache.service';
@@ -44,6 +55,8 @@ export class SiigoPurchaseSendService {
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
     private readonly planSubscriptionService: PlanSubscriptionService,
+    private readonly integrationsRepository: IntegrationsRepository,
+    private readonly historialFacturasRepository: HistorialFacturasRepository,
   ) {}
 
   async sendPurchase(
@@ -58,8 +71,10 @@ export class SiigoPurchaseSendService {
     });
 
     const documentId = request.documentId.trim();
-    const electronicDocument =
-      await this.electronicDocumentService.requireById(documentId, companyId);
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
 
     if (
       electronicDocument.electronicDocumentType !==
@@ -70,7 +85,9 @@ export class SiigoPurchaseSendService {
       );
     }
 
-    if (electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (
+      electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED
+    ) {
       throw new BadRequestException(
         'La factura de compra ya fue creada en SIIGO para este registro.',
       );
@@ -140,63 +157,72 @@ export class SiigoPurchaseSendService {
       );
     }
 
-    if (request.savePreferences) {
-      await persistSupplierPreferencesFromSendRequest(
-        this.siigoAccountMappingService,
-        request,
-        electronicDocument,
-        companyId,
-        taxesCatalog,
-        this.logger,
-      );
-    }
+    // Se guarda siempre — la clasificación confirmada al enviar alimenta
+    // tanto la preferencia del proveedor (autocompletar la próxima factura)
+    // como el historial que usa la IA como ejemplo, sin depender de que el
+    // usuario recuerde marcar nada.
+    await persistSupplierPreferencesFromSendRequest(
+      this.siigoAccountMappingService,
+      request,
+      electronicDocument,
+      companyId,
+      taxesCatalog,
+      this.logger,
+    );
+
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+    await persistHistorialFacturaFromSendRequest(
+      this.historialFacturasRepository,
+      request,
+      electronicDocument,
+      companyId,
+      integration.id,
+      taxesCatalog,
+      this.logger,
+    );
 
     try {
-      const createdPurchase = await this.siigoDocumentSendThrottleService.run(
+      return await this.electronicDocumentService.runExclusiveForDocumentCreation(
+        documentId,
         companyId,
-        () =>
-          executeSiigoRequestWithRetries(
-            this.siigoAuthService,
+        async () => {
+          const createdPurchase = await this.createPurchaseInSiigo(
             companyId,
-            this.logger,
-            'crear factura de compra',
-            async (accessToken, partnerId) =>
-              this.siigoHttpClient.createPurchase(
-                accessToken,
-                siigoPayload,
-                partnerId,
-              ),
-            SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
-          ),
-      );
+            siigoPayload,
+          );
 
-      const updatedDocument =
-        await this.electronicDocumentService.markPurchaseCreated(
-          documentId,
-          createdPurchase.id,
-          companyId,
-          createdPurchase.number ?? null,
-          preferenceSnapshot
-            ? {
-                ...electronicDocument.payload,
-                siigoSendConfiguration: preferenceSnapshot,
-              }
-            : undefined,
-        );
+          const updatedDocument =
+            await this.electronicDocumentService.markPurchaseCreated(
+              documentId,
+              createdPurchase.id,
+              companyId,
+              createdPurchase.number ?? null,
+              preferenceSnapshot
+                ? {
+                    ...electronicDocument.payload,
+                    siigoSendConfiguration: preferenceSnapshot,
+                  }
+                : undefined,
+            );
 
-      return {
-        success: true,
-        purchase: {
-          id: createdPurchase.id,
-          number: createdPurchase.number,
-          name: createdPurchase.name,
-          date: createdPurchase.date,
-          total: createdPurchase.total,
-          providerInvoicePrefix: createdPurchase.provider_invoice?.prefix,
-          providerInvoiceNumber: createdPurchase.provider_invoice?.number,
+          return {
+            success: true,
+            purchase: {
+              id: createdPurchase.id,
+              number: createdPurchase.number,
+              name: createdPurchase.name,
+              date: createdPurchase.date,
+              total: createdPurchase.total,
+              providerInvoicePrefix: createdPurchase.provider_invoice?.prefix,
+              providerInvoiceNumber: createdPurchase.provider_invoice?.number,
+            },
+            document: mapElectronicDocumentToResponse(updatedDocument),
+          };
         },
-        document: mapElectronicDocumentToResponse(updatedDocument),
-      };
+      );
     } catch (error) {
       await this.electronicDocumentService.updateStatus(
         documentId,
@@ -244,7 +270,9 @@ export class SiigoPurchaseSendService {
       );
     }
 
-    if (electronicDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (
+      electronicDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED
+    ) {
       throw new BadRequestException(
         'La factura de compra no está creada en SIIGO.',
       );
@@ -312,4 +340,64 @@ export class SiigoPurchaseSendService {
     }
   }
 
+  /**
+   * SIIGO recalcula el total de la compra con su propia lógica de redondeo
+   * — a veces en pesos enteros, a veces con centavos, según el caso
+   * puntual (ver siigo-purchase-total.helper.ts) — y rechaza el envío con
+   * `invalid_total_payments` si `payments[].value` no coincide EXACTO con
+   * lo que ella calculó. Reproducir ese redondeo de antemano no es
+   * confiable (los dos casos reales vistos hasta ahora difieren), así que
+   * en vez de eso: si SIIGO rechaza el total, reintenta UNA vez con el
+   * total exacto que SIIGO ya nos dio en su propio mensaje de error.
+   */
+  private async createPurchaseInSiigo(
+    companyId: string,
+    siigoPayload: SiigoPurchaseRequestDto,
+    alreadyRetriedWithCorrectedTotal = false,
+  ): Promise<SiigoPurchaseResponse> {
+    try {
+      return await this.siigoDocumentSendThrottleService.run(companyId, () =>
+        executeSiigoRequestWithRetries(
+          this.siigoAuthService,
+          companyId,
+          this.logger,
+          'crear factura de compra',
+          async (accessToken, partnerId) =>
+            this.siigoHttpClient.createPurchase(
+              accessToken,
+              siigoPayload,
+              partnerId,
+            ),
+          SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
+        ),
+      );
+    } catch (error) {
+      if (
+        alreadyRetriedWithCorrectedTotal ||
+        !isSiigoInvalidTotalPaymentsApiError(error)
+      ) {
+        throw error;
+      }
+
+      const correctedTotal = extractSiigoCalculatedTotalFromApiError(error);
+
+      if (correctedTotal === null || siigoPayload.payments.length === 0) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `[companyId=${companyId}] SIIGO rechazó el total de pagos calculado por nosotros; reintentando una vez con el total exacto que SIIGO reportó (${correctedTotal}).`,
+      );
+
+      const correctedPayload: SiigoPurchaseRequestDto = {
+        ...siigoPayload,
+        payments: applySiigoCorrectedPaymentsTotal(
+          siigoPayload.payments,
+          correctedTotal,
+        ),
+      };
+
+      return this.createPurchaseInSiigo(companyId, correctedPayload, true);
+    }
+  }
 }

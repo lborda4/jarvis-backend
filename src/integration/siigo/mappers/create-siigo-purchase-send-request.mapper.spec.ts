@@ -74,4 +74,37 @@ describe('mapCreatePurchaseSendRequestToSiigo', () => {
     expect(siigoPayload.items[0].price).toBe(3564706.35);
     expect(siigoPayload.payments[0].value).toBe(3742941);
   });
+
+  it('trunca observations a 1000 caracteres antes de enviarlo a SIIGO (caso real reportado: boilerplate legal de autorretención ICA de ~5000 caracteres)', () => {
+    const taxesCatalog: SiigoTaxCatalogItemDto[] = [];
+    const longObservations = 'CUFE: b1794c8ed394 - '.concat('a'.repeat(5000));
+
+    const request: CreateSiigoPurchaseSendRequestDto = {
+      documentId: 'doc-3',
+      date: '2026-07-06',
+      supplier: { identification: '830122566', branch_office: 0 },
+      provider_invoice: { prefix: 'BEM', number: '17439170' },
+      observations: longObservations,
+      items: [
+        {
+          code: '51356002',
+          description: '3166213494 Recarga',
+          quantity: 1,
+          price: 10000,
+        },
+      ],
+      payments: [{ id: 5056, value: 10000 }],
+    };
+
+    const siigoPayload = mapCreatePurchaseSendRequestToSiigo(
+      request,
+      40779,
+      taxesCatalog,
+    );
+
+    expect(siigoPayload.observations?.length).toBe(1000);
+    expect(siigoPayload.observations?.startsWith('CUFE: b1794c8ed394')).toBe(
+      true,
+    );
+  });
 });

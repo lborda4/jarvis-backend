@@ -34,6 +34,20 @@ export class ImportSupportDocumentsRequestDto {
   issueDate?: string;
 }
 
+export class ImportFailedRowDto {
+  @ApiProperty()
+  cufe: string;
+
+  @ApiProperty()
+  issuerNit: string;
+
+  @ApiProperty()
+  issuerName: string;
+
+  @ApiProperty()
+  error: string;
+}
+
 export class ImportSupportDocumentsResponseDto {
   @ApiProperty()
   processedRows: number;
@@ -49,4 +63,11 @@ export class ImportSupportDocumentsResponseDto {
 
   @ApiProperty({ type: [InvoicePreviewDto] })
   records: InvoicePreviewDto[];
+
+  @ApiPropertyOptional({
+    type: [ImportFailedRowDto],
+    description:
+      'Filas que no se importaron porque no se pudo consultar la factura (ej. CUFE no encontrado en NextPyme).',
+  })
+  failedRows?: ImportFailedRowDto[];
 }

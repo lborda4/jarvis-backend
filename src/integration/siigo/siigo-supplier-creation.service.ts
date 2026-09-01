@@ -9,13 +9,20 @@ import { ElectronicDocumentProcessingStatus } from '../../electronic-document/en
 import { ElectronicDocument } from '../../electronic-document/entities/electronic-document.entity';
 import { resolveSupplierDocumentFromPayload } from '../../electronic-document/helpers/electronic-document-supplier.helper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
+import { CompaniesRepository } from '../../company/repositories/companies.repository';
+import { LookupJarvisTerceroNitResponseDto } from '../jarvis/dto/jarvis-tercero.dto';
+import { JarvisDocumentType } from '../jarvis/enums/jarvis-document-type.enum';
+import { NextPymeRutService } from '../jarvis/nextpyme-rut.service';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
 import { SIIGO_DEFAULT_ITEM_TYPE } from './constants/supplier-configuration.constants';
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
-import { getSiigoIntegration, normalizeSupplierDocument } from './helpers/siigo-context.helper';
+import {
+  getSiigoIntegration,
+  normalizeSupplierDocument,
+} from './helpers/siigo-context.helper';
 import { executeSiigoRequestWithRetries } from './helpers/siigo-request-retry.helper';
 import { getSiigoSupplierName } from './helpers/siigo-supplier.helper';
 import { mapElectronicDocumentPayloadToSiigoSupplier } from './mappers/electronic-document-to-siigo-supplier.mapper';
@@ -25,6 +32,41 @@ import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoSupplierService } from './siigo-supplier.service';
 import { SiigoCustomer } from './interfaces/siigo-api.interface';
 import { SiigoSupplierRequestDto } from './dto/siigo-supplier-request.dto';
+
+/** Mapea el documentType (texto DIAN, ej. "NIT"/"CC"/"31"/"13") al enum que
+ * pide la consulta RUT/RUES de NextPyme. NIT por defecto — la gran mayoría
+ * de proveedores de factura de compra son personas jurídicas. */
+function resolveJarvisDocumentType(
+  documentType?: string | null,
+): JarvisDocumentType {
+  const normalized = documentType?.trim().toUpperCase() ?? '';
+
+  if (
+    normalized === 'CC' ||
+    normalized === '13' ||
+    normalized.includes('CIUDADANIA')
+  ) {
+    return JarvisDocumentType.CC;
+  }
+
+  if (
+    normalized === 'CE' ||
+    normalized === '22' ||
+    normalized.includes('EXTRANJER')
+  ) {
+    return JarvisDocumentType.CE;
+  }
+
+  if (
+    normalized === 'PA' ||
+    normalized === '41' ||
+    normalized.includes('PASAPORTE')
+  ) {
+    return JarvisDocumentType.PA;
+  }
+
+  return JarvisDocumentType.NIT;
+}
 
 @Injectable()
 export class SiigoSupplierCreationService {
@@ -36,6 +78,8 @@ export class SiigoSupplierCreationService {
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
     private readonly electronicDocumentService: ElectronicDocumentService,
+    private readonly companiesRepository: CompaniesRepository,
+    private readonly nextPymeRutService: NextPymeRutService,
   ) {}
 
   async createSupplier(
@@ -43,20 +87,18 @@ export class SiigoSupplierCreationService {
     companyId: string,
   ): Promise<CreateSiigoSupplierResponseDto> {
     const documentId = request?.documentId?.trim();
+    // Si no viene (creación automática), se deja en null: el mapper lo
+    // infiere del documentType del proveedor (ver resolveSiigoSupplierIdentity).
     const personType = normalizeSiigoPersonType(request?.person_type);
 
     if (!documentId) {
       throw new BadRequestException('El campo documentId es obligatorio.');
     }
 
-    if (!personType) {
-      throw new BadRequestException(
-        'Debe indicar si el proveedor es persona natural o persona jurídica.',
-      );
-    }
-
-    const electronicDocument =
-      await this.electronicDocumentService.requireById(documentId, companyId);
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
 
     const profileName = request?.name?.trim();
     const profileDocumentNumber = request?.document_number?.trim();
@@ -100,8 +142,10 @@ export class SiigoSupplierCreationService {
       );
     }
 
-    const refreshedDocument =
-      await this.electronicDocumentService.requireById(documentId, companyId);
+    const refreshedDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
     const supplier = resolveSupplierDocumentFromPayload(
       refreshedDocument.payload,
     );
@@ -116,9 +160,38 @@ export class SiigoSupplierCreationService {
       `[documentId=${documentId}] Creación de tercero en SIIGO desde payload persistido`,
     );
 
+    const company = await this.companiesRepository.findById(companyId);
+
+    // El tercero se crea con lo que traiga RUT/RUES (dato oficial), no con
+    // lo que venga del Excel de la DIAN — el Excel solo queda como
+    // respaldo si la consulta falla o no encuentra nada.
+    const rutRues = await this.lookupSupplierFromRutRues(
+      supplier.normalizedDocumentNumber,
+      refreshedDocument.payload.supplier.documentType,
+      company?.nextPymeToken?.trim() || undefined,
+    );
+    const supplierPayload = rutRues
+      ? {
+          ...refreshedDocument.payload,
+          supplier: {
+            ...refreshedDocument.payload.supplier,
+            ...(rutRues.name
+              ? { name: rutRues.name, commercialName: rutRues.name }
+              : {}),
+            ...(rutRues.check_digit ? { checkDigit: rutRues.check_digit } : {}),
+            ...(rutRues.address ? { address: rutRues.address } : {}),
+            ...(rutRues.email ? { email: rutRues.email } : {}),
+            ...(rutRues.phone ? { phone: rutRues.phone } : {}),
+            ...(rutRues.cityCode ? { cityCode: rutRues.cityCode } : {}),
+            ...(rutRues.stateCode ? { stateCode: rutRues.stateCode } : {}),
+          },
+        }
+      : refreshedDocument.payload;
+
     const siigoPayload = mapElectronicDocumentPayloadToSiigoSupplier(
-      refreshedDocument.payload,
+      supplierPayload,
       personType,
+      { cityCode: company?.cityCode ?? null },
     );
 
     this.logger.log(
@@ -172,6 +245,37 @@ export class SiigoSupplierCreationService {
           ? error.message
           : 'Error inesperado al crear tercero en SIIGO',
       );
+    }
+  }
+
+  /**
+   * Consulta RUT/RUES en NextPyme por NIT, con el token propio de la
+   * empresa (companies.next_pyme_token) si lo tiene configurado, si no cae
+   * al token global. Devuelve null (no lanza) si falla o no encuentra
+   * nada — el llamador cae al dato del Excel importado en ese caso, en vez
+   * de bloquear la creación del tercero.
+   */
+  private async lookupSupplierFromRutRues(
+    documentNumber: string,
+    documentType: string | undefined,
+    companyToken: string | undefined,
+  ): Promise<LookupJarvisTerceroNitResponseDto | null> {
+    try {
+      const result = await this.nextPymeRutService.lookupDocument(
+        resolveJarvisDocumentType(documentType),
+        documentNumber,
+        companyToken,
+      );
+
+      return result.found ? result : null;
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo consultar RUT/RUES para NIT=${documentNumber}; se usa la información del Excel importado: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      return null;
     }
   }
 

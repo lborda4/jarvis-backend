@@ -55,6 +55,18 @@ export class ElectronicDocumentListQueryDto {
   issueDates?: string;
 
   @ApiPropertyOptional({
+    description: 'Fecha de emisión inicial del rango (YYYY-MM-DD)',
+    example: '2026-03-01',
+  })
+  issueDateFrom?: string;
+
+  @ApiPropertyOptional({
+    description: 'Fecha de emisión final del rango (YYYY-MM-DD)',
+    example: '2026-03-31',
+  })
+  issueDateTo?: string;
+
+  @ApiPropertyOptional({
     description: 'Filtra por consecutivos SIIGO (separados por coma)',
     example: '1001,1002',
   })

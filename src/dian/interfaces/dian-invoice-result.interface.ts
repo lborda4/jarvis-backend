@@ -22,6 +22,8 @@ export interface DianInvoiceTotals {
   subtotal: number;
   total: number;
   iva: number;
+  /** Descuento general a nivel de documento (allowance_total_amount), no atribuible a una línea puntual. */
+  discount?: number;
 }
 
 export interface DianInvoiceResult {
@@ -34,9 +36,4 @@ export interface DianInvoiceResult {
   receptor: DianParty;
   items: DianInvoiceItem[];
   totales: DianInvoiceTotals;
-}
-
-export interface DianSearchError {
-  cufe: string;
-  mensaje: string;
 }

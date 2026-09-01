@@ -22,12 +22,12 @@ const ALLOWED_STATUSES = new Set<ElectronicDocumentStatus>([
 ]);
 
 @Injectable()
-export class SiigoSupportDocumentCreationHandler
-  implements SiigoDocumentCreationHandler
-{
+export class SiigoSupportDocumentCreationHandler implements SiigoDocumentCreationHandler {
   readonly documentType = ElectronicDocumentType.SUPPORT_DOCUMENT;
 
-  private readonly logger = new Logger(SiigoSupportDocumentCreationHandler.name);
+  private readonly logger = new Logger(
+    SiigoSupportDocumentCreationHandler.name,
+  );
 
   constructor(
     private readonly siigoAuthService: SiigoAuthService,
@@ -40,10 +40,14 @@ export class SiigoSupportDocumentCreationHandler
     documentId: string,
     companyId: string,
   ): Promise<CreateSiigoDocumentResponseDto> {
-    const electronicDocument =
-      await this.electronicDocumentService.requireById(documentId, companyId);
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
 
-    if (electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (
+      electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED
+    ) {
       throw new BadRequestException(
         'El Documento Soporte ya fue creado en SIIGO para este documento.',
       );
@@ -68,40 +72,46 @@ export class SiigoSupportDocumentCreationHandler
     );
 
     try {
-      const supportDocument = await executeSiigoRequestWithRetries(
-        this.siigoAuthService,
+      return await this.electronicDocumentService.runExclusiveForDocumentCreation(
+        documentId,
         companyId,
-        this.logger,
-        'crear Documento Soporte',
-        (accessToken, partnerId) =>
-          this.siigoHttpClient.createSupportDocument(
-            accessToken,
-            supportDocumentPayload,
-            partnerId,
-          ),
-      );
+        async () => {
+          const supportDocument = await executeSiigoRequestWithRetries(
+            this.siigoAuthService,
+            companyId,
+            this.logger,
+            'crear Documento Soporte',
+            (accessToken, partnerId) =>
+              this.siigoHttpClient.createSupportDocument(
+                accessToken,
+                supportDocumentPayload,
+                partnerId,
+              ),
+          );
 
-      const updatedDocument =
-        await this.electronicDocumentService.markPurchaseCreated(
-          documentId,
-          supportDocument.id,
-          companyId,
-          supportDocument.number ?? null,
-        );
+          const updatedDocument =
+            await this.electronicDocumentService.markPurchaseCreated(
+              documentId,
+              supportDocument.id,
+              companyId,
+              supportDocument.number ?? null,
+            );
 
-      return {
-        success: true,
-        siigoDocument: {
-          id: supportDocument.id,
-          number: supportDocument.number,
-          name: supportDocument.name,
-          date: supportDocument.date,
-          total: supportDocument.total,
-          receiptPrefix: supportDocument.supplier_receipt_number?.prefix,
-          receiptNumber: supportDocument.supplier_receipt_number?.number,
+          return {
+            success: true,
+            siigoDocument: {
+              id: supportDocument.id,
+              number: supportDocument.number,
+              name: supportDocument.name,
+              date: supportDocument.date,
+              total: supportDocument.total,
+              receiptPrefix: supportDocument.supplier_receipt_number?.prefix,
+              receiptNumber: supportDocument.supplier_receipt_number?.number,
+            },
+            document: mapElectronicDocumentToResponse(updatedDocument),
+          };
         },
-        document: mapElectronicDocumentToResponse(updatedDocument),
-      };
+      );
     } catch (error) {
       await this.electronicDocumentService.updateStatus(
         documentId,

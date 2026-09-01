@@ -62,7 +62,6 @@ export class CreateSiigoSupportDocumentRequestDto {
   items: CreateSiigoSupportDocumentItemDto[];
   payments: CreateSiigoSupportDocumentPaymentDto[];
   cost_center?: number;
-  savePreferences?: boolean;
   supplierPreferences?: CreateSiigoSupportDocumentSupplierPreferencesDto;
 }
 

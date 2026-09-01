@@ -37,6 +37,18 @@ export class Company {
   @Column({ type: 'jsonb', nullable: true })
   responsible: CompanyResponsible | null;
 
+  /** Token Bearer propio de la empresa para NextPyme — si no está, se usa NEXTPYME_API_TOKEN global. */
+  @Column({ name: 'next_pyme_token', type: 'varchar', nullable: true })
+  nextPymeToken: string | null;
+
+  /** Ciudad de la empresa (código DANE, ej. "11001") — default de ciudad al crear un tercero en SIIGO sin dirección propia. */
+  @Column({ name: 'city_code', type: 'varchar', nullable: true })
+  cityCode: string | null;
+
+  /** Nombre de la ciudad, solo para mostrar (el código es lo que se usa). */
+  @Column({ name: 'city_name', type: 'varchar', nullable: true })
+  cityName: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

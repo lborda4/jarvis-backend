@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT, SIIGO_SUPPORT_DOCUMENT_SEND_STAMP_ENABLED } from '../constants/siigo.constants';
+import {
+  SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT,
+  SIIGO_SUPPORT_DOCUMENT_SEND_STAMP_ENABLED,
+} from '../constants/siigo.constants';
 import {
   CreateSiigoSupportDocumentItemDto,
   CreateSiigoSupportDocumentRequestDto,
@@ -7,7 +10,11 @@ import {
 import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import { SiigoSupportDocumentRequestDto } from '../dto/siigo-support-document-request.dto';
 import { resolveSupportDocumentRetentionPlacement } from '../helpers/siigo-support-document-retention.helper';
-import { calculateSiigoSupportDocumentPaymentValue, roundMoney } from '../helpers/siigo-purchase-total.helper';
+import { truncateSiigoObservations } from '../helpers/siigo-observations.helper';
+import {
+  calculateSiigoSupportDocumentPaymentValue,
+  roundMoney,
+} from '../helpers/siigo-purchase-total.helper';
 
 export function mapCreateSupportDocumentRequestToSiigo(
   request: CreateSiigoSupportDocumentRequestDto,
@@ -55,12 +62,15 @@ export function mapCreateSupportDocumentRequestToSiigo(
       number: request.supplier_receipt_number.number.trim(),
     },
     ...(request.observations?.trim()
-      ? { observations: request.observations.trim() }
+      ? { observations: truncateSiigoObservations(request.observations.trim()) }
       : {}),
     ...(sendStamp ? { stamp: { send: true } } : {}),
     ...(retentions?.length ? { retentions } : {}),
     items,
-    payments: mapSiigoDocumentSendPayments(request.payments, calculatedPaymentValue),
+    payments: mapSiigoDocumentSendPayments(
+      request.payments,
+      calculatedPaymentValue,
+    ),
   };
 }
 
@@ -82,7 +92,10 @@ export function mapSiigoDocumentSendPayments(
     ];
   }
 
-  const requestedTotal = payments.reduce((sum, payment) => sum + payment.value, 0);
+  const requestedTotal = payments.reduce(
+    (sum, payment) => sum + payment.value,
+    0,
+  );
 
   if (requestedTotal <= 0) {
     throw new BadRequestException(
@@ -102,7 +115,9 @@ export function mapSiigoDocumentSendPayments(
     return {
       id: payment.id,
       value,
-      ...(payment.due_date?.trim() ? { due_date: payment.due_date.trim() } : {}),
+      ...(payment.due_date?.trim()
+        ? { due_date: payment.due_date.trim() }
+        : {}),
     };
   });
 }
@@ -111,9 +126,13 @@ export function mapSiigoDocumentSendItem(
   item: CreateSiigoSupportDocumentItemDto,
   itemRetentionIds: number[],
 ) {
-  const taxes = item.taxes?.filter((tax) => Number.isFinite(tax.id) && tax.id > 0);
+  const taxes = item.taxes?.filter(
+    (tax) => Number.isFinite(tax.id) && tax.id > 0,
+  );
   const discount =
-    item.discount !== undefined && Number.isFinite(item.discount) && item.discount > 0
+    item.discount !== undefined &&
+    Number.isFinite(item.discount) &&
+    item.discount > 0
       ? roundMoney(item.discount)
       : undefined;
   const existingTaxIds = new Set((taxes ?? []).map((tax) => tax.id));
@@ -148,9 +167,7 @@ function validateCreateSupportDocumentRequest(
   }
 
   if (!request.supplier?.identification?.trim()) {
-    throw new BadRequestException(
-      'El proveedor debe incluir identification.',
-    );
+    throw new BadRequestException('El proveedor debe incluir identification.');
   }
 
   if (!request.supplier_receipt_number?.prefix?.trim()) {

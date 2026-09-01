@@ -77,13 +77,62 @@ export class PlanSubscriptionService {
     return this.normalizeDocumentTypes(integration.plan?.includedDocumentTypes);
   }
 
+  /**
+   * Todo-o-nada: lanza ForbiddenException si `quantity` no cabe completo en
+   * el cupo restante del plan. Pensado para creaciones de UN documento (o un
+   * lote chico) donde no tiene sentido crear "una parte" — ver
+   * resolveAllowedQuantity para el caso de lotes grandes (ej. importación
+   * masiva de Factura de compra) donde sí conviene procesar hasta agotar el
+   * cupo en vez de rechazar todo.
+   */
   async assertCanCreateDocuments(params: {
     companyId: string;
     provider: IntegrationProvider;
     documentType: ElectronicDocumentType;
     quantity: number;
   }): Promise<void> {
-    const { companyId, provider, documentType, quantity } = params;
+    const { quantity } = params;
+    const { allowed, documentLimit, documentsUsed } =
+      await this.resolveAllowedQuantity({
+        companyId: params.companyId,
+        provider: params.provider,
+        documentType: params.documentType,
+        requestedQuantity: quantity,
+      });
+
+    if (allowed < quantity) {
+      throw new ForbiddenException(
+        this.buildLimitReachedMessage(
+          documentLimit,
+          documentsUsed,
+          quantity,
+        ),
+      );
+    }
+  }
+
+  /**
+   * Devuelve cuántos de los `requestedQuantity` documentos pedidos caben en
+   * el cupo restante del plan (0..requestedQuantity), en vez de solo
+   * aceptar/rechazar todo el lote — así el llamador puede procesar hasta
+   * agotar el cupo y reportar el resto como pendiente por límite de plan, en
+   * vez de descartar una importación completa porque excede el límite total
+   * del plan (ej. 500 filas contra un plan de 100 documentos). Sigue
+   * lanzando ForbiddenException para las condiciones que SÍ son todo-o-nada
+   * (sin plan activo, suscripción suspendida, tipo de documento no
+   * incluido) — esas no tienen un "parcial" razonable.
+   */
+  async resolveAllowedQuantity(params: {
+    companyId: string;
+    provider: IntegrationProvider;
+    documentType: ElectronicDocumentType;
+    requestedQuantity: number;
+  }): Promise<{
+    allowed: number;
+    documentLimit: number | null;
+    documentsUsed: number;
+  }> {
+    const { companyId, provider, documentType, requestedQuantity } = params;
 
     const integration =
       await this.integrationsRepository.findByCompanyAndProviderWithPlan(
@@ -111,14 +160,14 @@ export class PlanSubscriptionService {
       );
     }
 
-    if (quantity <= 0) {
-      return;
-    }
-
     const documentLimit = integration.plan.documentLimit;
 
+    if (requestedQuantity <= 0) {
+      return { allowed: 0, documentLimit, documentsUsed: 0 };
+    }
+
     if (documentLimit == null) {
-      return;
+      return { allowed: requestedQuantity, documentLimit: null, documentsUsed: 0 };
     }
 
     const startedAt = integration.subscriptionStartedAt ?? integration.createdAt;
@@ -127,12 +176,27 @@ export class PlanSubscriptionService {
       documentType,
       startedAt,
     );
+    const remaining = Math.max(0, documentLimit - documentsUsed);
 
-    if (documentsUsed + quantity > documentLimit) {
-      throw new ForbiddenException(
-        `Ha alcanzado el límite del plan (${documentLimit} documentos). Usados: ${documentsUsed}.`,
-      );
-    }
+    return {
+      allowed: Math.min(requestedQuantity, remaining),
+      documentLimit,
+      documentsUsed,
+    };
+  }
+
+  private buildLimitReachedMessage(
+    documentLimit: number | null,
+    documentsUsed: number,
+    requestedQuantity: number,
+  ): string {
+    const remaining =
+      documentLimit == null ? null : Math.max(0, documentLimit - documentsUsed);
+
+    return (
+      `Ha alcanzado el límite del plan (${documentLimit} documentos). ` +
+      `Usados: ${documentsUsed}, disponibles: ${remaining}, solicitados: ${requestedQuantity}.`
+    );
   }
 
   async assignPlan(params: {

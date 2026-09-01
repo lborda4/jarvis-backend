@@ -23,7 +23,10 @@ export interface SiigoLineItemForTotal {
 export interface CalculateSiigoDocumentTotalOptions {
   discountType?: SiigoDiscountType;
   globalDiscount?: number;
-  taxesById?: Map<number, Pick<SiigoTaxCatalogItemDto, 'id' | 'percentage' | 'type'>>;
+  taxesById?: Map<
+    number,
+    Pick<SiigoTaxCatalogItemDto, 'id' | 'percentage' | 'type'>
+  >;
   taxRate?: number;
   subtotal?: number;
   taxAmount?: number;
@@ -59,10 +62,19 @@ export function resolveSiigoTaxRate(
     options.taxAmount &&
     options.taxAmount > 0
   ) {
-    return options.taxAmount / options.subtotal;
+    // Se expresa como PORCENTAJE (ej. 19), no como fracción (0.19) — el
+    // único consumidor de este valor (calculateSiigoLineBreakdown) hace
+    // (baseValue * taxRate) / 100, exactamente igual que con
+    // taxDefinition.percentage del catálogo de impuestos. Devolver la
+    // fracción cruda subvaluaba el IVA por un factor de 100 (bug real: una
+    // factura de $70.000 + 19% IVA calculaba $133 de IVA en vez de $13.300).
+    return (options.taxAmount / options.subtotal) * 100;
   }
 
-  if (options.envDefaultTaxRate !== undefined && options.envDefaultTaxRate >= 0) {
+  if (
+    options.envDefaultTaxRate !== undefined &&
+    options.envDefaultTaxRate >= 0
+  ) {
     return options.envDefaultTaxRate;
   }
 
@@ -151,8 +163,7 @@ function calculateSiigoLineBreakdown(
         }
 
         taxTotal = roundAmount(
-          taxTotal +
-            roundAmount((baseValue * taxDefinition.percentage) / 100),
+          taxTotal + roundAmount((baseValue * taxDefinition.percentage) / 100),
         );
       }
     } else if (taxRate > 0) {
@@ -308,11 +319,10 @@ export function calculateSiigoPurchasePaymentValue(
   });
 }
 
-export interface CalculateSiigoSupportDocumentTotalOptions
-  extends Pick<
-    CalculateSiigoDocumentTotalOptions,
-    'discountType' | 'globalDiscount' | 'taxRate' | 'subtotal' | 'taxAmount'
-  > {
+export interface CalculateSiigoSupportDocumentTotalOptions extends Pick<
+  CalculateSiigoDocumentTotalOptions,
+  'discountType' | 'globalDiscount' | 'taxRate' | 'subtotal' | 'taxAmount'
+> {
   retentionIds?: number[];
   /**
    * Por defecto redondea a centavos (roundMoney). SIIGO valida el total de
@@ -347,6 +357,37 @@ export function calculateSiigoSupportDocumentPaymentValue(
   return roundAmount(itemsTotal - retentionTotal);
 }
 
+/**
+ * Ajusta `payments[]` para que sumen EXACTO el total que SIIGO calculó por
+ * su cuenta (ver isSiigoInvalidTotalPaymentsApiError/
+ * extractSiigoCalculatedTotalFromApiError en siigo-error.helper.ts): SIIGO
+ * rechaza /v1/purchases si `payments[].value` no coincide con su propio
+ * cálculo, y ese cálculo puede terminar en pesos enteros o con centavos
+ * según el caso puntual — no vale la pena tratar de adivinarlo de antemano.
+ * El ajuste se aplica SIEMPRE al último pago (el que en una factura con
+ * varias cuotas suele absorber el residuo de redondeo), dejando los demás
+ * intactos.
+ */
+export function applySiigoCorrectedPaymentsTotal<P extends { value: number }>(
+  payments: P[],
+  correctedTotal: number,
+): P[] {
+  if (payments.length === 0) {
+    return payments;
+  }
+
+  const lastPaymentIndex = payments.length - 1;
+  const otherPaymentsTotal = payments
+    .slice(0, lastPaymentIndex)
+    .reduce((sum, payment) => sum + payment.value, 0);
+
+  return payments.map((payment, index) =>
+    index === lastPaymentIndex
+      ? { ...payment, value: roundMoney(correctedTotal - otherPaymentsTotal) }
+      : payment,
+  );
+}
+
 export function buildSiigoPurchasePayment(
   items: Pick<SiigoPurchaseItemDto, 'quantity' | 'price' | 'taxes'>[],
   paymentTypeId: number,
@@ -361,8 +402,7 @@ export function buildSiigoPurchasePayment(
   };
 }
 
-export interface BuildSiigoSupportDocumentPaymentOptions
-  extends CalculateSiigoSupportDocumentTotalOptions {
+export interface BuildSiigoSupportDocumentPaymentOptions extends CalculateSiigoSupportDocumentTotalOptions {
   dueDate?: string;
 }
 

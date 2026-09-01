@@ -16,6 +16,9 @@ import {
   ensureSiigoIntegration,
 } from '../integration/helpers/integration-setup.helper';
 import { buildJarvisCredentialsSeed } from '../integration/jarvis/helpers/jarvis-credentials.helper';
+import { JarvisDocumentType } from '../integration/jarvis/enums/jarvis-document-type.enum';
+import { NextPymeMasterCatalogService } from '../integration/jarvis/nextpyme/nextpyme-master-catalog.service';
+import { NextPymeRutService } from '../integration/jarvis/nextpyme-rut.service';
 import { IntegrationsRepository } from '../integration/repositories/integrations.repository';
 import { Plan } from '../plan/entities/plan.entity';
 import { SubscriptionStatus } from '../plan/enums/subscription-status.enum';
@@ -30,9 +33,15 @@ import {
   CreateAdminCompanyRequestDto,
   CreateAdminCompanyResponseDto,
   JarvisCredentialsSeedDto,
+  ListAdminCitiesResponseDto,
   ListAdminCompaniesResponseDto,
   ListAdminPlansResponseDto,
+  LookupAdminCompanyNameResponseDto,
   RegenerateCompanyInviteCodeResponseDto,
+  UpdateCompanyCityRequestDto,
+  UpdateCompanyCityResponseDto,
+  UpdateCompanyNextPymeTokenRequestDto,
+  UpdateCompanyNextPymeTokenResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
   UpdateIntegrationSubscriptionResponseDto,
 } from './dto/admin-company.dto';
@@ -50,7 +59,52 @@ export class AdminService {
     private readonly plansRepository: PlansRepository,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly planSubscriptionService: PlanSubscriptionService,
+    private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
+    private readonly nextPymeRutService: NextPymeRutService,
   ) {}
+
+  /**
+   * Busca la razón social en el RUT/RUES de la DIAN a partir del NIT — para
+   * precargar el campo "Nombre" al crear la empresa sin tener que subir el
+   * PDF del RUT. Usa el token global de NextPyme (todavía no existe empresa
+   * ni token propio en este punto). Nunca lanza: si falla o no encuentra
+   * nada, devuelve name: null y el admin lo llena a mano, igual que hoy.
+   */
+  async lookupCompanyName(
+    nit: string,
+  ): Promise<LookupAdminCompanyNameResponseDto> {
+    const normalizedNit = nit.replace(/[^\d]/g, '');
+
+    if (!normalizedNit) {
+      return { name: null };
+    }
+
+    try {
+      const result = await this.nextPymeRutService.lookupDocument(
+        JarvisDocumentType.NIT,
+        normalizedNit,
+      );
+
+      return { name: result.found ? (result.name?.trim() ?? null) : null };
+    } catch {
+      return { name: null };
+    }
+  }
+
+  async listCities(): Promise<ListAdminCitiesResponseDto> {
+    const municipalities =
+      await this.nextPymeMasterCatalogService.getMunicipalities();
+
+    return {
+      items: municipalities
+        .filter((row) => row.code)
+        .map((row) => ({
+          code: String(row.code),
+          name: row.name,
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    };
+  }
 
   async listPlans(): Promise<ListAdminPlansResponseDto> {
     const plans = await this.plansRepository.findAllActive();
@@ -60,7 +114,9 @@ export class AdminService {
     };
   }
 
-  async listCompanies(_adminUserId: string): Promise<ListAdminCompaniesResponseDto> {
+  async listCompanies(
+    _adminUserId: string,
+  ): Promise<ListAdminCompaniesResponseDto> {
     const companies = await this.companiesRepository.findAllWithIntegrations();
 
     return {
@@ -107,7 +163,10 @@ export class AdminService {
         request?.includedDocumentTypes,
       );
 
-    if ((includesSiigo || includesJarvis) && requestedDocumentTypes.length === 0) {
+    if (
+      (includesSiigo || includesJarvis) &&
+      requestedDocumentTypes.length === 0
+    ) {
       throw new BadRequestException(
         'Debe seleccionar al menos un tipo de documento (Documento soporte o Factura de compra).',
       );
@@ -146,6 +205,9 @@ export class AdminService {
           personType,
           responsible,
           inviteCode: generateCompanyInviteCode(),
+          cityCode: request?.cityCode?.trim() || null,
+          cityName: request?.cityName?.trim() || null,
+          nextPymeToken: request?.nextPymeToken?.trim() || null,
         }),
       );
 
@@ -235,6 +297,45 @@ export class AdminService {
     };
   }
 
+  async updateNextPymeToken(
+    companyId: string,
+    request: UpdateCompanyNextPymeTokenRequestDto,
+    _adminUserId: string,
+  ): Promise<UpdateCompanyNextPymeTokenResponseDto> {
+    const company = await this.companiesRepository.findById(companyId);
+
+    if (!company) {
+      throw new NotFoundException('Empresa no encontrada.');
+    }
+
+    company.nextPymeToken = request.nextPymeToken?.trim() || null;
+    const saved = await this.companiesRepository.save(company);
+
+    return {
+      company: this.mapCompany(saved),
+    };
+  }
+
+  async updateCompanyCity(
+    companyId: string,
+    request: UpdateCompanyCityRequestDto,
+    _adminUserId: string,
+  ): Promise<UpdateCompanyCityResponseDto> {
+    const company = await this.companiesRepository.findById(companyId);
+
+    if (!company) {
+      throw new NotFoundException('Empresa no encontrada.');
+    }
+
+    company.cityCode = request.cityCode?.trim() || null;
+    company.cityName = request.cityName?.trim() || null;
+    const saved = await this.companiesRepository.save(company);
+
+    return {
+      company: this.mapCompany(saved),
+    };
+  }
+
   private async requirePlanForProvider(
     planId: string | undefined,
     provider: IntegrationProvider,
@@ -298,10 +399,9 @@ export class AdminService {
     }
 
     if (hasDocumentTypes) {
-      const documentTypes =
-        this.planSubscriptionService.normalizeDocumentTypes(
-          request.includedDocumentTypes,
-        );
+      const documentTypes = this.planSubscriptionService.normalizeDocumentTypes(
+        request.includedDocumentTypes,
+      );
 
       if (documentTypes.length === 0) {
         throw new BadRequestException(
@@ -381,6 +481,9 @@ export class AdminService {
       responsible: company.responsible,
       createdAt: company.createdAt.toISOString(),
       inviteCode: company.inviteCode,
+      nextPymeToken: company.nextPymeToken,
+      cityCode: company.cityCode,
+      cityName: company.cityName,
       integrations: (company.integrations ?? [])
         .filter((integration) => integration.active)
         .map((integration) => this.mapIntegration(integration))

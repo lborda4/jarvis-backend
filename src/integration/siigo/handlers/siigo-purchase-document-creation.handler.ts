@@ -24,12 +24,12 @@ const ALLOWED_STATUSES = new Set<ElectronicDocumentStatus>([
 ]);
 
 @Injectable()
-export class SiigoPurchaseDocumentCreationHandler
-  implements SiigoDocumentCreationHandler
-{
+export class SiigoPurchaseDocumentCreationHandler implements SiigoDocumentCreationHandler {
   readonly documentType = ElectronicDocumentType.PURCHASE_INVOICE;
 
-  private readonly logger = new Logger(SiigoPurchaseDocumentCreationHandler.name);
+  private readonly logger = new Logger(
+    SiigoPurchaseDocumentCreationHandler.name,
+  );
 
   constructor(
     private readonly siigoAuthService: SiigoAuthService,
@@ -43,10 +43,14 @@ export class SiigoPurchaseDocumentCreationHandler
     documentId: string,
     companyId: string,
   ): Promise<CreateSiigoDocumentResponseDto> {
-    const electronicDocument =
-      await this.electronicDocumentService.requireById(documentId, companyId);
+    const electronicDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
 
-    if (electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (
+      electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED
+    ) {
       throw new BadRequestException(
         'La factura de compra ya fue creada en SIIGO para este documento.',
       );
@@ -74,39 +78,45 @@ export class SiigoPurchaseDocumentCreationHandler
     );
 
     try {
-      const purchase = await executeSiigoRequestWithRetries(
-        this.siigoAuthService,
+      return await this.electronicDocumentService.runExclusiveForDocumentCreation(
+        documentId,
         companyId,
-        this.logger,
-        'crear factura de compra',
-        (accessToken, partnerId) =>
-          this.siigoHttpClient.createPurchase(
-            accessToken,
-            purchasePayload,
-            partnerId,
-          ),
-      );
+        async () => {
+          const purchase = await executeSiigoRequestWithRetries(
+            this.siigoAuthService,
+            companyId,
+            this.logger,
+            'crear factura de compra',
+            (accessToken, partnerId) =>
+              this.siigoHttpClient.createPurchase(
+                accessToken,
+                purchasePayload,
+                partnerId,
+              ),
+          );
 
-      const updatedDocument =
-        await this.electronicDocumentService.markPurchaseCreated(
-          documentId,
-          purchase.id,
-          companyId,
-        );
+          const updatedDocument =
+            await this.electronicDocumentService.markPurchaseCreated(
+              documentId,
+              purchase.id,
+              companyId,
+            );
 
-      return {
-        success: true,
-        siigoDocument: {
-          id: purchase.id,
-          number: purchase.number,
-          name: purchase.name,
-          date: purchase.date,
-          total: purchase.total,
-          receiptPrefix: purchase.provider_invoice?.prefix,
-          receiptNumber: purchase.provider_invoice?.number,
+          return {
+            success: true,
+            siigoDocument: {
+              id: purchase.id,
+              number: purchase.number,
+              name: purchase.name,
+              date: purchase.date,
+              total: purchase.total,
+              receiptPrefix: purchase.provider_invoice?.prefix,
+              receiptNumber: purchase.provider_invoice?.number,
+            },
+            document: mapElectronicDocumentToResponse(updatedDocument),
+          };
         },
-        document: mapElectronicDocumentToResponse(updatedDocument),
-      };
+      );
     } catch (error) {
       await this.electronicDocumentService.updateStatus(
         documentId,

@@ -45,6 +45,23 @@ export function isSiigoRateLimitError(error: unknown): boolean {
   );
 }
 
+/** 503 transitorio del lado de SIIGO (ej. "document_query_service" caído
+ * unos minutos) — no es un error nuestro, vale la pena reintentar unas
+ * pocas veces antes de darlo por perdido. */
+export function isSiigoServiceUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+
+  return (
+    message.includes('estado 503') ||
+    message.includes('"status":503') ||
+    message.includes('document_query_service')
+  );
+}
+
 export function isSiigoSupportDocumentNumberAlreadyExistsError(
   error: unknown,
 ): boolean {

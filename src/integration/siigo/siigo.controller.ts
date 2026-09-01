@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../../auth/interfaces/jwt-payload.interface';
@@ -24,6 +36,11 @@ import {
   ValidateAccountMappingRequestDto,
   ValidateAccountMappingResponseDto,
 } from './dto/validate-account-mapping.dto';
+import {
+  ListAccountMappingRulesResponseDto,
+  UpdateAccountMappingRuleRequestDto,
+  UpdateAccountMappingRuleResponseDto,
+} from './dto/account-mapping-rules.dto';
 import {
   ValidateSiigoImportRequestDto,
   ValidateSiigoImportResponseDto,
@@ -75,6 +92,8 @@ import {
 } from './dto/create-siigo-purchase-send.dto';
 import { SiigoPaymentTypesCatalogService } from './siigo-payment-types-catalog.service';
 import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
+import { SiigoProductsCatalogService } from './siigo-products-catalog.service';
+import { SiigoProductCatalogItemDto } from './dto/list-siigo-products.dto';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
 import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
@@ -87,6 +106,14 @@ import {
   SaveSiigoDocumentTypesRequestDto,
   SaveSiigoDocumentTypesResponseDto,
 } from './dto/save-siigo-document-types.dto';
+import { SuggestPurchaseItemClassificationResponseDto } from './dto/suggest-purchase-item-classification.dto';
+import { SiigoAiAccountSuggestionService } from './siigo-ai-account-suggestion.service';
+import {
+  PurchaseHistorySyncStatusResponseDto,
+  StartPurchaseHistorySyncResponseDto,
+} from './dto/purchase-history-sync.dto';
+import { SiigoPurchaseHistorySyncService } from './siigo-purchase-history-sync.service';
+import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classification.service';
 
 @ApiTags('integrations/siigo')
 @Controller('integrations/siigo')
@@ -101,13 +128,17 @@ export class SiigoController {
     private readonly siigoPurchaseSendService: SiigoPurchaseSendService,
     private readonly siigoDocumentResumeService: SiigoDocumentResumeService,
     private readonly siigoDocumentPreparationService: SiigoDocumentPreparationService,
+    private readonly siigoPurchaseAiClassificationService: SiigoPurchaseAiClassificationService,
     private readonly siigoAccountsCatalogService: SiigoAccountsCatalogService,
     private readonly siigoCatalogSyncService: SiigoCatalogSyncService,
     private readonly siigoPaymentTypesCatalogService: SiigoPaymentTypesCatalogService,
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
+    private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoBalanceTrialImportService: SiigoBalanceTrialImportService,
     private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
+    private readonly siigoAiAccountSuggestionService: SiigoAiAccountSuggestionService,
+    private readonly siigoPurchaseHistorySyncService: SiigoPurchaseHistorySyncService,
   ) {}
 
   @Post('credentials')
@@ -193,7 +224,9 @@ export class SiigoController {
     description:
       'Actualiza cuentas contables en base de datos y refresca medios de pago, impuestos y centros de costo en caché local.',
   })
-  syncCatalogs(@CurrentUser() user: AuthenticatedUser): Promise<{ synced: true }> {
+  syncCatalogs(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ synced: true }> {
     return this.siigoCatalogSyncService
       .syncCatalogs(getAuthenticatedCompanyId(user))
       .then(() => ({ synced: true }));
@@ -245,6 +278,20 @@ export class SiigoController {
     );
   }
 
+  @Get('products')
+  @ApiOperation({
+    summary: 'Catálogo de productos SIIGO',
+    description:
+      'Consulta GET /v1/products de SIIGO (paginado) y lo sirve desde caché local.',
+  })
+  listProducts(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<SiigoProductCatalogItemDto[]> {
+    return this.siigoProductsCatalogService.listProducts(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
   @Post('import')
   validateImport(
     @CurrentUser() user: AuthenticatedUser,
@@ -284,6 +331,32 @@ export class SiigoController {
     @Body() request: SaveAccountMappingRequestDto,
   ): Promise<SaveAccountMappingResponseDto> {
     return this.siigoAccountMappingService.saveAccountMapping(
+      request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('account-mappings/rules')
+  @ApiOperation({
+    summary: 'Reglas de mapeo de cuenta PUC por proveedor + ítem',
+  })
+  listAccountMappingRules(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ListAccountMappingRulesResponseDto> {
+    return this.siigoAccountMappingService.listAccountMappingRules(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Patch('account-mappings/rules/item')
+  @ApiOperation({
+    summary: 'Edita la cuenta PUC de una regla puntual (proveedor + ítem)',
+  })
+  updateAccountMappingRule(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: UpdateAccountMappingRuleRequestDto,
+  ): Promise<UpdateAccountMappingRuleResponseDto> {
+    return this.siigoAccountMappingService.updateAccountMappingRule(
       request,
       getAuthenticatedCompanyId(user),
     );
@@ -408,6 +481,10 @@ export class SiigoController {
       documentIds,
       companyId,
     );
+    this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground(
+      documentIds,
+      companyId,
+    );
 
     return {
       accepted: documentIds.length,
@@ -425,6 +502,68 @@ export class SiigoController {
       request.documentId,
       getAuthenticatedCompanyId(user),
     );
+  }
+
+  @Post('documents/:documentId/ai-suggestion')
+  @ApiOperation({
+    summary: 'Sugerir cuenta contable e IVA con IA',
+    description:
+      'Usa IA (OpenAI) para sugerir, a partir de la descripción de los ítems, una cuenta contable y un impuesto IVA del catálogo SIIGO de la empresa. Solo sugiere valores que existan literalmente en el catálogo; nunca inventa códigos.',
+  })
+  suggestAccountWithAi(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('documentId') documentId: string,
+  ): Promise<SuggestPurchaseItemClassificationResponseDto> {
+    return this.siigoAiAccountSuggestionService.suggestForDocument(
+      documentId,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('purchases-history/sync')
+  @ApiOperation({
+    summary: 'Sincronizar historial de facturas de compra',
+    description:
+      'Pagina GET /v1/purchases de SIIGO, guarda en historial_facturas las de los últimos 2 años y recalcula la variabilidad por proveedor. Corre en segundo plano; consultar progreso en GET purchases-history/sync-status.',
+  })
+  startPurchaseHistorySync(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<StartPurchaseHistorySyncResponseDto> {
+    return this.siigoPurchaseHistorySyncService.startSync(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('purchases-history/sync-status')
+  @ApiOperation({
+    summary: 'Estado del último sync de historial de facturas de compra',
+  })
+  async getPurchaseHistorySyncStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PurchaseHistorySyncStatusResponseDto> {
+    const job = await this.siigoPurchaseHistorySyncService.getLatestStatus(
+      getAuthenticatedCompanyId(user),
+    );
+
+    if (!job) {
+      return {
+        status: null,
+        syncedCount: 0,
+        totalCount: null,
+        errorMessage: null,
+        startedAt: null,
+        completedAt: null,
+      };
+    }
+
+    return {
+      status: job.status,
+      syncedCount: job.syncedCount,
+      totalCount: job.totalCount,
+      errorMessage: job.errorMessage,
+      startedAt: job.startedAt.toISOString(),
+      completedAt: job.completedAt?.toISOString() ?? null,
+    };
   }
 
   @Post('documents/resume-batch')

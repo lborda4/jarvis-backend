@@ -14,6 +14,14 @@ import {
 } from '../../helpers/supplier-mapping-value.helper';
 import { SupplierPreferenceSnapshot } from '../../interfaces/supplier-preference.interface';
 import { ElectronicDocumentService } from '../../../electronic-document/electronic-document.service';
+import { HistorialFacturaFuente } from '../../enums/historial-factura-fuente.enum';
+import { HistorialFacturaTipo } from '../../enums/historial-factura-tipo.enum';
+import { HistorialFacturasRepository } from '../../repositories/historial-facturas.repository';
+import { normalizeSupplierDocument } from './siigo-context.helper';
+import {
+  buildTaxCatalogById,
+  classifyTaxIdsUsingCatalog,
+} from './siigo-purchase-tax-classification.helper';
 import { SiigoAccountMappingService } from '../siigo-account-mapping.service';
 
 /**
@@ -186,5 +194,78 @@ export async function persistSupplierPreferencesFromSendRequest(
 
   logger.log(
     `[documentId=${request.documentId}] Preferencias de proveedor guardadas`,
+  );
+}
+
+/**
+ * Guarda la clasificación finalmente enviada (cuenta + impuestos por ítem)
+ * como historial_facturas con fuente='corregido_contador' — haya coincidido
+ * o no con lo sugerido, representa lo que el contador confirmó, y alimenta
+ * tanto el recálculo de tiene_variabilidad como los ejemplos few-shot de IA
+ * para este proveedor. Se identifica por el id del electronic_document local
+ * (no el id de SIIGO, que en este punto todavía no existe) — un reenvío del
+ * mismo documento reemplaza sus filas anteriores en vez de duplicarlas.
+ */
+export async function persistHistorialFacturaFromSendRequest(
+  historialFacturasRepository: HistorialFacturasRepository,
+  request: SupplierPreferenceSourceRequest,
+  electronicDocument: Awaited<
+    ReturnType<ElectronicDocumentService['requireById']>
+  >,
+  companyId: string,
+  integrationId: string,
+  taxesCatalog: SiigoTaxCatalogItemDto[],
+  logger: Logger,
+): Promise<void> {
+  if (request.items.length === 0) {
+    return;
+  }
+
+  const proveedorNit = normalizeSupplierDocument(
+    electronicDocument.payload.supplier.documentNumber ?? '',
+  );
+
+  if (!proveedorNit) {
+    return;
+  }
+
+  const taxCatalogById = buildTaxCatalogById(taxesCatalog);
+  const retentionIds = (request.retentions ?? []).map((retention) => retention.id);
+  const fechaFactura =
+    electronicDocument.payload.invoice.issueDate?.trim() ||
+    new Date().toISOString().slice(0, 10);
+
+  const rows = request.items.map((item) => {
+    const itemTaxIds = (item.taxes ?? [])
+      .map((tax) => tax.id)
+      .filter((id): id is number => Number.isFinite(id) && id > 0);
+
+    return historialFacturasRepository.create({
+      companyId,
+      integrationId,
+      facturaId: electronicDocument.id,
+      proveedorNit,
+      descripcionItem: item.description?.trim() || 'Ítem sin descripción',
+      tipo: HistorialFacturaTipo.CUENTA,
+      cuentaPuc: item.code,
+      impuestos: classifyTaxIdsUsingCatalog(
+        [...itemTaxIds, ...retentionIds],
+        taxCatalogById,
+      ),
+      fuente: HistorialFacturaFuente.CORREGIDO_CONTADOR,
+      fechaFactura,
+    });
+  });
+
+  await historialFacturasRepository.replaceRowsForFacturas(
+    companyId,
+    integrationId,
+    [electronicDocument.id],
+    rows,
+    HistorialFacturaFuente.CORREGIDO_CONTADOR,
+  );
+
+  logger.log(
+    `[documentId=${request.documentId}] historial_facturas actualizado con la clasificación confirmada (${rows.length} línea(s)).`,
   );
 }

@@ -370,6 +370,25 @@ export class JarvisSupportDocumentSendService {
         this.dataSource,
         resolutionLockKey,
         async () => {
+          // Relee el estado DENTRO del lock (no el `electronicDocument` de
+          // arriba, ya viejo) — si otro intento concurrente para ESTE mismo
+          // documento ganó la carrera mientras esperábamos el lock (ej.
+          // doble clic en "Enviar"), aborta acá en vez de numerar y enviar
+          // un segundo documento duplicado a NextPyme.
+          const freshDocument =
+            await this.electronicDocumentService.requireById(
+              documentId,
+              companyId,
+            );
+
+          if (
+            freshDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED
+          ) {
+            throw new BadRequestException(
+              'El Documento Soporte ya fue creado para este registro.',
+            );
+          }
+
           const numbering =
             await this.jarvisSetupService.allocateResolutionNumber(
               companyId,

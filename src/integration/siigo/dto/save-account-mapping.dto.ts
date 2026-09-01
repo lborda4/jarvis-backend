@@ -20,6 +20,12 @@ export class SaveSupplierCostCenterPreferenceDto {
   name: string;
 }
 
+export class SaveAccountMappingItemDto {
+  descripcion: string;
+  accountCode: string;
+  accountDescription?: string;
+}
+
 export class SaveAccountMappingRequestDto {
   documentId: string;
   accountCode: string;
@@ -27,6 +33,12 @@ export class SaveAccountMappingRequestDto {
   paymentMethod?: SaveSupplierPaymentMethodPreferenceDto;
   retentions?: SaveSupplierRetentionPreferenceDto[];
   costCenter?: SaveSupplierCostCenterPreferenceDto;
+  /** Cuenta por ítem individual (proveedor + descripción) — si viene, cada
+   * ítem del documento se guarda con SU propia cuenta en vez de aplicar
+   * `accountCode` a todos por igual. Si no viene (compatibilidad con
+   * llamadores existentes de un solo concepto), se aplica `accountCode` a
+   * todos los ítems del documento, igual que antes. */
+  items?: SaveAccountMappingItemDto[];
 }
 
 export class SaveAccountMappingResponseDto {
