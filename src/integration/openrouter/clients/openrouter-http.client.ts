@@ -36,9 +36,9 @@ export class OpenRouterHttpClient {
   ) {}
 
   isConfigured(): boolean {
-    return Boolean(
-      this.configService.get('openRouter.apiKey', { infer: true }),
-    );
+    const config = this.configService.get('openRouter', { infer: true });
+
+    return Boolean(config.apiKey) && config.enabled;
   }
 
   async createChatCompletion(

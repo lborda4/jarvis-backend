@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
-import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { resolveSupplierDocumentFromPayload } from '../../electronic-document/helpers/electronic-document-supplier.helper';
@@ -79,14 +78,6 @@ export class SiigoDocumentPreparationService {
             `[documentId=${documentId}] Error en preparación en segundo plano`,
             error instanceof Error ? error.stack : String(error),
           );
-
-          await this.electronicDocumentService.updateProcessingMetadata(
-            documentId,
-            {
-              processingStatus: ElectronicDocumentProcessingStatus.FAILED,
-            },
-            companyId,
-          );
         } finally {
           processedCount += 1;
 
@@ -111,14 +102,6 @@ export class SiigoDocumentPreparationService {
     const trimmedId = documentId.trim();
     let document = await this.electronicDocumentService.requireById(
       trimmedId,
-      companyId,
-    );
-
-    await this.electronicDocumentService.updateProcessingMetadata(
-      trimmedId,
-      {
-        processingStatus: ElectronicDocumentProcessingStatus.PROCESSING,
-      },
       companyId,
     );
 
@@ -153,13 +136,9 @@ export class SiigoDocumentPreparationService {
             ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
             companyId,
           );
-          await this.electronicDocumentService.updateProcessingMetadata(
+          await this.electronicDocumentService.updateSupplierExistsInSiigo(
             trimmedId,
-            {
-              supplierExistsInSiigo: false,
-              processingStatus:
-                ElectronicDocumentProcessingStatus.SUPPLIER_REQUIRED,
-            },
+            false,
             companyId,
           );
 
@@ -177,14 +156,6 @@ export class SiigoDocumentPreparationService {
     }
 
     if (this.isAccountMappingComplete(document.status)) {
-      await this.electronicDocumentService.updateProcessingMetadata(
-        trimmedId,
-        {
-          processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED,
-        },
-        companyId,
-      );
-
       return {
         documentId: trimmedId,
         nextStep: 'READY',
@@ -205,27 +176,12 @@ export class SiigoDocumentPreparationService {
         ElectronicDocumentStatus.ACCOUNT_REQUIRED,
         companyId,
       );
-      await this.electronicDocumentService.updateProcessingMetadata(
-        trimmedId,
-        {
-          processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_REQUIRED,
-        },
-        companyId,
-      );
 
       return {
         documentId: trimmedId,
         nextStep: 'ACCOUNT_REQUIRED',
       };
     }
-
-    await this.electronicDocumentService.updateProcessingMetadata(
-      trimmedId,
-      {
-        processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED,
-      },
-      companyId,
-    );
 
     return {
       documentId: trimmedId,

@@ -46,6 +46,21 @@ export interface PurchaseInvoiceImportConfig {
   workerPollIntervalMs: number;
 }
 
+export interface SiigoPurchaseHistoryAutoSyncConfig {
+  /** Cada cuánto el proceso en background revisa si alguna empresa tiene el
+   * sync de historial de compras vencido — NO es el intervalo de refresco
+   * por empresa (ver staleAfterHours), solo la frecuencia del chequeo. */
+  checkIntervalMs: number;
+  /** Antigüedad del último sync COMPLETADO a partir de la cual una empresa
+   * se considera vencida y se vuelve a sincronizar sola, sin que nadie la
+   * dispare a mano. */
+  staleAfterHours: number;
+  /** Pausa entre el arranque del resync de una empresa y el de la
+   * siguiente — espacia el inicio (no la duración) para no lanzar varias
+   * sincronizaciones completas de golpe si muchas empresas vencen a la vez. */
+  startStaggerMs: number;
+}
+
 export interface NextPymeConfig {
   baseUrl: string;
   apiToken?: string;
@@ -59,6 +74,10 @@ export interface OpenRouterConfig {
   apiKey?: string;
   model: string;
   baseUrl: string;
+  /** Apagado global de pruebas: en `false` el cliente se comporta como si
+   * no tuviera API key (isConfigured() = false), así que todos los
+   * llamadores existentes ya caen solos a su fallback sin IA. */
+  enabled: boolean;
 }
 
 export interface AppConfiguration {
@@ -70,6 +89,7 @@ export interface AppConfiguration {
   nextPyme: NextPymeConfig;
   openRouter: OpenRouterConfig;
   purchaseInvoiceImport: PurchaseInvoiceImportConfig;
+  siigoPurchaseHistoryAutoSync: SiigoPurchaseHistoryAutoSyncConfig;
 }
 
 function parseBoolean(
@@ -176,6 +196,7 @@ export default (): AppConfiguration => ({
     baseUrl:
       trimOptional(process.env.OPENROUTER_BASE_URL) ??
       'https://openrouter.ai/api/v1',
+    enabled: parseBoolean(process.env.AI_CLASSIFICATION_ENABLED, true),
   },
   purchaseInvoiceImport: {
     batchSize: parsePositiveInteger(
@@ -197,6 +218,20 @@ export default (): AppConfiguration => ({
     workerPollIntervalMs: parsePositiveInteger(
       process.env.PURCHASE_INVOICE_WORKER_POLL_INTERVAL_MS,
       2000,
+    ),
+  },
+  siigoPurchaseHistoryAutoSync: {
+    checkIntervalMs: parsePositiveInteger(
+      process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_CHECK_INTERVAL_MS,
+      24 * 60 * 60 * 1000, // 24h
+    ),
+    staleAfterHours: parsePositiveInteger(
+      process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_STALE_AFTER_HOURS,
+      12,
+    ),
+    startStaggerMs: parsePositiveInteger(
+      process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_START_STAGGER_MS,
+      15_000,
     ),
   },
 });

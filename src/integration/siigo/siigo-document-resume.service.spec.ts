@@ -12,7 +12,6 @@ function buildDocumentStub(status: ElectronicDocumentStatus) {
     electronicDocumentType: 'PURCHASE_INVOICE',
     siigoDocumentNumber: null,
     supplierExistsInSiigo: true,
-    processingStatus: null,
     payload: {},
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),

@@ -235,6 +235,17 @@ export async function persistHistorialFacturaFromSendRequest(
     electronicDocument.payload.invoice.issueDate?.trim() ||
     new Date().toISOString().slice(0, 10);
 
+  const snapshot = request.supplierPreferences;
+  const paymentMethod = snapshot?.paymentMethod ?? {
+    id: request.payments[0]?.id,
+    name: '',
+    type: '',
+  };
+  const metodoPagoId = paymentMethod?.id ?? null;
+  const metodoPagoNombre = metodoPagoId
+    ? paymentMethod.name?.trim() || `Medio ${metodoPagoId}`
+    : null;
+
   const rows = request.items.map((item) => {
     const itemTaxIds = (item.taxes ?? [])
       .map((tax) => tax.id)
@@ -252,6 +263,8 @@ export async function persistHistorialFacturaFromSendRequest(
         [...itemTaxIds, ...retentionIds],
         taxCatalogById,
       ),
+      metodoPagoId,
+      metodoPagoNombre,
       fuente: HistorialFacturaFuente.CORREGIDO_CONTADOR,
       fechaFactura,
     });

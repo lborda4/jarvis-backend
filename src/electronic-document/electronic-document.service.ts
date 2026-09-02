@@ -37,7 +37,10 @@ import {
 import { indexSupplierItemAccountMappings } from '../integration/helpers/supplier-item-account-mapping.helper';
 import { SupplierItemAccountMapping } from '../integration/entities/supplier-item-account-mapping.entity';
 import { SupplierItemAccountMappingsRepository } from '../integration/repositories/supplier-item-account-mappings.repository';
-import { HistorialFacturasRepository } from '../integration/repositories/historial-facturas.repository';
+import {
+  HistorialFacturaProviderInvoiceMatch,
+  HistorialFacturasRepository,
+} from '../integration/repositories/historial-facturas.repository';
 import {
   SupplierCostCenterPreference,
   SupplierPaymentMethodPreference,
@@ -48,6 +51,7 @@ import { JarvisTercerosRepository } from '../integration/jarvis/repositories/jar
 import { IntegrationsRepository } from '../integration/repositories/integrations.repository';
 import { SupplierConfigurationsRepository } from '../integration/repositories/supplier-configurations.repository';
 import { getSiigoIntegration } from '../integration/siigo/helpers/siigo-context.helper';
+import { parseProviderInvoiceNumber } from '../integration/siigo/mappers/electronic-document-to-siigo-purchase.mapper';
 import {
   resolveSuggestedTaxForItem,
   SuggestedItemTax,
@@ -66,10 +70,10 @@ import { ElectronicDocumentListResponseDto } from './dto/electronic-document-lis
 import { ElectronicDocumentFilterOptionsDto } from './dto/electronic-document-filter-options.dto';
 import { ElectronicDocumentCompanyOptionDto } from './dto/electronic-document-company-option.dto';
 import { ElectronicDocument } from './entities/electronic-document.entity';
-import { ElectronicDocumentProcessingStatus } from './enums/electronic-document-processing-status.enum';
 import { ElectronicDocumentStatus } from './enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
 import { mapDianResultToElectronicDocumentPayload } from './mappers/dian-to-electronic-document-payload.mapper';
+import { ElectronicDocumentPayload } from './interfaces/electronic-document-payload.interface';
 import { GroupedSupportDocument } from './interfaces/support-document-import.interface';
 import { mapGroupedSupportDocumentToPayload } from './mappers/support-document-excel-to-payload.mapper';
 import { mapElectronicDocumentToListItem } from './mappers/electronic-document-list-item.mapper';
@@ -232,28 +236,18 @@ export class ElectronicDocumentService {
     return updated;
   }
 
-  async updateProcessingMetadata(
+  async updateSupplierExistsInSiigo(
     documentId: string,
-    metadata: Partial<{
-      supplierExistsInSiigo: boolean | null;
-      processingStatus: ElectronicDocumentProcessingStatus;
-    }>,
+    supplierExistsInSiigo: boolean | null,
     companyId?: string,
   ): Promise<ElectronicDocument> {
     const document = await this.requireById(documentId, companyId);
-
-    if (metadata.supplierExistsInSiigo !== undefined) {
-      document.supplierExistsInSiigo = metadata.supplierExistsInSiigo;
-    }
-
-    if (metadata.processingStatus !== undefined) {
-      document.processingStatus = metadata.processingStatus;
-    }
+    document.supplierExistsInSiigo = supplierExistsInSiigo;
 
     const updated = await this.electronicDocumentsRepository.save(document);
 
     this.logger.log(
-      `Metadatos de procesamiento actualizados (id=${updated.id}, processingStatus=${updated.processingStatus}, supplierExistsInSiigo=${updated.supplierExistsInSiigo})`,
+      `Proveedor SIIGO actualizado (id=${updated.id}, supplierExistsInSiigo=${updated.supplierExistsInSiigo})`,
     );
 
     return updated;
@@ -395,7 +389,6 @@ export class ElectronicDocumentService {
       documentTypeThird: payload.supplier.documentType,
       electronicDocumentType,
       status: ElectronicDocumentStatus.PENDING,
-      processingStatus: ElectronicDocumentProcessingStatus.PENDING,
       supplierExistsInSiigo: null,
       payload,
     });
@@ -507,9 +500,6 @@ export class ElectronicDocumentService {
               status: terceroKnown
                 ? ElectronicDocumentStatus.ACCOUNT_MAPPED
                 : ElectronicDocumentStatus.PENDING,
-              processingStatus: terceroKnown
-                ? ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED
-                : ElectronicDocumentProcessingStatus.PENDING,
               supplierExistsInSiigo: terceroKnown ? true : null,
               payload,
             });
@@ -554,7 +544,7 @@ export class ElectronicDocumentService {
     rows: Array<{
       issuerNit: string;
       issuerName: string;
-      payload: import('./interfaces/electronic-document-payload.interface').ElectronicDocumentPayload;
+      payload: ElectronicDocumentPayload;
     }>,
     companyId: string,
   ): Promise<{
@@ -568,6 +558,11 @@ export class ElectronicDocumentService {
       cufe: string | null;
       documentId: string | null;
       skippedByPlanLimit: boolean;
+      /** true si el documento se creó directo en PURCHASE_CREATED porque ya
+       * existía en SIIGO (matcheado por provider_invoice) — el llamador no
+       * debe mandarlo al pipeline de clasificación/envío automático, ya
+       * está hecho. */
+      alreadyInSiigo: boolean;
     }>;
   }> {
     if (!rows.length) {
@@ -613,8 +608,29 @@ export class ElectronicDocumentService {
       (row) => !existingDocumentIdByCufe.has(row.payload.invoice.cufe),
     );
 
-    const { savedDocuments, documentsSkippedByPlanLimit, skippedRows } =
-      await this.withDocumentQuotaLock(
+    // Factura de compra ya creada en SIIGO (ej. se cargó antes por otro
+    // medio, o ya se envió y este Excel se está reimportando por error): se
+    // detecta por provider_invoice (prefix+number de la factura del
+    // TERCERO — la misma clave que se le manda a SIIGO al crearla, ver
+    // parseProviderInvoiceNumber) contra lo que ya trajo el último sync de
+    // historial de compras. Si matchea, el documento se crea directo en
+    // PURCHASE_CREATED (con el siigoPurchaseId/consecutivo real) en vez de
+    // PENDING/ACCOUNT_MAPPED — evita que el import intente crearla de
+    // nuevo. Solo aplica a SIIGO: Jarvis no sincroniza este historial.
+    const alreadyInSiigoByProviderInvoice =
+      provider === IntegrationProvider.SIIGO
+        ? await this.resolveAlreadyInSiigoByProviderInvoice(
+            company.id,
+            newRows,
+          )
+        : new Map<string, HistorialFacturaProviderInvoiceMatch>();
+
+    const {
+      savedDocuments,
+      documentsSkippedByPlanLimit,
+      skippedRows,
+      cufesAlreadyInSiigo,
+    } = await this.withDocumentQuotaLock(
         company.id,
         ElectronicDocumentType.PURCHASE_INVOICE,
         async () => {
@@ -634,6 +650,7 @@ export class ElectronicDocumentService {
               savedDocuments: [] as ElectronicDocument[],
               documentsSkippedByPlanLimit: skipped.length,
               skippedRows: skipped,
+              cufesAlreadyInSiigo: new Set<string>(),
             };
           }
 
@@ -641,6 +658,8 @@ export class ElectronicDocumentService {
             company.id,
             provider,
           );
+
+          const cufesAlreadyInSiigo = new Set<string>();
 
           const documents = rowsToCreate.map((row) => {
             const payload = row.payload;
@@ -657,32 +676,60 @@ export class ElectronicDocumentService {
             payload.supplier.name = supplierName;
             payload.supplier.commercialName = supplierName;
 
-            return this.electronicDocumentsRepository.create({
+            const providerInvoiceMatch = alreadyInSiigoByProviderInvoice.get(
+              this.buildProviderInvoiceKey(payload.invoice.number),
+            );
+
+            if (providerInvoiceMatch && payload.invoice.cufe) {
+              cufesAlreadyInSiigo.add(payload.invoice.cufe);
+            }
+
+            const document = this.electronicDocumentsRepository.create({
               companyId: company.id,
               cufe: payload.invoice.cufe || null,
               documentNumberThird:
                 this.normalizeDocument(payload.supplier.documentNumber) || null,
               documentTypeThird: payload.supplier.documentType,
               electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE,
-              status: terceroKnown
-                ? ElectronicDocumentStatus.ACCOUNT_MAPPED
-                : ElectronicDocumentStatus.PENDING,
-              processingStatus: terceroKnown
-                ? ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED
-                : ElectronicDocumentProcessingStatus.PENDING,
+              status: providerInvoiceMatch
+                ? ElectronicDocumentStatus.PURCHASE_CREATED
+                : terceroKnown
+                  ? ElectronicDocumentStatus.ACCOUNT_MAPPED
+                  : ElectronicDocumentStatus.PENDING,
               supplierExistsInSiigo: terceroKnown ? true : null,
               payload,
             });
+
+            // create() restringe a propósito el resto de sus campos (no se
+            // arman documentos con siigoPurchaseId a mano en ningún otro
+            // flujo) — acá sí corresponde: son datos reales de una compra
+            // que YA existe en SIIGO, tomados del match por provider_invoice.
+            if (providerInvoiceMatch) {
+              document.siigoPurchaseId = providerInvoiceMatch.facturaId;
+              document.siigoDocumentNumber =
+                providerInvoiceMatch.siigoNumero != null
+                  ? String(providerInvoiceMatch.siigoNumero)
+                  : null;
+            }
+
+            return document;
           });
 
           const saved = await this.dataSource.transaction(async (manager) =>
             manager.save(ElectronicDocument, documents),
           );
 
+          if (cufesAlreadyInSiigo.size > 0) {
+            this.logger.log(
+              `[companyId=${company.id}] ${cufesAlreadyInSiigo.size} factura(s) de compra ya existían en SIIGO (matcheadas por provider_invoice) — se crearon directo como LISTA, sin reenviar.`,
+            );
+          }
+
           return {
             savedDocuments: saved,
             documentsSkippedByPlanLimit: skipped.length,
             skippedRows: skipped,
+            cufesAlreadyInSiigo,
           };
         },
       );
@@ -717,6 +764,7 @@ export class ElectronicDocumentService {
           cufe,
           documentId: existingDocumentIdByCufe.get(cufe) as string,
           skippedByPlanLimit: false,
+          alreadyInSiigo: false,
         };
       }
 
@@ -725,6 +773,7 @@ export class ElectronicDocumentService {
           cufe,
           documentId: createdDocumentIdByCufe.get(cufe) as string,
           skippedByPlanLimit: false,
+          alreadyInSiigo: cufesAlreadyInSiigo.has(cufe),
         };
       }
 
@@ -732,6 +781,7 @@ export class ElectronicDocumentService {
         cufe,
         documentId: null,
         skippedByPlanLimit: cufe ? skippedCufes.has(cufe) : false,
+        alreadyInSiigo: false,
       };
     });
 
@@ -742,6 +792,40 @@ export class ElectronicDocumentService {
       documentsSkippedByPlanLimit,
       rows: resultRows,
     };
+  }
+
+  /** "PREFIX::number" (prefix en mayúsculas) — misma normalización que
+   * HistorialFacturasRepository.findByProviderInvoices, para poder cruzar
+   * su resultado acá. */
+  private buildProviderInvoiceKey(invoiceNumber: string): string {
+    const { prefix, number } = parseProviderInvoiceNumber(invoiceNumber);
+    return `${prefix.toUpperCase()}::${number}`;
+  }
+
+  /** Para cada fila, resuelve si su provider_invoice (prefix+number de la
+   * factura del tercero) ya está creada en SIIGO, según lo que trajo el
+   * último sync de historial de compras — ver findByProviderInvoices. */
+  private async resolveAlreadyInSiigoByProviderInvoice(
+    companyId: string,
+    rows: Array<{ payload: ElectronicDocumentPayload }>,
+  ): Promise<Map<string, HistorialFacturaProviderInvoiceMatch>> {
+    if (rows.length === 0) {
+      return new Map();
+    }
+
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+    const keys = rows.map((row) =>
+      parseProviderInvoiceNumber(row.payload.invoice.number),
+    );
+
+    return this.historialFacturasRepository.findByProviderInvoices(
+      companyId,
+      integration.id,
+      keys,
+    );
   }
 
   async resolveDocumentProvider(

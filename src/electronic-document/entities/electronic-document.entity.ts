@@ -10,7 +10,6 @@ import {
 import { Company } from '../../company/entities/company.entity';
 import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
-import { ElectronicDocumentProcessingStatus } from '../enums/electronic-document-processing-status.enum';
 import type { ElectronicDocumentPayload } from '../interfaces/electronic-document-payload.interface';
 
 @Entity('electronic_documents')
@@ -49,14 +48,6 @@ export class ElectronicDocument {
 
   @Column({ name: 'supplier_exists_in_siigo', type: 'boolean', nullable: true })
   supplierExistsInSiigo: boolean | null;
-
-  @Column({
-    name: 'processing_status',
-    type: 'varchar',
-    length: 50,
-    default: ElectronicDocumentProcessingStatus.PENDING,
-  })
-  processingStatus: ElectronicDocumentProcessingStatus;
 
   @Column({ type: 'jsonb' })
   payload: ElectronicDocumentPayload;

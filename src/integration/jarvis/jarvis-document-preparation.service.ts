@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ResumeElectronicDocumentResponseDto } from '../../electronic-document/dto/resume-electronic-document.dto';
 import { mapElectronicDocumentToListItem } from '../../electronic-document/mappers/electronic-document-list-item.mapper';
-import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
@@ -38,14 +37,6 @@ export class JarvisDocumentPreparationService {
           this.logger.error(
             `[documentId=${documentId}] Error en preparación Jarvis`,
             error instanceof Error ? error.stack : String(error),
-          );
-
-          await this.electronicDocumentService.updateProcessingMetadata(
-            documentId,
-            {
-              processingStatus: ElectronicDocumentProcessingStatus.FAILED,
-            },
-            companyId,
           );
         }
       }),
@@ -88,14 +79,6 @@ export class JarvisDocumentPreparationService {
       };
     }
 
-    await this.electronicDocumentService.updateProcessingMetadata(
-      trimmedId,
-      {
-        processingStatus: ElectronicDocumentProcessingStatus.PROCESSING,
-      },
-      companyId,
-    );
-
     const documentNumber = normalizeJarvisDocumentNumber(
       document.payload.supplier.documentNumber ||
         document.documentNumberThird ||
@@ -119,12 +102,9 @@ export class JarvisDocumentPreparationService {
         ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
         companyId,
       );
-      await this.electronicDocumentService.updateProcessingMetadata(
+      await this.electronicDocumentService.updateSupplierExistsInSiigo(
         trimmedId,
-        {
-          supplierExistsInSiigo: false,
-          processingStatus: ElectronicDocumentProcessingStatus.SUPPLIER_REQUIRED,
-        },
+        false,
         companyId,
       );
 
@@ -152,12 +132,9 @@ export class JarvisDocumentPreparationService {
       ElectronicDocumentStatus.ACCOUNT_MAPPED,
       companyId,
     );
-    await this.electronicDocumentService.updateProcessingMetadata(
+    await this.electronicDocumentService.updateSupplierExistsInSiigo(
       trimmedId,
-      {
-        supplierExistsInSiigo: true,
-        processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED,
-      },
+      true,
       companyId,
     );
 
@@ -209,12 +186,9 @@ export class JarvisDocumentPreparationService {
             ElectronicDocumentStatus.ACCOUNT_MAPPED,
             companyId,
           );
-          await this.electronicDocumentService.updateProcessingMetadata(
+          await this.electronicDocumentService.updateSupplierExistsInSiigo(
             sibling.id,
-            {
-              supplierExistsInSiigo: true,
-              processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_MAPPED,
-            },
+            true,
             companyId,
           );
         } catch (error) {

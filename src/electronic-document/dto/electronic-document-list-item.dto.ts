@@ -1,4 +1,3 @@
-import { ElectronicDocumentProcessingStatus } from '../enums/electronic-document-processing-status.enum';
 import { SuggestedAccount } from '../../integration/helpers/supplier-accounts-catalog.helper';
 import {
   SupplierCostCenterPreference,
@@ -51,7 +50,6 @@ export class ElectronicDocumentListItemDto {
    * fijos siguen llegando completos. El objeto entero es null solo si el
    * proveedor es nuevo o nunca se sincronizó. */
   suggestedItemConfig: SuggestedPurchaseItemConfig | null;
-  processingStatus: ElectronicDocumentProcessingStatus;
   observations?: string | null;
   items?: ElectronicDocumentListItemItemDto[];
   createdAt: string;

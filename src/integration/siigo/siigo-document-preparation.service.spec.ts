@@ -1,9 +1,8 @@
-import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
 import { SiigoDocumentPreparationService } from './siigo-document-preparation.service';
 
 function buildService(): SiigoDocumentPreparationService {
   return new SiigoDocumentPreparationService(
-    { updateProcessingMetadata: jest.fn().mockResolvedValue(undefined) } as any,
+    {} as any,
     {} as any,
     {} as any,
     {} as any,
@@ -62,13 +61,6 @@ describe('SiigoDocumentPreparationService.prepareDocuments', () => {
     await service.prepareDocuments(documentIds, 'company-1');
 
     expect(service.prepareSupplierAndAccounts).toHaveBeenCalledTimes(3);
-    expect(
-      (service as any).electronicDocumentService.updateProcessingMetadata,
-    ).toHaveBeenCalledWith(
-      'doc-2',
-      { processingStatus: ElectronicDocumentProcessingStatus.FAILED },
-      'company-1',
-    );
   });
 
   it('procesa un lote vacío sin errores', async () => {

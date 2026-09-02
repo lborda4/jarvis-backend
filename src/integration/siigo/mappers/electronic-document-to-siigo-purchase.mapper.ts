@@ -103,7 +103,7 @@ function validatePayloadForPurchase(payload: ElectronicDocumentPayload): void {
   }
 }
 
-function parseProviderInvoiceNumber(numeroFactura: string): {
+export function parseProviderInvoiceNumber(numeroFactura: string): {
   prefix: string;
   number: string;
 } {

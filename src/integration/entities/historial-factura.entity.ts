@@ -30,6 +30,12 @@ import { Integration } from './integration.entity';
   'integrationId',
   'facturaId',
 ])
+@Index('IDX_historial_facturas_provider_invoice', [
+  'companyId',
+  'integrationId',
+  'providerInvoicePrefix',
+  'providerInvoiceNumber',
+])
 export class HistorialFactura {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -66,6 +72,25 @@ export class HistorialFactura {
 
   @Column({ name: 'metodo_pago_nombre', type: 'varchar', nullable: true })
   metodoPagoNombre: string | null;
+
+  /** provider_invoice.prefix/number de la respuesta de SIIGO — el prefijo y
+   * número de la factura del TERCERO (ej. "FE"/"652"), no el consecutivo
+   * interno de SIIGO ("FC-3-93"). Se repite en todas las líneas de una
+   * misma factura, igual que metodoPagoId/Nombre. Se usa para detectar, al
+   * importar un Excel de Factura de compra, si esa factura del proveedor
+   * ya está creada en SIIGO (evita duplicarla) — ver
+   * findByProviderInvoices. */
+  @Column({ name: 'provider_invoice_prefix', type: 'varchar', nullable: true })
+  providerInvoicePrefix: string | null;
+
+  @Column({ name: 'provider_invoice_number', type: 'varchar', nullable: true })
+  providerInvoiceNumber: string | null;
+
+  /** Consecutivo numérico de SIIGO (SiigoPurchaseResponse.number, ej. 93) —
+   * se guarda acá para poder mostrarlo de una en el documento importado que
+   * matchea por provider_invoice, sin tener que volver a consultar SIIGO. */
+  @Column({ name: 'siigo_numero', type: 'integer', nullable: true })
+  siigoNumero: number | null;
 
   @Column({ type: 'varchar' })
   fuente: HistorialFacturaFuente;

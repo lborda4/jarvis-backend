@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Integration } from '../entities/integration.entity';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationCredentials } from '../interfaces/integration-credentials.interface';
+import { SubscriptionStatus } from '../../plan/enums/subscription-status.enum';
 
 @Injectable()
 export class IntegrationsRepository {
@@ -48,6 +49,19 @@ export class IntegrationsRepository {
       >,
   ): Integration {
     return this.repository.create(data);
+  }
+
+  /** Todas las integraciones activas de un proveedor con suscripción
+   * ACTIVA — usado por el resync automático de historial de compras en
+   * segundo plano, que no tiene sentido gastar contra SIIGO en empresas
+   * suspendidas/canceladas o con la integración apagada. */
+  findAllActiveByProviderAndSubscription(
+    provider: IntegrationProvider,
+    subscriptionStatus: SubscriptionStatus,
+  ): Promise<Integration[]> {
+    return this.repository.find({
+      where: { provider, active: true, subscriptionStatus },
+    });
   }
 
   findAllByCompanyId(companyId: string): Promise<Integration[]> {

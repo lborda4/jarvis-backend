@@ -56,7 +56,6 @@ export function mapElectronicDocumentToListItem(
     suggestedRetentions,
     suggestedCostCenter,
     suggestedItemConfig,
-    processingStatus: document.processingStatus,
     observations: document.payload?.observations?.trim() || null,
     items: mapDocumentItems(
       document,

@@ -314,6 +314,10 @@ export class SiigoPurchaseHistorySyncService {
       facturaIds.push(purchase.id);
 
       const payment = purchase.payments?.[0];
+      const providerInvoicePrefix =
+        purchase.provider_invoice?.prefix?.trim() || null;
+      const providerInvoiceNumber =
+        purchase.provider_invoice?.number?.trim() || null;
 
       for (const item of purchase.items ?? []) {
         rows.push(
@@ -332,6 +336,9 @@ export class SiigoPurchaseHistorySyncService {
             ),
             metodoPagoId: payment?.id ?? null,
             metodoPagoNombre: payment?.name?.trim() || null,
+            providerInvoicePrefix,
+            providerInvoiceNumber,
+            siigoNumero: Number.isFinite(purchase.number) ? purchase.number : null,
             fuente: HistorialFacturaFuente.SIIGO_ORIGINAL,
             fechaFactura: purchase.date,
           }),

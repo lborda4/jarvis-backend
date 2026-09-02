@@ -5,7 +5,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
-import { ElectronicDocumentProcessingStatus } from '../../electronic-document/enums/electronic-document-processing-status.enum';
 import { ElectronicDocument } from '../../electronic-document/entities/electronic-document.entity';
 import { resolveSupplierDocumentFromPayload } from '../../electronic-document/helpers/electronic-document-supplier.helper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
@@ -308,12 +307,9 @@ export class SiigoSupplierCreationService {
       ElectronicDocumentStatus.ACCOUNT_REQUIRED,
       companyId,
     );
-    await this.electronicDocumentService.updateProcessingMetadata(
+    await this.electronicDocumentService.updateSupplierExistsInSiigo(
       documentId,
-      {
-        supplierExistsInSiigo: true,
-        processingStatus: ElectronicDocumentProcessingStatus.ACCOUNT_REQUIRED,
-      },
+      true,
       companyId,
     );
 
@@ -368,13 +364,9 @@ export class SiigoSupplierCreationService {
             ElectronicDocumentStatus.ACCOUNT_REQUIRED,
             companyId,
           );
-          await this.electronicDocumentService.updateProcessingMetadata(
+          await this.electronicDocumentService.updateSupplierExistsInSiigo(
             sibling.id,
-            {
-              supplierExistsInSiigo: true,
-              processingStatus:
-                ElectronicDocumentProcessingStatus.ACCOUNT_REQUIRED,
-            },
+            true,
             companyId,
           );
         } catch (error) {

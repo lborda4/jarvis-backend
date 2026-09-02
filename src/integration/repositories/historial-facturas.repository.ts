@@ -54,6 +54,13 @@ export interface HistorialFacturaImpuestoCampoGroup {
   count: number;
 }
 
+export interface HistorialFacturaProviderInvoiceMatch {
+  /** siigoPurchaseId (SiigoPurchaseResponse.id) de la factura ya creada. */
+  facturaId: string;
+  /** Consecutivo numérico de SIIGO (SiigoPurchaseResponse.number). */
+  siigoNumero: number | null;
+}
+
 @Injectable()
 export class HistorialFacturasRepository {
   constructor(
@@ -317,6 +324,84 @@ export class HistorialFacturasRepository {
     }
 
     return { id: Number(best.metodoPagoId), name: best.metodoPagoNombre };
+  }
+
+  /**
+   * Busca, para cada (prefix, number) de provider_invoice pedido, si ya hay
+   * una factura sincronizada desde SIIGO con ese identificador — se usa al
+   * importar un Excel de Factura de compra para detectar que esa factura
+   * del proveedor ya está creada en SIIGO (evita reintentar crearla) sin
+   * llamar a la API de SIIGO de nuevo, apoyándose en lo que ya trajo el
+   * último sync de historial de compras. Agrupa por prefix (normalmente 1-2
+   * valores distintos por lote) en vez de una consulta por factura.
+   *
+   * La clave del Map devuelto es "PREFIX::number" (prefix en mayúsculas,
+   * number tal como vino) — armar la misma clave al consultar el resultado.
+   */
+  async findByProviderInvoices(
+    companyId: string,
+    integrationId: string,
+    keys: Array<{ prefix: string; number: string }>,
+  ): Promise<Map<string, HistorialFacturaProviderInvoiceMatch>> {
+    const numbersByPrefix = new Map<string, Set<string>>();
+
+    for (const key of keys) {
+      const prefix = key.prefix?.trim().toUpperCase();
+      const number = key.number?.trim();
+
+      if (!prefix || !number) {
+        continue;
+      }
+
+      if (!numbersByPrefix.has(prefix)) {
+        numbersByPrefix.set(prefix, new Set());
+      }
+
+      numbersByPrefix.get(prefix)!.add(number);
+    }
+
+    if (numbersByPrefix.size === 0) {
+      return new Map();
+    }
+
+    const result = new Map<string, HistorialFacturaProviderInvoiceMatch>();
+
+    await Promise.all(
+      [...numbersByPrefix.entries()].map(async ([prefix, numbers]) => {
+        const rows = await this.repository
+          .createQueryBuilder('historial')
+          .select('historial.factura_id', 'facturaId')
+          .addSelect(
+            'historial.provider_invoice_number',
+            'providerInvoiceNumber',
+          )
+          .addSelect('historial.siigo_numero', 'siigoNumero')
+          .where('historial.company_id = :companyId', { companyId })
+          .andWhere('historial.integration_id = :integrationId', {
+            integrationId,
+          })
+          .andWhere('UPPER(historial.provider_invoice_prefix) = :prefix', {
+            prefix,
+          })
+          .andWhere('historial.provider_invoice_number IN (:...numbers)', {
+            numbers: [...numbers],
+          })
+          .getRawMany<{
+            facturaId: string;
+            providerInvoiceNumber: string;
+            siigoNumero: number | null;
+          }>();
+
+        for (const row of rows) {
+          result.set(`${prefix}::${row.providerInvoiceNumber}`, {
+            facturaId: row.facturaId,
+            siigoNumero: row.siigoNumero,
+          });
+        }
+      }),
+    );
+
+    return result;
   }
 
   /** La fila de impuestos más reciente para ese (proveedor, cuenta) — se usa como impuestos_default. */

@@ -340,6 +340,11 @@ export class PurchaseInvoiceImportWorkerService
       const resultByCufe = new Map(
         creationResult.rows.map((row) => [row.cufe, row]),
       );
+      // Documentos que se crearon directo en PURCHASE_CREATED porque ya
+      // existían en SIIGO (matcheados por provider_invoice, ver
+      // createFromPurchaseInvoiceRows) — no van al pipeline de
+      // clasificación/envío automático de más abajo, ya están listos.
+      const documentIdsAlreadyInSiigo: string[] = [];
 
       successfulRows.forEach(({ row, jobRow }) => {
         const creationRow = row.cufe ? resultByCufe.get(row.cufe) : undefined;
@@ -347,6 +352,11 @@ export class PurchaseInvoiceImportWorkerService
         if (creationRow?.documentId) {
           jobRow.documentId = creationRow.documentId;
           createdDocumentIds.push(creationRow.documentId);
+
+          if (creationRow.alreadyInSiigo) {
+            documentIdsAlreadyInSiigo.push(creationRow.documentId);
+          }
+
           records.push({
             cufe: row.cufe,
             documentType: row.documentType,
@@ -376,7 +386,20 @@ export class PurchaseInvoiceImportWorkerService
       );
       pgUpdateMs += Date.now() - pgUpdateDocsStartedAt;
 
-      if (createdDocumentIds.length > 0) {
+      const documentIdsPendingProcessing =
+        documentIdsAlreadyInSiigo.length > 0
+          ? createdDocumentIds.filter(
+              (id) => !documentIdsAlreadyInSiigo.includes(id),
+            )
+          : createdDocumentIds;
+
+      if (documentIdsAlreadyInSiigo.length > 0) {
+        this.logger.log(
+          `[job=${job.id}] ${documentIdsAlreadyInSiigo.length} factura(s) ya existían en SIIGO — creadas directo como listas, sin pasar por clasificación/envío automático.`,
+        );
+      }
+
+      if (documentIdsPendingProcessing.length > 0) {
         const provider =
           await this.electronicDocumentService.resolveDocumentProvider(
             job.companyId,
@@ -384,16 +407,16 @@ export class PurchaseInvoiceImportWorkerService
 
         if (provider === IntegrationProvider.JARVIS) {
           this.jarvisDocumentPreparationService.prepareDocumentsInBackground(
-            createdDocumentIds,
+            documentIdsPendingProcessing,
             job.companyId,
           );
         } else {
           this.siigoDocumentPreparationService.prepareDocumentsInBackground(
-            createdDocumentIds,
+            documentIdsPendingProcessing,
             job.companyId,
           );
           this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground(
-            createdDocumentIds,
+            documentIdsPendingProcessing,
             job.companyId,
           );
         }

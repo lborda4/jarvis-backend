@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
@@ -118,6 +119,8 @@ import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classi
 @ApiTags('integrations/siigo')
 @Controller('integrations/siigo')
 export class SiigoController {
+  private readonly logger = new Logger(SiigoController.name);
+
   constructor(
     private readonly siigoValidationService: SiigoValidationService,
     private readonly siigoAuthService: SiigoAuthService,
@@ -147,14 +150,33 @@ export class SiigoController {
     description:
       'Persiste username, access_key y partner_id en integrations.credentials de la empresa activa. Autentica contra SIIGO para generar token y expires_at.',
   })
-  saveCredentials(
+  async saveCredentials(
     @CurrentUser() user: AuthenticatedUser,
     @Body() request: SaveSiigoCredentialsRequestDto,
   ): Promise<SaveSiigoCredentialsResponseDto> {
-    return this.siigoAuthService.saveCredentials(
+    const companyId = getAuthenticatedCompanyId(user);
+    const response = await this.siigoAuthService.saveCredentials(
       request,
-      getAuthenticatedCompanyId(user),
+      companyId,
     );
+
+    // Apenas las credenciales quedan guardadas y validadas, adelanta en
+    // segundo plano la carga de impuestos, medios de pago y comprobantes de
+    // cargue (Documento Soporte/Factura de compra) — así cuando el usuario
+    // avanza a los pasos siguientes del asistente, esos catálogos ya están
+    // tibios en caché en vez de esperar la consulta a SIIGO en ese momento.
+    // Fire-and-forget a propósito: nunca debe demorar ni romper la
+    // respuesta de este endpoint, y si falla acá el catálogo igual se
+    // resuelve solo (bajo demanda) la próxima vez que alguien lo pida —
+    // ver SiigoConfigurationCacheService.ensureCompanyCache.
+    void this.siigoCatalogSyncService.syncCatalogs(companyId).catch((error) => {
+      this.logger.warn(
+        `[companyId=${companyId}] No se pudo adelantar la carga de catálogos SIIGO tras guardar credenciales — se resolverá bajo demanda más adelante.`,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+
+    return response;
   }
 
   @Get('credentials/status')

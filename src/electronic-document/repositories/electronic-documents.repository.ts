@@ -50,7 +50,6 @@ export class ElectronicDocumentsRepository {
       | 'documentTypeThird'
       | 'electronicDocumentType'
       | 'status'
-      | 'processingStatus'
       | 'supplierExistsInSiigo'
       | 'payload'
     >,
