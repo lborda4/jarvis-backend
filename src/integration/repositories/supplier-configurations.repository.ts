@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThanOrEqual, Repository } from 'typeorm';
 import { normalizeSupplierDocument } from '../siigo/helpers/siigo-context.helper';
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
 
@@ -55,6 +55,26 @@ export class SupplierConfigurationsRepository {
   ): Promise<SupplierConfiguration[]> {
     return this.repository.find({
       where: { companyId, integrationId },
+    });
+  }
+
+  /** Terceros creados AUTOMÁTICAMENTE en SIIGO (ver
+   * SiigoDocumentPreparationService.tryAutoCreateSupplier) desde `since` —
+   * se usa para avisarle al usuario cuántos y cuáles terceros se crearon
+   * solos durante el import que acaba de disparar. Orden más reciente
+   * primero, para que el mensaje muestre los últimos si hay muchos. */
+  findAutoCreatedSince(
+    companyId: string,
+    integrationId: string,
+    since: Date,
+  ): Promise<SupplierConfiguration[]> {
+    return this.repository.find({
+      where: {
+        companyId,
+        integrationId,
+        autoCreatedInSiigoAt: MoreThanOrEqual(since),
+      },
+      order: { autoCreatedInSiigoAt: 'DESC' },
     });
   }
 

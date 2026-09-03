@@ -50,6 +50,7 @@ export function mapElectronicDocumentToListItem(
     electronicDocumentType: document.electronicDocumentType,
     siigoDocumentNumber: document.siigoDocumentNumber,
     supplierExistsInSiigo: document.supplierExistsInSiigo,
+    alreadyInSiigo: document.alreadyInSiigo,
     suggestedAccount,
     suggestedProduct,
     suggestedPaymentMethod,

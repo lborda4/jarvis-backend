@@ -404,6 +404,22 @@ export class HistorialFacturasRepository {
     return result;
   }
 
+  /** Todas las líneas guardadas de UNA factura ya sincronizada desde SIIGO
+   * (mismo facturaId en todas, una por ítem) — se usa para traer la cuenta,
+   * medio de pago, IVA y retenciones REALES de una factura que se detectó
+   * ya creada en SIIGO al importar un Excel (ver
+   * resolveAlreadyInSiigoByProviderInvoice/findByProviderInvoices), en vez
+   * de dejar esos campos en blanco como si nunca se hubiera clasificado. */
+  findLinesByFacturaId(
+    companyId: string,
+    integrationId: string,
+    facturaId: string,
+  ): Promise<HistorialFactura[]> {
+    return this.repository.find({
+      where: { companyId, integrationId, facturaId },
+    });
+  }
+
   /** La fila de impuestos más reciente para ese (proveedor, cuenta) — se usa como impuestos_default. */
   findMostRecentByProveedorAndCuenta(
     companyId: string,

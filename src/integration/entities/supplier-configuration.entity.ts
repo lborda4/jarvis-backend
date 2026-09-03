@@ -60,6 +60,19 @@ export class SupplierConfiguration {
   @Column({ name: 'ultima_actualizacion', type: 'timestamptz', nullable: true })
   ultimaActualizacion: Date | null;
 
+  /** Momento en que este tercero se creó AUTOMÁTICAMENTE en SIIGO (sin que
+   * el usuario clickeara "Crear tercero"), ver
+   * SiigoDocumentPreparationService.tryAutoCreateSupplier — null si nunca
+   * pasó por ese flujo (creado a mano, o ya existía en SIIGO de antes). Se
+   * usa para avisarle al usuario cuántos y cuáles terceros se crearon solos
+   * durante un import (ver findAutoCreatedSince). */
+  @Column({
+    name: 'auto_created_in_siigo_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  autoCreatedInSiigoAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

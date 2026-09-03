@@ -38,6 +38,24 @@ import {
 } from '../interfaces/siigo-api.interface';
 
 const LOG_BODY_PREVIEW_LIMIT = 2000;
+/** Sin este timeout, una petición que SIIGO deja "colgada" en vez de
+ * responder rápido (lo que hace bajo su rate limit en vez de un 429
+ * inmediato) bloquea para siempre el worker de mapWithConcurrency que la
+ * está esperando — con 5 workers fijos, basta con que esto le pase a 5
+ * documentos de un lote grande para que el resto de la cola nunca se
+ * llegue a procesar. Bug real reportado en producción: de un lote de 100,
+ * ~20 quedaron congelados en "EN PROCESO" sin ningún error en los logs. */
+const SIIGO_HTTP_TIMEOUT_MS = 30_000;
+/** Reintentos con backoff SOLO para 429 (rate limit) — un lote grande de
+ * documentos puede fácilmente superar el límite de SIIGO; reintentar unas
+ * pocas veces evita que un throttle transitorio deje el documento
+ * permanentemente fallido. */
+const SIIGO_RATE_LIMIT_MAX_ATTEMPTS = 4;
+const SIIGO_RATE_LIMIT_BASE_DELAY_MS = 2_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 @Injectable()
 export class SiigoHttpClient {
@@ -292,31 +310,53 @@ export class SiigoHttpClient {
       }`,
     );
 
-    const response = await firstValueFrom(
-      this.httpService.request<T>({
-        validateStatus: () => true,
-        ...config,
-      }),
-    );
-
-    if (response.status < 200 || response.status >= 300) {
-      const errorBody = this.preview(response.data);
-
-      this.logger.error(
-        `[SIIGO HTTP] ${config.method} ${config.url} respondió con estado ${response.status}: ${errorBody}` +
-          (requestPreview ? ` | body enviado=${requestPreview}` : ''),
+    for (
+      let attempt = 1;
+      attempt <= SIIGO_RATE_LIMIT_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      const response = await firstValueFrom(
+        this.httpService.request<T>({
+          timeout: SIIGO_HTTP_TIMEOUT_MS,
+          validateStatus: () => true,
+          ...config,
+        }),
       );
 
-      throw new Error(
-        `SIIGO respondió con estado ${response.status}: ${errorBody}`,
+      if (response.status === 429 && attempt < SIIGO_RATE_LIMIT_MAX_ATTEMPTS) {
+        const waitMs = SIIGO_RATE_LIMIT_BASE_DELAY_MS * attempt;
+
+        this.logger.warn(
+          `[SIIGO HTTP] ${config.method} ${config.url} respondió 429 (rate limit) — reintento ${attempt}/${SIIGO_RATE_LIMIT_MAX_ATTEMPTS - 1} en ${waitMs}ms.`,
+        );
+
+        await delay(waitMs);
+        continue;
+      }
+
+      if (response.status < 200 || response.status >= 300) {
+        const errorBody = this.preview(response.data);
+
+        this.logger.error(
+          `[SIIGO HTTP] ${config.method} ${config.url} respondió con estado ${response.status}: ${errorBody}` +
+            (requestPreview ? ` | body enviado=${requestPreview}` : ''),
+        );
+
+        throw new Error(
+          `SIIGO respondió con estado ${response.status}: ${errorBody}`,
+        );
+      }
+
+      this.logger.debug(
+        `[SIIGO HTTP] ${config.method} ${config.url} -> ${response.status} ${this.preview(response.data)}`,
       );
+
+      return response.data;
     }
 
-    this.logger.debug(
-      `[SIIGO HTTP] ${config.method} ${config.url} -> ${response.status} ${this.preview(response.data)}`,
+    throw new Error(
+      `SIIGO respondió con estado 429 (rate limit) tras ${SIIGO_RATE_LIMIT_MAX_ATTEMPTS} intentos.`,
     );
-
-    return response.data;
   }
 
   private preview(value: unknown): string {

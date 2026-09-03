@@ -37,6 +37,23 @@ function resolveDocumentType(
 }
 
 // DIAN tabla 9.5 (forma de pago): 1 = Contado, 2 = Crédito.
+/**
+ * NextPyme manda "0001-01-01" como payment_due_date en facturas sin fecha
+ * de vencimiento real (ej. Contado) — es el valor por defecto de un
+ * DateTime sin inicializar de su lado (.NET DateTime.MinValue), no una
+ * fecha real. Guardarlo tal cual como `dueDate` producía un bug real
+ * reportado: el frontend calculaba "Plazo" como issueDate - dueDate, y
+ * `Date.UTC(1, 0, 1)` en JS interpreta años de 0-99 como "1900 + año"
+ * (quirk histórico del motor) — año 1 se convertía en 1901, dando un Plazo
+ * de -45744 días en vez de simplemente no tener dato. Cualquier año < 1900
+ * se descarta acá mismo, en el origen, en vez de confiar en que cada
+ * consumidor lo filtre por su cuenta.
+ */
+function isPlausibleInvoiceDate(value: string): boolean {
+  const year = Number(value.slice(0, 4));
+  return Number.isFinite(year) && year >= 1900;
+}
+
 function resolveIsCreditPayment(
   paymentFormId: string | number | undefined,
 ): boolean | undefined {
@@ -92,6 +109,17 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       : taxExclusive > 0 && taxInclusive > taxExclusive
         ? taxInclusive - taxExclusive
         : Math.max(payable + discount - subtotal, 0);
+  // Retenciones sugeridas por el vendedor, certificadas en la factura DIAN
+  // (ver comentario en NextPymeInvoiceQueryResult.with_holding_tax_totals) —
+  // se descartan entradas sin tax_code o con porcentaje 0/inválido, nunca se
+  // adivina el código.
+  const withholdings = (result.with_holding_tax_totals ?? [])
+    .map((tax) => ({
+      dianTaxCode: String(tax.tax_code ?? '').trim(),
+      percentage: toNumber(tax.percent),
+    }))
+    .filter((tax) => tax.dianTaxCode && tax.percentage > 0);
+
   const invoiceNumber =
     `${result.prefix ?? ''}${result.number ?? ''}`.trim() || cufe.slice(0, 12);
   const isCreditPayment = resolveIsCreditPayment(
@@ -159,7 +187,8 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       prefix: result.prefix?.trim() || undefined,
       number: invoiceNumber,
       issueDate: result.date?.trim() || '',
-      ...(result.payment_form?.payment_due_date?.trim()
+      ...(result.payment_form?.payment_due_date?.trim() &&
+      isPlausibleInvoiceDate(result.payment_form.payment_due_date.trim())
         ? { dueDate: result.payment_form.payment_due_date.trim() }
         : {}),
       ...(isCreditPayment !== undefined ? { isCreditPayment } : {}),
@@ -175,5 +204,6 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       ...(discount > 0 ? { discount } : {}),
     },
     ...(result.notes?.trim() ? { observations: result.notes.trim() } : {}),
+    ...(withholdings.length > 0 ? { withholdings } : {}),
   };
 }

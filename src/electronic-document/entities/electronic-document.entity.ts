@@ -49,6 +49,18 @@ export class ElectronicDocument {
   @Column({ name: 'supplier_exists_in_siigo', type: 'boolean', nullable: true })
   supplierExistsInSiigo: boolean | null;
 
+  /** true si el documento se creó directo en PURCHASE_CREATED porque ya
+   * existía en SIIGO al importar el Excel (match por provider_invoice, ver
+   * ElectronicDocumentService.createFromPurchaseInvoiceRows) — a diferencia
+   * de una factura que SÍ se envió desde Jarvis y SIIGO confirmó, que
+   * también queda en PURCHASE_CREATED pero con este campo en false. Solo
+   * distingue cómo mostrarlo (frontend: "Existente en SIIGO" vs "Lista");
+   * el resto de la lógica (no reenviar, contar cupo, poder eliminarla
+   * localmente, etc.) sigue tratando ambos casos igual, por eso NO es un
+   * `status` aparte. */
+  @Column({ name: 'already_in_siigo', type: 'boolean', default: false })
+  alreadyInSiigo: boolean;
+
   @Column({ type: 'jsonb' })
   payload: ElectronicDocumentPayload;
 

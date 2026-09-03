@@ -25,6 +25,16 @@ import { Integration } from './integration.entity';
   'proveedorNit',
   'cuentaPuc',
 ])
+/** Para findDominantPaymentMethodByCuenta, que filtra por cuenta_puc SIN
+ * proveedor_nit (medio de pago dominante de la cuenta sin importar el
+ * proveedor) — IDX_historial_facturas_cuenta no sirve para esa consulta
+ * porque proveedor_nit va ANTES de cuenta_puc en ese índice compuesto, así
+ * que Postgres no puede usarlo para buscar directo por cuenta_puc. */
+@Index('IDX_historial_facturas_cuenta_directa', [
+  'companyId',
+  'integrationId',
+  'cuentaPuc',
+])
 @Index('IDX_historial_facturas_factura', [
   'companyId',
   'integrationId',

@@ -31,7 +31,9 @@ function buildService(status: ElectronicDocumentStatus) {
   const siigoDocumentCreationService = {
     createInSiigo: jest.fn().mockResolvedValue(undefined),
   };
-  const siigoAuthService = {};
+  const siigoAuthService = {
+    getValidAuthContext: jest.fn().mockResolvedValue({}),
+  };
 
   const service = new SiigoDocumentResumeService(
     electronicDocumentService as never,
@@ -45,6 +47,7 @@ function buildService(status: ElectronicDocumentStatus) {
     electronicDocumentService,
     siigoDocumentPreparationService,
     siigoDocumentCreationService,
+    siigoAuthService,
   };
 }
 
@@ -90,5 +93,36 @@ describe('SiigoDocumentResumeService.resume', () => {
     expect(
       siigoDocumentPreparationService.prepareSupplierAndAccounts,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('SiigoDocumentResumeService.resumeBatch', () => {
+  it('nunca reanuda más documentos en simultáneo que el límite de concurrencia acotada (bug real: 50 resume() disparados a la vez saturaban el rate limit de SIIGO)', async () => {
+    const { service, siigoDocumentPreparationService } = buildService(
+      ElectronicDocumentStatus.ACCOUNT_MAPPED,
+    );
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    siigoDocumentPreparationService.prepareSupplierAndAccounts.mockImplementation(
+      async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+
+        return { documentId: 'doc-1', nextStep: 'READY' };
+      },
+    );
+
+    const documentIds = Array.from({ length: 23 }, (_, i) => `doc-${i}`);
+    await service.resumeBatch(documentIds, 'company-1');
+
+    expect(
+      siigoDocumentPreparationService.prepareSupplierAndAccounts,
+    ).toHaveBeenCalledTimes(23);
+    expect(maxInFlight).toBeLessThanOrEqual(5);
+    expect(maxInFlight).toBeGreaterThan(1);
   });
 });

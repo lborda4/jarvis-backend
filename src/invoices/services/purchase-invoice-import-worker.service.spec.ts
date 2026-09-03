@@ -88,11 +88,6 @@ function buildService(
     ...overrides.jobRowsRepository,
   };
   const electronicDocumentService = {
-    resolvePurchaseInvoiceQuota: jest.fn().mockResolvedValue({
-      allowed: 100,
-      documentLimit: null,
-      documentsUsed: 0,
-    }),
     createFromPurchaseInvoiceRows: jest.fn(),
     resolveDocumentProvider: jest.fn().mockResolvedValue('SIIGO'),
     ...overrides.electronicDocumentService,
@@ -236,35 +231,55 @@ describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, ví
     expect(nextPymeApiClient.getInvoiceByCufe).toHaveBeenCalledTimes(2);
   });
 
-  it('aborta el job sin consultar NextPyme cuando no hay cupo del plan', async () => {
-    const {
-      service,
-      jobsRepository,
-      nextPymeApiClient,
-      postgresNotifyService,
-    } = buildService({
-      jobRowsRepository: {
-        countOutstandingByJob: jest.fn().mockResolvedValue(5),
-      },
-      electronicDocumentService: {
-        resolvePurchaseInvoiceQuota: jest.fn().mockResolvedValue({
-          allowed: 0,
-          documentLimit: 10,
-          documentsUsed: 10,
-        }),
-      },
+  it('no aborta ni consulta el cupo del plan al importar, aunque el plan ya esté agotado', async () => {
+    // El cupo del plan ya no se descuenta/valida al importar — solo al
+    // ENVIAR a SIIGO (ver assertCanCreateDocuments en
+    // SiigoPurchaseSendService). Un plan agotado no debe impedir crear los
+    // registros locales de la importación.
+    const successRow = buildJobRow({
+      id: 'row-1',
+      rowIndex: 1,
+      cufe: 'cufe-ok',
+      rawRow: buildRawRow({ cufe: 'cufe-ok' }),
     });
+
+    const { service, nextPymeApiClient, electronicDocumentService } =
+      buildService({
+        jobRowsRepository: {
+          countOutstandingByJob: jest.fn().mockResolvedValue(1),
+          claimPendingBatch: jest.fn().mockResolvedValue([successRow]),
+        },
+        nextPymeApiClient: {
+          getInvoiceByCufe: jest.fn().mockResolvedValue({
+            outcome: 'found',
+            data: {
+              seller: { identification_number: '900123456' },
+              legal_monetary_totals: { payable_amount: '100000' },
+              invoice_lines: [],
+            },
+            attempts: 1,
+            retryDelayMs: 0,
+          }),
+        },
+        electronicDocumentService: {
+          createFromPurchaseInvoiceRows: jest.fn().mockResolvedValue({
+            documentsCreated: 1,
+            documentsReused: 0,
+            itemsTotal: 1,
+            documentsSkippedByPlanLimit: 0,
+            rows: [
+              { cufe: 'cufe-ok', documentId: 'doc-1', skippedByPlanLimit: false },
+            ],
+          }),
+        },
+      });
 
     await (service as any).processOneBatchForJob(buildJob());
 
-    expect(nextPymeApiClient.getInvoiceByCufe).not.toHaveBeenCalled();
-    expect(jobsRepository.patch).toHaveBeenCalledWith(
-      'job-1',
-      expect.objectContaining({ status: PurchaseInvoiceImportJobStatus.ERROR }),
-    );
-    expect(postgresNotifyService.publish).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'completed' }),
-    );
+    expect(nextPymeApiClient.getInvoiceByCufe).toHaveBeenCalledTimes(1);
+    expect(
+      electronicDocumentService.createFromPurchaseInvoiceRows,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('finaliza el job como completed cuando no quedan filas pending/processing', async () => {

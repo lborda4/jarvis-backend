@@ -19,7 +19,7 @@ const ACCOUNT_MAPPING_REQUIRED_STATUS = 'ACCOUNT_MAPPING_REQUIRED';
 /** Cuántos documentos se preparan contra SIIGO en simultáneo — un import de
  * 500+ filas no debe disparar 500+ llamadas paralelas (rate limit de SIIGO).
  * Mismo valor que SYNC_PAGE_FETCH_CONCURRENCY en el sync de historial. */
-const SIIGO_DOCUMENT_PREPARATION_CONCURRENCY = 5;
+export const SIIGO_DOCUMENT_PREPARATION_CONCURRENCY = 5;
 /** Techo de líneas de progreso logueadas por lote, sin importar el tamaño
  * (un import de 50 filas loguea cada ~3; uno de 5000 loguea cada ~250). */
 const MAX_PROGRESS_LOG_LINES = 20;
@@ -78,6 +78,11 @@ export class SiigoDocumentPreparationService {
             `[documentId=${documentId}] Error en preparación en segundo plano`,
             error instanceof Error ? error.stack : String(error),
           );
+          // Antes esto solo quedaba logueado y el documento se quedaba
+          // congelado en su estado anterior ("EN PROCESO" para siempre en
+          // la UI, sin ningún error visible ni forma de reintentar) — ver
+          // markPreparationFailed.
+          await this.markPreparationFailed(documentId, companyId);
         } finally {
           processedCount += 1;
 
@@ -231,6 +236,7 @@ export class SiigoDocumentPreparationService {
       await this.siigoSupplierCreationService.createSupplier(
         { documentId },
         companyId,
+        'automatic',
       );
 
       return true;
@@ -265,6 +271,33 @@ export class SiigoDocumentPreparationService {
       supplierRequestsInFlight: new Map(),
       supplierCreationInFlight: new Map(),
     };
+  }
+
+  /**
+   * Marca el documento como FAILED cuando su preparación revienta con una
+   * excepción — así queda visible (acción "Reintentar" en el dashboard) en
+   * vez de congelado en su estado anterior sin ningún indicio de error. No
+   * debe volver a lanzar: si esta actualización también falla, el
+   * documento sigue en su estado previo pero el resto del lote (los demás
+   * documentos de este worker de mapWithConcurrency) no debe verse
+   * afectado.
+   */
+  private async markPreparationFailed(
+    documentId: string,
+    companyId: string,
+  ): Promise<void> {
+    try {
+      await this.electronicDocumentService.updateStatus(
+        documentId,
+        ElectronicDocumentStatus.FAILED,
+        companyId,
+      );
+    } catch (updateError) {
+      this.logger.error(
+        `[documentId=${documentId}] No se pudo marcar el documento como FAILED tras el error de preparación`,
+        updateError instanceof Error ? updateError.stack : String(updateError),
+      );
+    }
   }
 
   private isAccountMappingComplete(status: ElectronicDocumentStatus): boolean {

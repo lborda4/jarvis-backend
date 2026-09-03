@@ -18,6 +18,7 @@ import { SupplierConfiguration } from '../entities/supplier-configuration.entity
 import { SIIGO_DEFAULT_ITEM_TYPE } from './constants/supplier-configuration.constants';
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
+import { ListAutoCreatedSuppliersResponseDto } from './dto/list-auto-created-suppliers.dto';
 import {
   getSiigoIntegration,
   normalizeSupplierDocument,
@@ -84,6 +85,12 @@ export class SiigoSupplierCreationService {
   async createSupplier(
     request: CreateSiigoSupplierRequestDto,
     companyId: string,
+    /** 'automatic' = disparado solo por SiigoDocumentPreparationService
+     * (sin que el usuario clickeara nada) — marca
+     * SupplierConfiguration.autoCreatedInSiigoAt para poder avisarle al
+     * usuario después cuántos terceros se crearon solos. 'manual' (default)
+     * = el botón "Crear tercero" del usuario, no se marca. */
+    source: 'automatic' | 'manual' = 'manual',
   ): Promise<CreateSiigoSupplierResponseDto> {
     const documentId = request?.documentId?.trim();
     // Si no viene (creación automática), se deja en null: el mapper lo
@@ -224,6 +231,8 @@ export class SiigoSupplierCreationService {
         refreshedDocument,
         supplier.normalizedDocumentNumber,
         siigoSupplier,
+        !existingSupplier,
+        source,
       );
     } catch (error) {
       this.logger.error(
@@ -284,6 +293,8 @@ export class SiigoSupplierCreationService {
     electronicDocument: ElectronicDocument,
     normalizedDocumentNumber: string,
     siigoSupplier: SiigoCustomer,
+    createdNow: boolean,
+    source: 'automatic' | 'manual',
   ): Promise<CreateSiigoSupplierResponseDto> {
     const integration = await getSiigoIntegration(
       this.integrationsRepository,
@@ -300,6 +311,7 @@ export class SiigoSupplierCreationService {
       normalizedDocumentNumber,
       supplierName,
       electronicDocument.payload.supplier.documentType || 'NIT',
+      createdNow && source === 'automatic',
     );
 
     await this.electronicDocumentService.updateStatus(
@@ -322,6 +334,7 @@ export class SiigoSupplierCreationService {
 
     return {
       success: true,
+      created: createdNow,
       supplier: mapSiigoCustomerToCreatedSupplierResponse(
         siigoSupplier,
         electronicDocument.payload,
@@ -423,6 +436,7 @@ export class SiigoSupplierCreationService {
     supplierDocument: string,
     supplierName: string,
     supplierDocumentType: string,
+    markAutoCreatedInSiigo: boolean,
   ): Promise<SupplierConfiguration> {
     const existing =
       await this.supplierConfigurationsRepository.findByCompanyIntegrationAndNormalizedSupplierDocument(
@@ -435,6 +449,9 @@ export class SiigoSupplierCreationService {
       existing.supplierName = supplierName;
       existing.supplierDocument = normalizeSupplierDocument(supplierDocument);
       existing.supplierDocumentType = supplierDocumentType;
+      if (markAutoCreatedInSiigo) {
+        existing.autoCreatedInSiigoAt = new Date();
+      }
       return this.supplierConfigurationsRepository.save(existing);
     }
 
@@ -447,6 +464,42 @@ export class SiigoSupplierCreationService {
       itemType: SIIGO_DEFAULT_ITEM_TYPE,
     });
 
+    if (markAutoCreatedInSiigo) {
+      configuration.autoCreatedInSiigoAt = new Date();
+    }
+
     return this.supplierConfigurationsRepository.save(configuration);
+  }
+
+  /** Terceros creados AUTOMÁTICAMENTE en SIIGO (sin que el usuario
+   * clickeara "Crear tercero") desde `since` — el frontend lo consulta
+   * justo después de un import para avisarle al usuario cuántos y cuáles
+   * terceros se crearon solos, ver tryAutoCreateSupplier en
+   * SiigoDocumentPreparationService. */
+  async listAutoCreatedSuppliersSince(
+    companyId: string,
+    since: Date,
+  ): Promise<ListAutoCreatedSuppliersResponseDto> {
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+
+    const configurations =
+      await this.supplierConfigurationsRepository.findAutoCreatedSince(
+        companyId,
+        integration.id,
+        since,
+      );
+
+    return {
+      suppliers: configurations.map((configuration) => ({
+        supplierDocument: configuration.supplierDocument,
+        supplierName: configuration.supplierName || configuration.supplierDocument,
+        createdAt: (
+          configuration.autoCreatedInSiigoAt as Date
+        ).toISOString(),
+      })),
+    };
   }
 }

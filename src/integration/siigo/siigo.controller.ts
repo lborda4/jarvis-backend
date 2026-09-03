@@ -30,6 +30,10 @@ import { DeleteSiigoPurchaseResponseDto } from './dto/delete-siigo-purchase.dto'
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
 import {
+  ListAutoCreatedSuppliersQueryDto,
+  ListAutoCreatedSuppliersResponseDto,
+} from './dto/list-auto-created-suppliers.dto';
+import {
   SaveAccountMappingRequestDto,
   SaveAccountMappingResponseDto,
 } from './dto/save-account-mapping.dto';
@@ -333,6 +337,26 @@ export class SiigoController {
     return this.siigoSupplierCreationService.createSupplier(
       request,
       getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('suppliers/auto-created')
+  @ApiOperation({
+    summary: 'Terceros creados automáticamente en SIIGO',
+    description:
+      'Terceros que SiigoDocumentPreparationService creó solo en SIIGO (sin que el usuario clickeara "Crear tercero") desde la fecha indicada — se usa para avisarle al usuario tras un import.',
+  })
+  listAutoCreatedSuppliers(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListAutoCreatedSuppliersQueryDto,
+  ): Promise<ListAutoCreatedSuppliersResponseDto> {
+    const since = query.since?.trim()
+      ? new Date(query.since.trim())
+      : new Date(Date.now() - 60 * 60 * 1000);
+
+    return this.siigoSupplierCreationService.listAutoCreatedSuppliersSince(
+      getAuthenticatedCompanyId(user),
+      since,
     );
   }
 

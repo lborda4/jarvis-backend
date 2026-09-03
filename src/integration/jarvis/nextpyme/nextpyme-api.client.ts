@@ -197,6 +197,20 @@ export interface NextPymeInvoiceQueryResult {
    * correcta para el IVA del documento, evita duplicar cuando hay
    * varias líneas. */
   tax_totals?: NextPymeInvoiceQueryLineTax[];
+  /** Retenciones SUGERIDAS por el vendedor a nivel de factura — mismo nivel
+   * que tax_totals, un elemento por tipo de retención (ReteIVA/
+   * ReteFuente-ReteRenta/ReteICA). `tax_code` es el código DIAN estable
+   * (05=ReteIVA, 06=ReteFuente/ReteRenta, 07=ReteICA — confirmado contra
+   * datos reales); `tax_name` es un texto libre que varía (ej. "ReteRenta"
+   * vs "ReteFuente" para el mismo código 06), así que el mapeo a tipo debe
+   * hacerse por `tax_code`, nunca por `tax_name`. */
+  with_holding_tax_totals?: Array<{
+    tax_code?: string;
+    tax_name?: string;
+    tax_amount?: string | number;
+    percent?: string | number;
+    amount?: string | number;
+  }>;
   invoice_lines: NextPymeInvoiceQueryLine[];
 }
 

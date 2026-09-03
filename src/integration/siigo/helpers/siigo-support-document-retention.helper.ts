@@ -92,3 +92,74 @@ export function validateSupportDocumentRetentions(
 ): SupportDocumentRetentionPlacement {
   return resolveSupportDocumentRetentionPlacement(retentionIds, taxesCatalog);
 }
+
+/** Código DIAN (tabla de "tipo de retención" del UBL WithholdingTaxTotal) →
+ * tipo interno — confirmado contra respuestas reales de NextPyme (05,06,07);
+ * el `tax_name` que trae NextPyme para el mismo código varía (ej. "ReteRenta"
+ * vs "ReteFuente" para 06), por eso el match usa el código, nunca el nombre.
+ * Autorretención no tiene código confirmado todavía — si aparece, simplemente
+ * no matchea nada (no se adivina). */
+const DIAN_WITHHOLDING_CODE_TO_TYPE: Record<string, string> = {
+  '05': 'ReteIVA',
+  '06': 'Retefuente',
+  '07': 'ReteICA',
+};
+
+const RETENTION_MATCH_TOLERANCE = 0.01;
+
+export interface SuggestedRetentionFromInvoice {
+  id: number;
+  name: string;
+  type: string;
+  percentage: number;
+}
+
+/**
+ * Retenciones que el VENDEDOR ya certificó en la factura DIAN original
+ * (NextPyme `with_holding_tax_totals`), cruzadas contra el catálogo de
+ * impuestos de SIIGO de la empresa por tipo (código DIAN) + porcentaje. Es
+ * un dato específico de ESTA factura (no un patrón histórico del
+ * proveedor) — pensado como ÚLTIMO fallback, cuando ni el historial
+ * confirmado ni una preferencia guardada resolvieron nada, en vez de dejar
+ * la retención completamente vacía a pesar de que la factura sí la trae
+ * (bug real reportado: "no subió ninguna retención así tuviera imp renta").
+ * Si el porcentaje no matchea ningún impuesto real del catálogo, esa
+ * retención puntual simplemente no se sugiere — nunca se adivina.
+ */
+export function resolveSuggestedRetentionsFromInvoice(
+  withholdings: Array<{ dianTaxCode: string; percentage: number }> | undefined,
+  taxesCatalog: SiigoTaxCatalogItemDto[],
+): SuggestedRetentionFromInvoice[] {
+  if (!withholdings?.length) {
+    return [];
+  }
+
+  const results: SuggestedRetentionFromInvoice[] = [];
+
+  for (const withholding of withholdings) {
+    const dianType = DIAN_WITHHOLDING_CODE_TO_TYPE[withholding.dianTaxCode];
+
+    if (!dianType) {
+      continue;
+    }
+
+    const normalizedDianType = normalizeSiigoTaxType(dianType);
+    const match = taxesCatalog.find(
+      (tax) =>
+        tax.active !== false &&
+        normalizeSiigoTaxType(tax.type) === normalizedDianType &&
+        Math.abs(tax.percentage - withholding.percentage) < RETENTION_MATCH_TOLERANCE,
+    );
+
+    if (match) {
+      results.push({
+        id: match.id,
+        name: match.name,
+        type: match.type,
+        percentage: match.percentage,
+      });
+    }
+  }
+
+  return results;
+}

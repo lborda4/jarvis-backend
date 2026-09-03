@@ -150,38 +150,11 @@ export class PurchaseInvoiceImportWorkerService
       return;
     }
 
-    // Chequeo de cupo del plan ANTES de consultar NextPyme: si ya no queda
-    // cupo, no tiene sentido gastar tiempo consultando el CUFE de cada fila
-    // para terminar descartando todo — se aborta acá mismo. Es una
-    // estimación (no bajo el advisory lock, puede haber una carrera con
-    // otro import concurrente de la misma empresa) — el chequeo
-    // autoritativo sigue estando en createFromPurchaseInvoiceRows, que si
-    // hay cupo parcial procesa hasta agotarlo en vez de rechazar todo.
-    const quota =
-      await this.electronicDocumentService.resolvePurchaseInvoiceQuota(
-        job.companyId,
-        outstanding,
-      );
-
-    if (quota.allowed <= 0) {
-      const message =
-        quota.documentLimit == null
-          ? 'No se pudo determinar el cupo disponible del plan.'
-          : `Ha alcanzado el límite del plan (${quota.documentLimit} documentos, usados: ${quota.documentsUsed}). No hay cupo disponible para importar ninguna factura.`;
-
-      this.logger.warn(
-        `[job=${job.id}] Facturas de compra DIAN: import abortado sin consultar NextPyme — ${message}`,
-      );
-
-      await this.purchaseInvoiceImportJobsRepository.patch(job.id, {
-        status: PurchaseInvoiceImportJobStatus.ERROR,
-        errorMessage: message,
-        completedAt: new Date(),
-      });
-      await this.notifyCompleted(job.id, job.companyId);
-      return;
-    }
-
+    // El cupo del plan ya NO limita ni aborta la importación: solo se
+    // valida/descuenta al momento de ENVIAR el documento a SIIGO (ver
+    // assertCanCreateDocuments en SiigoPurchaseSendService), que es cuando
+    // realmente cuenta contra el plan. Importar el Excel crea los registros
+    // locales sin importar cuántos quepan en el cupo restante.
     if (job.status === PurchaseInvoiceImportJobStatus.PENDING) {
       await this.purchaseInvoiceImportJobsRepository.patch(job.id, {
         status: PurchaseInvoiceImportJobStatus.RUNNING,

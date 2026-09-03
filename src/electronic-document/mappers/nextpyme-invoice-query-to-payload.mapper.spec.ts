@@ -217,6 +217,76 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     expect(payload.totals).toEqual({ subtotal: 16000, total: 16000, iva: 0 });
   });
 
+  it('mapea with_holding_tax_totals a payload.withholdings (retención sugerida por el vendedor, certificada en la factura)', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        with_holding_tax_totals: [
+          { tax_code: '06', tax_name: 'ReteRenta', tax_amount: '1023.00', percent: '2.50' },
+          { tax_code: '05', tax_name: 'ReteIVA', tax_amount: '6144.60', percent: '15.00' },
+        ],
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.withholdings).toEqual([
+      { dianTaxCode: '06', percentage: 2.5 },
+      { dianTaxCode: '05', percentage: 15 },
+    ]);
+  });
+
+  it('no incluye withholdings cuando la factura no trae with_holding_tax_totals', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult(),
+      'cufe-123',
+    );
+
+    expect(payload.withholdings).toBeUndefined();
+  });
+
+  it('descarta entradas de with_holding_tax_totals sin código o con porcentaje 0 (nunca adivina)', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        with_holding_tax_totals: [
+          { tax_code: '', tax_name: 'Desconocido', percent: '2.50' },
+          { tax_code: '06', tax_name: 'ReteRenta', percent: '0' },
+        ],
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.withholdings).toBeUndefined();
+  });
+
+  it('descarta payment_due_date="0001-01-01" (placeholder de NextPyme para facturas sin vencimiento real, ej. Contado) — antes producía un Plazo de -45744 días en el frontend', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        payment_form: {
+          payment_form_id: '1',
+          payment_method_id: '1',
+          payment_due_date: '0001-01-01',
+        },
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.invoice.dueDate).toBeUndefined();
+  });
+
+  it('conserva un payment_due_date real', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        payment_form: {
+          payment_form_id: '2',
+          payment_method_id: '1',
+          payment_due_date: '2026-04-29',
+        },
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.invoice.dueDate).toBe('2026-04-29');
+  });
+
   it('returns a zero total when the monetary fields are missing/garbled', () => {
     const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       buildResult({

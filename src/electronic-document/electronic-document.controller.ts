@@ -1,10 +1,12 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
+  Post,
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -17,6 +19,10 @@ import { ElectronicDocumentListResponseDto } from './dto/electronic-document-lis
 import { ElectronicDocumentFilterOptionsDto } from './dto/electronic-document-filter-options.dto';
 import { ElectronicDocumentCompanyOptionDto } from './dto/electronic-document-company-option.dto';
 import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
+import {
+  DeleteElectronicDocumentsBatchRequestDto,
+  DeleteElectronicDocumentsBatchResponseDto,
+} from './dto/delete-electronic-documents-batch.dto';
 
 @ApiTags('electronic-documents')
 @Controller('electronic-documents')
@@ -65,6 +71,22 @@ export class ElectronicDocumentController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ElectronicDocumentCompanyOptionDto[]> {
     return this.electronicDocumentService.listCompanyOptions(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('delete-batch')
+  @ApiOperation({
+    summary: 'Eliminar en lote documentos electrónicos locales',
+    description:
+      'Borra de la base de datos, en una sola operación, los documentos locales que aún no estén en estado lista (enviado). Los que sí lo estén se omiten y se reportan en skippedIds.',
+  })
+  deleteDocumentsBatch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: DeleteElectronicDocumentsBatchRequestDto,
+  ): Promise<DeleteElectronicDocumentsBatchResponseDto> {
+    return this.electronicDocumentService.deleteLocalDocuments(
+      request.documentIds ?? [],
       getAuthenticatedCompanyId(user),
     );
   }

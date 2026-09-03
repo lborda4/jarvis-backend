@@ -1,11 +1,15 @@
 import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { mapElectronicDocumentToListItem } from '../../electronic-document/mappers/electronic-document-list-item.mapper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { ResumeElectronicDocumentResponseDto } from '../../electronic-document/dto/resume-electronic-document.dto';
 import { ResumeElectronicDocumentsBatchResponseDto } from '../../electronic-document/dto/resume-electronic-documents-batch.dto';
-import { SiigoDocumentPreparationService } from './siigo-document-preparation.service';
+import {
+  SiigoDocumentPreparationService,
+  SIIGO_DOCUMENT_PREPARATION_CONCURRENCY,
+} from './siigo-document-preparation.service';
 import { SiigoDocumentCreationService } from './siigo-document-creation.service';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoBatchContext } from './interfaces/siigo-batch-context.interface';
@@ -38,10 +42,18 @@ export class SiigoDocumentResumeService {
 
     const batchContext = await this.createBatchContext(companyId);
     const prepareOnly = options?.prepareOnly ?? true;
-    const items = await Promise.all(
-      uniqueIds.map((documentId) =>
+    // mapWithConcurrency (no Promise.all sin límite): reanudar un lote de
+    // 50 documentos importados no debe disparar 50 llamadas paralelas
+    // contra SIIGO (cada resume() puede terminar consultando el tercero) —
+    // mismo límite que usa la preparación en segundo plano del import. Bug
+    // real reportado: un import de 50 filas disparaba 50 resume() a la vez
+    // desde el frontend, saturando el rate limit de SIIGO y volviendo la
+    // validación mucho más lenta de lo normal.
+    const items = await mapWithConcurrency(
+      uniqueIds,
+      SIIGO_DOCUMENT_PREPARATION_CONCURRENCY,
+      (documentId) =>
         this.resume(documentId, companyId, batchContext, { prepareOnly }),
-      ),
     );
 
     return { items };

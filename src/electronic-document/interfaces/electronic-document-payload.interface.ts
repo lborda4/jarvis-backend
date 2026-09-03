@@ -53,6 +53,18 @@ export interface ElectronicDocumentTax {
   amount: number;
 }
 
+/** Retención SUGERIDA por el vendedor, certificada en la factura DIAN
+ * original (NextPyme `with_holding_tax_totals`) — a nivel de documento, no
+ * por ítem. `dianTaxCode` es el código DIAN (05=ReteIVA, 06=ReteFuente/
+ * ReteRenta, 07=ReteICA), la clave estable para matchear contra el
+ * catálogo de SIIGO (ver resolveSuggestedRetentionsFromInvoice) — el
+ * `tax_name` que trae NextPyme es texto libre e inconsistente para un
+ * mismo código, no sirve para matchear. */
+export interface ElectronicDocumentWithholding {
+  dianTaxCode: string;
+  percentage: number;
+}
+
 export interface ElectronicDocumentPayload {
   supplier: ElectronicDocumentSupplier;
   invoice: ElectronicDocumentInvoice;
@@ -68,4 +80,9 @@ export interface ElectronicDocumentPayload {
    * — ver resolveSuggestedAccountForDocument/resolveSuggestedRetentionsForDocument.
    */
   aiSuggestion?: AiSuggestionSnapshot | null;
+  /** Retenciones sugeridas por el vendedor, certificadas en la factura DIAN
+   * original — ver ElectronicDocumentWithholding. Usado como ÚLTIMO
+   * fallback (después de historial confirmado, IA y preferencia guardada)
+   * cuando ninguno de esos resolvió nada: ver resolveSuggestedRetentionsForDocument. */
+  withholdings?: ElectronicDocumentWithholding[];
 }

@@ -34,6 +34,11 @@ export class ElectronicDocumentListItemDto {
   electronicDocumentType: string | null;
   siigoDocumentNumber: string | null;
   supplierExistsInSiigo: boolean | null;
+  /** true si quedó en PURCHASE_CREATED porque la factura ya existía en
+   * SIIGO al importar el Excel (match por provider_invoice), no porque se
+   * envió desde Jarvis — el frontend lo muestra como "Existente en SIIGO"
+   * en vez de "Lista" (ver mapDocumentToImportRowStatus). */
+  alreadyInSiigo: boolean;
   suggestedAccount: SuggestedAccount | null;
   /** Sugerencia de producto (solo cuando la clasificación con IA determinó
    * itemType='Product') — a diferencia de `suggestedAccount`, no tiene un

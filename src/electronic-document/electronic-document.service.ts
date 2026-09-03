@@ -7,6 +7,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { withPostgresAdvisoryLock } from '../common/helpers/postgres-advisory-lock.helper';
+import { mapWithConcurrency } from '../common/helpers/concurrency.helper';
 import { CompaniesRepository } from '../company/repositories/companies.repository';
 import {
   buildAccountNameByCode,
@@ -51,7 +52,7 @@ import { JarvisTercerosRepository } from '../integration/jarvis/repositories/jar
 import { IntegrationsRepository } from '../integration/repositories/integrations.repository';
 import { SupplierConfigurationsRepository } from '../integration/repositories/supplier-configurations.repository';
 import { getSiigoIntegration } from '../integration/siigo/helpers/siigo-context.helper';
-import { parseProviderInvoiceNumber } from '../integration/siigo/mappers/electronic-document-to-siigo-purchase.mapper';
+import { resolveProviderInvoiceParts } from '../integration/siigo/mappers/electronic-document-to-siigo-purchase.mapper';
 import {
   resolveSuggestedTaxForItem,
   SuggestedItemTax,
@@ -63,6 +64,15 @@ import { SiigoProductCatalogItemDto } from '../integration/siigo/dto/list-siigo-
 import { SiigoPaymentTypeCatalogItemDto } from '../integration/siigo/dto/list-siigo-payment-types.dto';
 import { resolveSiigoPaymentDocumentType } from '../integration/siigo/helpers/siigo-payment-document-type.helper';
 import { resolveCreditFallbackPaymentMethod } from '../integration/siigo/helpers/siigo-credit-payment-method.helper';
+import {
+  resolveSuggestedRetentionsFromInvoice,
+  isDocumentLevelSupportDocumentRetentionType,
+  isItemLevelSupportDocumentRetentionType,
+} from '../integration/siigo/helpers/siigo-support-document-retention.helper';
+import {
+  buildInvoiceSnapshotFromHistorialLines,
+  HistorialFacturaInvoiceSnapshot,
+} from '../integration/helpers/historial-factura-invoice-snapshot.helper';
 import { PlanSubscriptionService } from '../plan/plan-subscription.service';
 import { DianInvoiceResult } from '../dian/interfaces/dian-invoice-result.interface';
 import { ElectronicDocumentListQueryDto } from './dto/electronic-document-list-query.dto';
@@ -80,6 +90,7 @@ import { mapElectronicDocumentToListItem } from './mappers/electronic-document-l
 import { parseOptionalElectronicDocumentTypeFilter } from './helpers/electronic-document-type.helper';
 import { normalizeElectronicDocumentPageLimit } from './constants/electronic-document-pagination.constants';
 import { parseImportStatusFilters } from './helpers/import-status-filter.helper';
+import { resolveSendConfigurationFromPayload } from './helpers/electronic-document-send-configuration.helper';
 import { ElectronicDocumentsRepository } from './repositories/electronic-documents.repository';
 
 @Injectable()
@@ -347,6 +358,52 @@ export class ElectronicDocumentService {
     );
   }
 
+  /**
+   * Variante en lote de deleteLocalDocument — un solo SELECT + un solo
+   * DELETE para todo el lote, en vez de 2×N consultas (una por documento).
+   * Borrar 100 registros uno por uno desde el dashboard tardaba varios
+   * segundos por el overhead de 100 idas y vueltas HTTP+BD; este endpoint
+   * lo resuelve en una sola operación.
+   */
+  async deleteLocalDocuments(
+    documentIds: string[],
+    companyId: string,
+  ): Promise<{ deletedIds: string[]; skippedIds: string[] }> {
+    const uniqueIds = [...new Set(documentIds.map((id) => id?.trim()).filter(Boolean))];
+
+    if (uniqueIds.length === 0) {
+      return { deletedIds: [], skippedIds: [] };
+    }
+
+    const documents = await this.electronicDocumentsRepository.findByCompanyAndIds(
+      companyId,
+      uniqueIds,
+    );
+    const documentsById = new Map(documents.map((document) => [document.id, document]));
+
+    const deletableIds: string[] = [];
+    const skippedIds: string[] = [];
+
+    for (const id of uniqueIds) {
+      const document = documentsById.get(id);
+
+      if (!document || document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+        skippedIds.push(id);
+        continue;
+      }
+
+      deletableIds.push(id);
+    }
+
+    await this.electronicDocumentsRepository.deleteByIds(deletableIds);
+
+    this.logger.log(
+      `Documentos electrónicos eliminados de la BD en lote (${deletableIds.length} eliminado(s), ${skippedIds.length} omitido(s)).`,
+    );
+
+    return { deletedIds: deletableIds, skippedIds };
+  }
+
   async createFromParsedInvoice(
     parsedInvoice: DianInvoiceResult,
     electronicDocumentType: ElectronicDocumentType,
@@ -461,11 +518,17 @@ export class ElectronicDocumentService {
         company.id,
         ElectronicDocumentType.SUPPORT_DOCUMENT,
         async () => {
-          await this.planSubscriptionService.assertCanCreateDocuments({
+          // Solo se valida elegibilidad (plan activo, suscripción no
+          // suspendida, tipo de documento incluido) — el cupo NUMÉRICO del
+          // plan ya no limita cuántos documentos locales se crean acá.
+          // Importar el Excel nunca debe descontar nada del plan; eso solo
+          // ocurre al ENVIAR a SIIGO (ver assertCanCreateDocuments en
+          // SiigoSupportDocumentSendService).
+          await this.planSubscriptionService.resolveAllowedQuantity({
             companyId: company.id,
             provider,
             documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
-            quantity: groups.length,
+            requestedQuantity: groups.length,
           });
 
           const supplierNamesByNit = await this.resolveSupplierNamesByNit(
@@ -634,16 +697,21 @@ export class ElectronicDocumentService {
         company.id,
         ElectronicDocumentType.PURCHASE_INVOICE,
         async () => {
-          const { allowed } =
-            await this.planSubscriptionService.resolveAllowedQuantity({
-              companyId: company.id,
-              provider,
-              documentType: ElectronicDocumentType.PURCHASE_INVOICE,
-              requestedQuantity: newRows.length,
-            });
+          // Solo se valida elegibilidad (plan activo, suscripción no
+          // suspendida, tipo de documento incluido) — el cupo NUMÉRICO del
+          // plan ya no limita cuántos documentos locales se crean acá.
+          // Importar el Excel nunca debe descontar nada del plan; eso solo
+          // ocurre al ENVIAR a SIIGO (ver assertCanCreateDocuments en
+          // SiigoPurchaseSendService), que es cuando SIIGO ya respondió bien.
+          await this.planSubscriptionService.resolveAllowedQuantity({
+            companyId: company.id,
+            provider,
+            documentType: ElectronicDocumentType.PURCHASE_INVOICE,
+            requestedQuantity: newRows.length,
+          });
 
-          const rowsToCreate = newRows.slice(0, allowed);
-          const skipped = newRows.slice(allowed);
+          const rowsToCreate = newRows;
+          const skipped: typeof newRows = [];
 
           if (rowsToCreate.length === 0) {
             return {
@@ -677,7 +745,7 @@ export class ElectronicDocumentService {
             payload.supplier.commercialName = supplierName;
 
             const providerInvoiceMatch = alreadyInSiigoByProviderInvoice.get(
-              this.buildProviderInvoiceKey(payload.invoice.number),
+              this.buildProviderInvoiceKey(payload.invoice),
             );
 
             if (providerInvoiceMatch && payload.invoice.cufe) {
@@ -710,6 +778,14 @@ export class ElectronicDocumentService {
                 providerInvoiceMatch.siigoNumero != null
                   ? String(providerInvoiceMatch.siigoNumero)
                   : null;
+              // Marca que este PURCHASE_CREATED es porque la factura YA
+              // existía en SIIGO (no porque Jarvis la envió) — el frontend
+              // lo muestra como "Existente en SIIGO" en vez de "Lista" (ver
+              // mapDocumentToImportRowStatus). El resto de la lógica de
+              // negocio (no reenviar, cupo, poder eliminarla localmente)
+              // sigue tratando este documento igual que cualquier otro
+              // PURCHASE_CREATED a propósito.
+              document.alreadyInSiigo = true;
             }
 
             return document;
@@ -797,8 +873,11 @@ export class ElectronicDocumentService {
   /** "PREFIX::number" (prefix en mayúsculas) — misma normalización que
    * HistorialFacturasRepository.findByProviderInvoices, para poder cruzar
    * su resultado acá. */
-  private buildProviderInvoiceKey(invoiceNumber: string): string {
-    const { prefix, number } = parseProviderInvoiceNumber(invoiceNumber);
+  private buildProviderInvoiceKey(invoice: {
+    number: string;
+    prefix?: string;
+  }): string {
+    const { prefix, number } = resolveProviderInvoiceParts(invoice);
     return `${prefix.toUpperCase()}::${number}`;
   }
 
@@ -818,7 +897,7 @@ export class ElectronicDocumentService {
       companyId,
     );
     const keys = rows.map((row) =>
-      parseProviderInvoiceNumber(row.payload.invoice.number),
+      resolveProviderInvoiceParts(row.payload.invoice),
     );
 
     return this.historialFacturasRepository.findByProviderInvoices(
@@ -841,33 +920,6 @@ export class ElectronicDocumentService {
     }
 
     return IntegrationProvider.SIIGO;
-  }
-
-  /**
-   * Estimación rápida (fuera del advisory lock, no autoritativa) de cuántos
-   * documentos de Factura de compra caben en el cupo restante del plan —
-   * pensada para que el import masivo pueda abortar ANTES de gastar tiempo
-   * consultando NextPyme por cada fila cuando ya no hay cupo, en vez de
-   * enterarse recién al final. El chequeo real (bajo lock, sin condición de
-   * carrera con otro import concurrente) sigue viviendo en
-   * createFromPurchaseInvoiceRows.
-   */
-  async resolvePurchaseInvoiceQuota(
-    companyId: string,
-    requestedQuantity: number,
-  ): Promise<{
-    allowed: number;
-    documentLimit: number | null;
-    documentsUsed: number;
-  }> {
-    const provider = await this.resolveDocumentProvider(companyId);
-
-    return this.planSubscriptionService.resolveAllowedQuantity({
-      companyId,
-      provider,
-      documentType: ElectronicDocumentType.PURCHASE_INVOICE,
-      requestedQuantity,
-    });
   }
 
   private async resolveSupplierNamesByNit(
@@ -1203,7 +1255,17 @@ export class ElectronicDocumentService {
       }
     }
 
-    for (const document of documents) {
+    // mapWithConcurrency (no for...of secuencial): cada documento puede
+    // necesitar hasta 2 consultas a la BD (findLinesByFacturaId,
+    // resolvePaymentMethodByAccount) que antes se esperaban una por una —
+    // una página de 30 documentos disparaba hasta 60 round trips
+    // SECUENCIALES a la BD en este mismo request, lo que explicaba que
+    // aplicar un filtro se sintiera lento aunque cada consulta individual
+    // fuera rápida (bug real reportado: "las consultas se demoran mucho, es
+    // solo a la BD, no debería"). Cada documento escribe en su propia
+    // entrada de cada Map (por document.id), así que procesarlos en
+    // paralelo es seguro — no hay estado compartido entre documentos.
+    await mapWithConcurrency(documents, 8, async (document) => {
       const integrationId = integrationIdByCompanyId.get(document.companyId);
       const taxesCatalog = taxesCatalogByCompanyId.get(document.companyId);
 
@@ -1227,7 +1289,7 @@ export class ElectronicDocumentService {
           document.id,
           (document.payload?.items ?? []).map(() => null),
         );
-        continue;
+        return;
       }
 
       const accountNameByCode = accountNameByCodeByCompanyId.get(
@@ -1236,6 +1298,43 @@ export class ElectronicDocumentService {
       const productNameByCode = productNameByCodeByCompanyId.get(
         document.companyId,
       );
+
+      // Factura de compra ya detectada como creada en SIIGO al importar el
+      // Excel (match por provider_invoice, ver createFromPurchaseInvoiceRows)
+      // — nunca se envió desde Jarvis, así que no tiene
+      // `payload.siigoSendConfiguration` guardado y los resolvers de abajo
+      // devolverían todo en blanco (ver resolveSuggestedAccountForDocument y
+      // compañía: solo miran ese snapshot cuando el status es
+      // PURCHASE_CREATED). Se arma un snapshot equivalente a partir de lo que
+      // el sync de historial trajo REALMENTE de SIIGO para esa factura
+      // puntual, en vez de dejar cuenta/medio de pago/IVA/Retefuente vacíos.
+      let historialSnapshot: HistorialFacturaInvoiceSnapshot | null = null;
+
+      if (
+        document.status === ElectronicDocumentStatus.PURCHASE_CREATED &&
+        document.siigoPurchaseId &&
+        !resolveSendConfigurationFromPayload(document.payload)
+      ) {
+        const historialLines =
+          await this.historialFacturasRepository.findLinesByFacturaId(
+            document.companyId,
+            integrationId,
+            document.siigoPurchaseId,
+          );
+
+        if (historialLines.length > 0) {
+          const documentType = resolveSiigoPaymentDocumentType(
+            document.electronicDocumentType ?? undefined,
+          );
+
+          historialSnapshot = buildInvoiceSnapshotFromHistorialLines(
+            historialLines,
+            paymentTypesCatalogByKey.get(
+              `${document.companyId}|${documentType}`,
+            ) ?? [],
+          );
+        }
+      }
 
       const suggestedProduct = resolveSuggestedProductForDocument(document);
       products.set(
@@ -1250,12 +1349,14 @@ export class ElectronicDocumentService {
           : null,
       );
 
-      const suggestedAccount = resolveSuggestedAccountForDocument(
-        document,
-        configurationIndex,
-        itemMappingIndex,
-        integrationId,
-      );
+      const suggestedAccount =
+        historialSnapshot?.account ??
+        resolveSuggestedAccountForDocument(
+          document,
+          configurationIndex,
+          itemMappingIndex,
+          integrationId,
+        );
       accounts.set(
         document.id,
         suggestedAccount && accountNameByCode
@@ -1291,11 +1392,13 @@ export class ElectronicDocumentService {
             : itemAccount,
         ),
       );
-      const suggestedPaymentMethod = resolveSuggestedPaymentMethodForDocument(
-        document,
-        configurationIndex,
-        integrationId,
-      );
+      const suggestedPaymentMethod =
+        historialSnapshot?.paymentMethod ??
+        resolveSuggestedPaymentMethodForDocument(
+          document,
+          configurationIndex,
+          integrationId,
+        );
 
       if (suggestedPaymentMethod) {
         paymentMethods.set(document.id, suggestedPaymentMethod);
@@ -1333,13 +1436,35 @@ export class ElectronicDocumentService {
             ),
         );
       }
+      // Retenciones que el vendedor ya certificó en la factura DIAN original
+      // (NextPyme with_holding_tax_totals) — dato de ESTA factura puntual,
+      // usado solo como ÚLTIMO recurso cuando ni el historial confirmado ni
+      // una preferencia guardada resolvieron nada (nunca pisa una decisión
+      // ya tomada). Ver resolveSuggestedRetentionsFromInvoice.
+      const invoiceWithholdingMatches = taxesCatalog
+        ? resolveSuggestedRetentionsFromInvoice(
+            document.payload?.withholdings,
+            taxesCatalog,
+          )
+        : [];
+      const invoiceDocumentRetentions = invoiceWithholdingMatches.filter(
+        (tax) => isDocumentLevelSupportDocumentRetentionType(tax.type),
+      );
+      const invoiceRetefuente =
+        invoiceWithholdingMatches.find((tax) =>
+          isItemLevelSupportDocumentRetentionType(tax.type),
+        ) ?? null;
+
+      const suggestedDocumentRetentions = resolveSuggestedRetentionsForDocument(
+        document,
+        configurationIndex,
+        integrationId,
+      );
       retentions.set(
         document.id,
-        resolveSuggestedRetentionsForDocument(
-          document,
-          configurationIndex,
-          integrationId,
-        ),
+        suggestedDocumentRetentions.length > 0
+          ? suggestedDocumentRetentions
+          : invoiceDocumentRetentions,
       );
       costCenters.set(
         document.id,
@@ -1349,11 +1474,25 @@ export class ElectronicDocumentService {
           integrationId,
         ),
       );
-      const suggestedItemConfig = resolveSuggestedItemConfigForDocument(
-        document,
-        configurationIndex,
-        integrationId,
-      );
+      const suggestedItemConfig =
+        historialSnapshot?.itemConfig ??
+        resolveSuggestedItemConfigForDocument(
+          document,
+          configurationIndex,
+          integrationId,
+        ) ??
+        (invoiceRetefuente
+          ? {
+              itemType: null,
+              accountCode: null,
+              accountName: null,
+              productCode: null,
+              productName: null,
+              ivaTax: null,
+              retefuenteTax: invoiceRetefuente,
+              paymentMethod: null,
+            }
+          : null);
       const resolvedProductName =
         suggestedItemConfig?.productCode && productNameByCode
           ? (productNameByCode.get(suggestedItemConfig.productCode) ??
@@ -1365,6 +1504,7 @@ export class ElectronicDocumentService {
         suggestedItemConfig
           ? {
               ...suggestedItemConfig,
+              retefuenteTax: suggestedItemConfig.retefuenteTax ?? invoiceRetefuente,
               accountName:
                 suggestedItemConfig.accountCode && accountNameByCode
                   ? resolveAccountNameFromCatalog(
@@ -1377,7 +1517,7 @@ export class ElectronicDocumentService {
             }
           : suggestedItemConfig,
       );
-    }
+    });
 
     return {
       accounts,

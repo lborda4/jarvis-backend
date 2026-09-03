@@ -10,5 +10,9 @@ export class CreateSiigoSupplierResponseSupplierDto {
 
 export class CreateSiigoSupplierResponseDto {
   success: boolean;
+  /** true si se creó un tercero NUEVO en SIIGO en esta llamada — false si ya
+   * existía y solo se reutilizó (ver findSupplierInSiigoWithRetries en
+   * SiigoSupplierCreationService). */
+  created: boolean;
   supplier: CreateSiigoSupplierResponseSupplierDto;
 }

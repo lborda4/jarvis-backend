@@ -72,6 +72,30 @@ export class ElectronicDocumentsRepository {
     await this.repository.delete({ id });
   }
 
+  /** Variante en lote de findById+deleteById — evita 2×N round trips a la
+   * BD (uno por documento) cuando se borran muchos registros de una vez
+   * desde el dashboard; ver deleteLocalDocuments en el service. */
+  findByCompanyAndIds(
+    companyId: string,
+    ids: string[],
+  ): Promise<ElectronicDocument[]> {
+    if (ids.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.repository.find({
+      where: { companyId, id: In(ids) },
+    });
+  }
+
+  async deleteByIds(ids: string[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+
+    await this.repository.delete({ id: In(ids) });
+  }
+
   async findAll(
     filters: FindElectronicDocumentsFilters,
   ): Promise<{ items: ElectronicDocument[]; total: number }> {

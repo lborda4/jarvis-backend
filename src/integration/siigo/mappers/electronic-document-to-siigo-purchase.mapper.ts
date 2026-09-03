@@ -129,3 +129,44 @@ export function parseProviderInvoiceNumber(numeroFactura: string): {
     number: (digitsOnly || normalized).slice(0, 11),
   };
 }
+
+/**
+ * Prefix + consecutivo para DETECTAR si una factura ya existe en SIIGO
+ * (comparar contra historial_facturas.provider_invoice_*) — a diferencia de
+ * parseProviderInvoiceNumber (que arma lo que se ENVÍA a la API de SIIGO al
+ * crear, con los límites de longitud reales de esa API), acá NO hay que
+ * adivinar dónde termina el prefijo: `invoice.prefix` ya viene tal cual del
+ * Excel/NextPyme (columna propia, no derivada), así que se usa directo y el
+ * consecutivo es simplemente lo que sobra de `invoice.number` (que es
+ * `prefix + consecutivo` concatenados, ver mapDianSalesInvoiceRowToPayload).
+ *
+ * Antes esto reparseaba `invoice.number` con la regex de
+ * parseProviderInvoiceNumber, que asume que el prefijo es SOLO letras — un
+ * prefijo alfanumérico real (ej. "G9C4", "K330", "66DJ", todos de 4
+ * caracteres) no matchea esa regex, cae al fallback `prefix: 'DIAN'` y
+ * corrompe el consecutivo (le come dígitos del prefijo) — bug real
+ * reportado: nunca detectaba que esas facturas ya estaban en SIIGO.
+ */
+export function resolveProviderInvoiceParts(invoice: {
+  number: string;
+  prefix?: string;
+}): {
+  prefix: string;
+  number: string;
+} {
+  const trimmedPrefix = invoice.prefix?.trim();
+
+  if (!trimmedPrefix) {
+    return parseProviderInvoiceNumber(invoice.number);
+  }
+
+  const fullNumber = invoice.number?.trim() ?? '';
+  const consecutive = fullNumber.startsWith(trimmedPrefix)
+    ? fullNumber.slice(trimmedPrefix.length)
+    : fullNumber;
+
+  return {
+    prefix: trimmedPrefix,
+    number: consecutive || fullNumber,
+  };
+}

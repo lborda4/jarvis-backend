@@ -46,6 +46,88 @@ function buildService(document: {
   return { service, electronicDocumentsRepository };
 }
 
+function buildDeleteBatchService(documents: Array<{ id: string; status: ElectronicDocumentStatus }>) {
+  const electronicDocumentsRepository = {
+    findByCompanyAndIds: jest.fn().mockResolvedValue(documents),
+    deleteByIds: jest.fn().mockResolvedValue(undefined),
+  };
+  const dataSource = {
+    createQueryRunner: jest.fn().mockReturnValue(buildQueryRunnerStub()),
+  };
+
+  const service = new ElectronicDocumentService(
+    dataSource as never,
+    electronicDocumentsRepository as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  return { service, electronicDocumentsRepository };
+}
+
+describe('ElectronicDocumentService.deleteLocalDocuments', () => {
+  it('borra en un solo lote los documentos que no están en estado lista y omite los ya creados en SIIGO', async () => {
+    const { service, electronicDocumentsRepository } = buildDeleteBatchService([
+      { id: 'doc-1', status: ElectronicDocumentStatus.PENDING },
+      { id: 'doc-2', status: ElectronicDocumentStatus.PURCHASE_CREATED },
+      { id: 'doc-3', status: ElectronicDocumentStatus.ACCOUNT_REQUIRED },
+    ]);
+
+    const result = await service.deleteLocalDocuments(
+      ['doc-1', 'doc-2', 'doc-3'],
+      'company-1',
+    );
+
+    expect(electronicDocumentsRepository.findByCompanyAndIds).toHaveBeenCalledWith(
+      'company-1',
+      ['doc-1', 'doc-2', 'doc-3'],
+    );
+    expect(electronicDocumentsRepository.deleteByIds).toHaveBeenCalledTimes(1);
+    expect(electronicDocumentsRepository.deleteByIds).toHaveBeenCalledWith([
+      'doc-1',
+      'doc-3',
+    ]);
+    expect(result).toEqual({
+      deletedIds: ['doc-1', 'doc-3'],
+      skippedIds: ['doc-2'],
+    });
+  });
+
+  it('reporta como omitido un id que ya no existe (borrado por otra pestaña, por ejemplo) sin lanzar error', async () => {
+    const { service, electronicDocumentsRepository } = buildDeleteBatchService([
+      { id: 'doc-1', status: ElectronicDocumentStatus.PENDING },
+    ]);
+
+    const result = await service.deleteLocalDocuments(
+      ['doc-1', 'doc-missing'],
+      'company-1',
+    );
+
+    expect(result).toEqual({
+      deletedIds: ['doc-1'],
+      skippedIds: ['doc-missing'],
+    });
+  });
+
+  it('no llama al repositorio si no llegan ids', async () => {
+    const { service, electronicDocumentsRepository } = buildDeleteBatchService([]);
+
+    const result = await service.deleteLocalDocuments([], 'company-1');
+
+    expect(result).toEqual({ deletedIds: [], skippedIds: [] });
+    expect(electronicDocumentsRepository.findByCompanyAndIds).not.toHaveBeenCalled();
+  });
+});
+
 describe('ElectronicDocumentService.updateStatus', () => {
   it('ignora un intento de marcar error en un documento ya creado en SIIGO (no pisa el éxito con un fallo tardío)', async () => {
     const { service, electronicDocumentsRepository } = buildService({
