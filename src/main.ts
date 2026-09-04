@@ -14,13 +14,14 @@ async function bootstrap() {
   const port = configService.get('app.port', { infer: true });
 
   app.enableCors({
-    origin: [
-      'http://localhost:5173',
-      'https://pos.siigo.com',
-    ],
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'rquid'],
-  });
+  origin: [
+    'http://localhost:5173',
+    'https://pos.siigo.com',
+    'https://www.jarviscol.com',
+  ],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'rquid'],
+});
 
   app.useGlobalFilters(new HttpExceptionFilter());
 
