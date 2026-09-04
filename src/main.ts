@@ -30,6 +30,7 @@ async function bootstrap() {
       [
         'http://localhost:5173',
         'https://pos.siigo.com',
+        'https://www.jarviscol.com',
       ],
     ),
   );
