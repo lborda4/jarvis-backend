@@ -17,6 +17,7 @@ import { SiigoModule } from './integration/siigo/siigo.module';
 import { JarvisModule } from './integration/jarvis/jarvis.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { AdminModule } from './admin/admin.module';
+import { BoldModule } from './bold/bold.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { AdminModule } from './admin/admin.module';
     SiigoModule,
     JarvisModule,
     AdminModule,
+    BoldModule,
   ],
   controllers: [AppController],
   providers: [AppService],

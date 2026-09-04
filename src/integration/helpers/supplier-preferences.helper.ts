@@ -126,7 +126,15 @@ export function resolveSuggestedAccountForDocument(
       };
     }
 
-    return null;
+    // Sin configuración de envío confirmada (factura ya creada en SIIGO por
+    // otra vía — ej. detectada por provider_invoice al importar, nunca
+    // enviada desde acá — y sin líneas propias en historial_facturas
+    // todavía, ver historialSnapshot en electronic-document.service.ts):
+    // no hay NADA confirmado que proteger, así que en vez de dejarla vacía
+    // cae a las mismas reglas de un documento normal (IA, regla exacta por
+    // ítem, historial del proveedor) — nunca debería faltar una cuenta sin
+    // que sea porque genuinamente no hay ninguna señal confiable. Sigue
+    // sin entrar acá arriba: no hay `return` — cae al resto de la función.
   }
 
   if (document.payload.aiSuggestion?.account) {
@@ -275,10 +283,25 @@ export function resolveSuggestedItemConfigForDocument(
   configurationIndex: Map<string, SupplierConfiguration>,
   integrationId: string,
 ): SuggestedPurchaseItemConfig | null {
-  if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+  if (
+    document.status === ElectronicDocumentStatus.PURCHASE_CREATED &&
+    resolveSendConfigurationFromPayload(document.payload)
+  ) {
+    // Ya tiene una configuración CONFIRMADA de cuando se envió desde acá
+    // (payload.siigoSendConfiguration) — no corresponde sugerir nada
+    // genérico encima de un dato ya confirmado.
     return null;
   }
 
+  // Antes CUALQUIER documento PURCHASE_CREATED devolvía null acá sin
+  // excepción — para una factura ya creada en SIIGO por otra vía (detectada
+  // por provider_invoice al importar, nunca enviada desde acá) que todavía
+  // no tiene líneas propias en historial_facturas (ver historialSnapshot en
+  // electronic-document.service.ts, que tiene prioridad sobre esto cuando
+  // sí las tiene), eso dejaba la cuenta/IVA/Retefuente sin ninguna
+  // sugerencia aunque el historial GENERAL del proveedor sí tuviera una
+  // señal confiable — bug real reportado ("no me está trayendo la cuenta
+  // contable cuando ya está creada en SIIGO").
   const configuration = resolveSupplierConfigurationForDocument(
     document,
     configurationIndex,

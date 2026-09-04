@@ -110,6 +110,39 @@ export class SiigoDocumentPreparationService {
       companyId,
     );
 
+    // Chequeo de "¿ya existe en SIIGO?" ANTES de validar proveedor/cuenta —
+    // el chequeo que se hace al importar (createFromPurchaseInvoiceRows) es
+    // solo una foto del momento de importar; si el sync de historial de
+    // compras trae esta factura recién DESPUÉS (import y sync no están
+    // sincronizados entre sí), sin este segundo chequeo el documento
+    // seguiría de largo validando proveedor y cuenta, arriesgándose a
+    // terminar creándola duplicada en SIIGO si el usuario llega a "Enviar".
+    if (document.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
+      const alreadyInSiigo =
+        await this.electronicDocumentService.resolveAlreadyInSiigoMatch(
+          document,
+          companyId,
+        );
+
+      if (alreadyInSiigo) {
+        document = await this.electronicDocumentService.markPurchaseCreated(
+          trimmedId,
+          alreadyInSiigo.facturaId,
+          companyId,
+          alreadyInSiigo.siigoNumero,
+        );
+
+        this.logger.log(
+          `[documentId=${trimmedId}] Factura ya existía en SIIGO (detectada por provider_invoice) — marcada como lista sin validar proveedor ni cuenta.`,
+        );
+
+        return {
+          documentId: trimmedId,
+          nextStep: 'READY',
+        };
+      }
+    }
+
     if (document.supplierExistsInSiigo !== true) {
       const validation = await this.siigoValidationService.validateImport(
         {

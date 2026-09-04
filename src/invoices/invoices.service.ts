@@ -263,6 +263,25 @@ export class InvoicesService {
       }),
     );
 
+    // Sin filas para procesar (Excel vacío o sin ninguna fila "Factura
+    // electrónica"/"Recibido"): se marca COMPLETED acá mismo, en la misma
+    // request, en vez de dejarlo en PENDING a la espera de que el worker en
+    // segundo plano lo descubra en su próximo tick. Antes esto quedaba
+    // PENDING con 0 filas — el frontend mostraba "0 de 0" mientras esperaba
+    // un evento de finalización que dependía de una carrera entre el
+    // primer tick del worker y que el socket ya estuviera suscrito a este
+    // job, en vez de resolver de inmediato como corresponde cuando
+    // literalmente no hay nada que hacer.
+    if (rows.length === 0) {
+      await this.purchaseInvoiceImportJobsRepository.patch(job.id, {
+        status: PurchaseInvoiceImportJobStatus.COMPLETED,
+        processedRows: 0,
+        completedAt: new Date(),
+      });
+
+      return { jobId: job.id, totalRows: 0 };
+    }
+
     // VALIDACIÓN PREVIA: si hay filas inválidas se aborta acá, antes de
     // insertar una sola PurchaseInvoiceImportJobRow — el jobId ya existe así
     // que el frontend puede consultar el motivo por GET .../status igual

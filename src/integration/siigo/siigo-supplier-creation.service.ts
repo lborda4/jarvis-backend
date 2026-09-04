@@ -314,11 +314,24 @@ export class SiigoSupplierCreationService {
       createdNow && source === 'automatic',
     );
 
-    await this.electronicDocumentService.updateStatus(
+    // Nunca pisar un documento que YA quedó PURCHASE_CREATED (enviado de
+    // verdad, o ya existía en SIIGO al importar) — sea cual sea el status
+    // que traía cuando arrancó esta llamada, se revisa el ACTUAL antes de
+    // escribir. Bug real reportado: una factura ya creada en SIIGO (con
+    // consecutivo real) terminaba mostrando "Pendiente" con "Enviar"
+    // habilitado — riesgo de duplicarla en SIIGO si se reenviaba.
+    const currentDocument = await this.electronicDocumentService.requireById(
       documentId,
-      ElectronicDocumentStatus.ACCOUNT_REQUIRED,
       companyId,
     );
+
+    if (currentDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
+      await this.electronicDocumentService.updateStatus(
+        documentId,
+        ElectronicDocumentStatus.ACCOUNT_REQUIRED,
+        companyId,
+      );
+    }
     await this.electronicDocumentService.updateSupplierExistsInSiigo(
       documentId,
       true,

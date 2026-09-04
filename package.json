@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "nest build",
+    "build:bold-extension": "tsc -p src/bold/extension/tsconfig.json",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "cross-env NODE_ENV=local nest start",
     "start:dev": "NODE_ENV=local nest start --watch",

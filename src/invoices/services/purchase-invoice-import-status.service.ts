@@ -114,9 +114,17 @@ export class PurchaseInvoiceImportStatusService {
       totalRows: job.totalRows,
       successCount,
       errorCount,
-      progressPercent: job.totalRows
-        ? Math.round(((successCount + errorCount) / job.totalRows) * 100)
-        : null,
+      // job.totalRows === 0 (Excel sin filas para procesar) es "ya
+      // terminado", no "sin dato" — antes `job.totalRows ? ... : null`
+      // trataba 0 como falsy y devolvía null también en ese caso, dejando
+      // la barra de progreso sin completar para un job que en realidad ya
+      // estaba COMPLETED.
+      progressPercent:
+        job.totalRows === 0
+          ? 100
+          : job.totalRows
+            ? Math.round(((successCount + errorCount) / job.totalRows) * 100)
+            : null,
       itemsTotal: job.itemsTotal,
       documentsCreated: job.documentsCreated,
       documentIds: job.documentIds,

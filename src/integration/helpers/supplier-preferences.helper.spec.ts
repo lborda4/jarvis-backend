@@ -138,7 +138,23 @@ describe('resolveSuggestedItemConfigForDocument', () => {
     ).toBeNull();
   });
 
-  it('no autocompleta para documentos ya enviados (PURCHASE_CREATED)', () => {
+  it('un documento PURCHASE_CREATED sin configuración de envío confirmada (ej. ya existía en SIIGO, detectado por provider_invoice al importar) sí cae al historial del proveedor — bug real reportado: "no me está trayendo la cuenta contable cuando ya está creada en SIIGO"', () => {
+    const configurationIndex = buildConfigurationIndex({
+      campoVariabilidad: {
+        cuentaPuc: { variable: false, valor: '5135950001' },
+      },
+    });
+
+    const suggestion = resolveSuggestedItemConfigForDocument(
+      buildDocument({ status: ElectronicDocumentStatus.PURCHASE_CREATED }),
+      configurationIndex,
+      INTEGRATION_ID,
+    );
+
+    expect(suggestion?.accountCode).toBe('5135950001');
+  });
+
+  it('un documento PURCHASE_CREATED CON configuración de envío confirmada (sí se envió desde acá) no sugiere nada genérico encima', () => {
     const configurationIndex = buildConfigurationIndex({
       campoVariabilidad: {
         cuentaPuc: { variable: false, valor: '5135950001' },
@@ -147,7 +163,21 @@ describe('resolveSuggestedItemConfigForDocument', () => {
 
     expect(
       resolveSuggestedItemConfigForDocument(
-        buildDocument({ status: ElectronicDocumentStatus.PURCHASE_CREATED }),
+        buildDocument({
+          status: ElectronicDocumentStatus.PURCHASE_CREATED,
+          payload: {
+            supplier: {
+              documentNumber: SUPPLIER_NIT,
+              documentType: 'NIT',
+              name: 'Proveedor de prueba',
+            },
+            items: [],
+            siigoSendConfiguration: {
+              account: { code: '5199990001', name: 'Cuenta confirmada' },
+              retentions: [],
+            },
+          },
+        }),
         configurationIndex,
         INTEGRATION_ID,
       ),
@@ -275,6 +305,56 @@ function buildItemMappingIndex(
 
   return index;
 }
+
+describe('resolveSuggestedAccountForDocument — PURCHASE_CREATED', () => {
+  it('un documento PURCHASE_CREATED sin configuración de envío confirmada cae a la sugerencia de IA en vez de quedar vacío', () => {
+    const document = buildDocument({
+      status: ElectronicDocumentStatus.PURCHASE_CREATED,
+      payload: {
+        supplier: {
+          documentNumber: SUPPLIER_NIT,
+          documentType: 'NIT',
+          name: 'Proveedor de prueba',
+        },
+        items: [],
+        aiSuggestion: {
+          account: { code: '51356001', name: 'Servicio internet' },
+          retentions: [],
+        },
+      },
+    });
+
+    expect(
+      resolveSuggestedAccountForDocument(document, new Map(), new Map(), INTEGRATION_ID),
+    ).toEqual({ code: '51356001', name: 'Servicio internet', uses: 1 });
+  });
+
+  it('un documento PURCHASE_CREATED con configuración de envío confirmada usa esa cuenta, no la de IA', () => {
+    const document = buildDocument({
+      status: ElectronicDocumentStatus.PURCHASE_CREATED,
+      payload: {
+        supplier: {
+          documentNumber: SUPPLIER_NIT,
+          documentType: 'NIT',
+          name: 'Proveedor de prueba',
+        },
+        items: [],
+        siigoSendConfiguration: {
+          account: { code: '5199990001', name: 'Cuenta confirmada' },
+          retentions: [],
+        },
+        aiSuggestion: {
+          account: { code: '51356001', name: 'Servicio internet' },
+          retentions: [],
+        },
+      },
+    });
+
+    expect(
+      resolveSuggestedAccountForDocument(document, new Map(), new Map(), INTEGRATION_ID),
+    ).toEqual({ code: '5199990001', name: 'Cuenta confirmada', uses: 1 });
+  });
+});
 
 describe('resolveSuggestedAccountsForDocumentItems / resolveSuggestedAccountForDocument', () => {
   // Caso real: un proveedor de telecomunicaciones factura tres conceptos,

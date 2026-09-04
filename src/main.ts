@@ -8,14 +8,16 @@ import { SocketIoAdapter } from './realtime/socket-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
   const configService = app.get(ConfigService<AppConfiguration, true>);
+
   const port = configService.get('app.port', { infer: true });
 
-  const corsOrigins = configService.get('app.corsOrigins', { infer: true });
-  const defaultCorsOrigins = ['http://localhost:5173'];
-
   app.enableCors({
-    origin: corsOrigins.length > 0 ? corsOrigins : defaultCorsOrigins,
+    origin: [
+      'http://localhost:5173',
+      'https://pos.siigo.com',
+    ],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'rquid'],
   });
@@ -25,18 +27,29 @@ async function bootstrap() {
   app.useWebSocketAdapter(
     new SocketIoAdapter(
       app,
-      corsOrigins.length > 0 ? corsOrigins : defaultCorsOrigins,
+      [
+        'http://localhost:5173',
+        'https://pos.siigo.com',
+      ],
     ),
   );
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Backend API')
-    .setDescription('API del backend de documentos electrónicos e integración Siigo')
+    .setDescription(
+      'API del backend de documentos electrónicos e integración Siigo',
+    )
     .setVersion('1.0')
     .build();
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+
+  const swaggerDocument = SwaggerModule.createDocument(
+    app,
+    swaggerConfig,
+  );
+
   SwaggerModule.setup('docs', app, swaggerDocument);
 
   await app.listen(port);
 }
+
 bootstrap();

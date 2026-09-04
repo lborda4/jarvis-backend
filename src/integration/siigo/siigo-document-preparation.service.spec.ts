@@ -126,3 +126,105 @@ describe('SiigoDocumentPreparationService.prepareDocuments', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('SiigoDocumentPreparationService.prepareSupplierAndAccounts', () => {
+  function buildDocumentStub(status: ElectronicDocumentStatus) {
+    return {
+      id: 'doc-1',
+      companyId: 'company-1',
+      status,
+      supplierExistsInSiigo: null,
+      payload: { supplier: {}, invoice: { number: 'FE123', prefix: 'FE' } },
+    } as any;
+  }
+
+  it('si la factura ya existe en SIIGO (detectada por provider_invoice), la marca lista sin validar proveedor ni cuenta — el sync pudo traerla DESPUÉS de importarla', async () => {
+    const electronicDocumentService = {
+      requireById: jest.fn().mockResolvedValue(buildDocumentStub(ElectronicDocumentStatus.PENDING)),
+      resolveAlreadyInSiigoMatch: jest.fn().mockResolvedValue({
+        facturaId: 'siigo-purchase-1',
+        siigoNumero: 42,
+      }),
+      markPurchaseCreated: jest.fn().mockResolvedValue(
+        buildDocumentStub(ElectronicDocumentStatus.PURCHASE_CREATED),
+      ),
+    };
+    const siigoValidationService = { validateImport: jest.fn() };
+    const siigoAccountMappingService = { validateAccountMapping: jest.fn() };
+    const service = new SiigoDocumentPreparationService(
+      electronicDocumentService as any,
+      siigoValidationService as any,
+      siigoAccountMappingService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.prepareSupplierAndAccounts('doc-1', 'company-1');
+
+    expect(result).toEqual({ documentId: 'doc-1', nextStep: 'READY' });
+    expect(electronicDocumentService.markPurchaseCreated).toHaveBeenCalledWith(
+      'doc-1',
+      'siigo-purchase-1',
+      'company-1',
+      42,
+    );
+    expect(siigoValidationService.validateImport).not.toHaveBeenCalled();
+    expect(siigoAccountMappingService.validateAccountMapping).not.toHaveBeenCalled();
+  });
+
+  it('si no hay match por provider_invoice, sigue el flujo normal de validar proveedor', async () => {
+    const electronicDocumentService = {
+      requireById: jest.fn().mockResolvedValue(buildDocumentStub(ElectronicDocumentStatus.PENDING)),
+      resolveAlreadyInSiigoMatch: jest.fn().mockResolvedValue(null),
+      updateStatus: jest.fn(),
+      updateSupplierExistsInSiigo: jest.fn(),
+    };
+    const siigoValidationService = {
+      validateImport: jest.fn().mockResolvedValue({ status: 'SUPPLIER_FOUND' }),
+    };
+    const siigoAccountMappingService = {
+      validateAccountMapping: jest.fn().mockResolvedValue({ status: 'READY' }),
+    };
+    const service = new SiigoDocumentPreparationService(
+      electronicDocumentService as any,
+      siigoValidationService as any,
+      siigoAccountMappingService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.prepareSupplierAndAccounts('doc-1', 'company-1');
+
+    expect(electronicDocumentService.resolveAlreadyInSiigoMatch).toHaveBeenCalledTimes(1);
+    expect(siigoValidationService.validateImport).toHaveBeenCalledTimes(1);
+    expect(result.nextStep).toBe('READY');
+  });
+
+  it('un documento ya PURCHASE_CREATED no vuelve a chequear provider_invoice (ya se sabe que existe)', async () => {
+    const electronicDocumentService = {
+      requireById: jest.fn().mockResolvedValue({
+        ...buildDocumentStub(ElectronicDocumentStatus.PURCHASE_CREATED),
+        supplierExistsInSiigo: true,
+      }),
+      resolveAlreadyInSiigoMatch: jest.fn(),
+    };
+    const service = new SiigoDocumentPreparationService(
+      electronicDocumentService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.prepareSupplierAndAccounts('doc-1', 'company-1');
+
+    expect(electronicDocumentService.resolveAlreadyInSiigoMatch).not.toHaveBeenCalled();
+    expect(result.nextStep).toBe('READY');
+  });
+});

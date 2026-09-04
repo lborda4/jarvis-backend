@@ -128,6 +128,98 @@ describe('ElectronicDocumentService.deleteLocalDocuments', () => {
   });
 });
 
+function buildAlreadyInSiigoService() {
+  const integrationsRepository = {
+    findByCompanyAndProvider: jest.fn((_companyId: string, provider: string) =>
+      Promise.resolve(provider === 'SIIGO' ? { id: 'integration-1' } : null),
+    ),
+  };
+  const historialFacturasRepository = {
+    findByProviderInvoices: jest.fn().mockResolvedValue(
+      new Map([['FE::123', { facturaId: 'siigo-purchase-1', siigoNumero: 42 }]]),
+    ),
+  };
+  const dataSource = {
+    createQueryRunner: jest.fn().mockReturnValue(buildQueryRunnerStub()),
+  };
+
+  const service = new ElectronicDocumentService(
+    dataSource as never,
+    {} as never,
+    {} as never,
+    integrationsRepository as never,
+    {} as never,
+    {} as never,
+    historialFacturasRepository as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  return { service, integrationsRepository, historialFacturasRepository };
+}
+
+describe('ElectronicDocumentService.resolveAlreadyInSiigoMatch', () => {
+  it('devuelve el match cuando el provider_invoice del documento ya está en historial_facturas', async () => {
+    const { service, historialFacturasRepository } = buildAlreadyInSiigoService();
+
+    const match = await service.resolveAlreadyInSiigoMatch(
+      {
+        companyId: 'company-1',
+        payload: {
+          invoice: { number: 'FE123', prefix: 'FE' },
+        } as never,
+      },
+      'company-1',
+    );
+
+    expect(match).toEqual({ facturaId: 'siigo-purchase-1', siigoNumero: 42 });
+    expect(historialFacturasRepository.findByProviderInvoices).toHaveBeenCalledWith(
+      'company-1',
+      'integration-1',
+      [{ prefix: 'FE', number: '123' }],
+    );
+  });
+
+  it('devuelve null cuando no hay match', async () => {
+    const { service, historialFacturasRepository } = buildAlreadyInSiigoService();
+    historialFacturasRepository.findByProviderInvoices.mockResolvedValue(new Map());
+
+    const match = await service.resolveAlreadyInSiigoMatch(
+      {
+        companyId: 'company-1',
+        payload: { invoice: { number: 'DIAN::999' } } as never,
+      },
+      'company-1',
+    );
+
+    expect(match).toBeNull();
+  });
+
+  it('devuelve null sin consultar historial_facturas cuando la empresa usa Jarvis (no SIIGO)', async () => {
+    const { service, integrationsRepository, historialFacturasRepository } =
+      buildAlreadyInSiigoService();
+    integrationsRepository.findByCompanyAndProvider.mockImplementation(
+      (_companyId: string, provider: string) =>
+        Promise.resolve(provider === 'JARVIS' ? { id: 'jarvis-1', active: true } : null),
+    );
+
+    const match = await service.resolveAlreadyInSiigoMatch(
+      {
+        companyId: 'company-1',
+        payload: { invoice: { number: 'FE123', prefix: 'FE' } } as never,
+      },
+      'company-1',
+    );
+
+    expect(match).toBeNull();
+    expect(historialFacturasRepository.findByProviderInvoices).not.toHaveBeenCalled();
+  });
+});
+
 describe('ElectronicDocumentService.updateStatus', () => {
   it('ignora un intento de marcar error en un documento ya creado en SIIGO (no pisa el éxito con un fallo tardío)', async () => {
     const { service, electronicDocumentsRepository } = buildService({

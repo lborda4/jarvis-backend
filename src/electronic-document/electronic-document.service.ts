@@ -764,7 +764,22 @@ export class ElectronicDocumentService {
                 : terceroKnown
                   ? ElectronicDocumentStatus.ACCOUNT_MAPPED
                   : ElectronicDocumentStatus.PENDING,
-              supplierExistsInSiigo: terceroKnown ? true : null,
+              // providerInvoiceMatch: la factura ya existe en SIIGO, así que
+              // el proveedor TAMBIÉN existe ahí (es imposible que SIIGO
+              // tenga una compra sin tercero) — antes esto quedaba en null
+              // (terceroKnown solo aplica a JARVIS), lo que hacía que
+              // SiigoDocumentPreparationService.prepareSupplierAndAccounts
+              // tratara el documento como "proveedor sin confirmar" si algo
+              // lo volvía a preparar más adelante, y de ahí terminaba
+              // pisando el status PURCHASE_CREATED con ACCOUNT_REQUIRED (bug
+              // real reportado: factura ya en SIIGO con consecutivo, pero
+              // mostrando "Pendiente" con "Enviar" habilitado — riesgo real
+              // de duplicarla en SIIGO si se reenviaba).
+              supplierExistsInSiigo: providerInvoiceMatch
+                ? true
+                : terceroKnown
+                  ? true
+                  : null,
               payload,
             });
 
@@ -905,6 +920,37 @@ export class ElectronicDocumentService {
       integration.id,
       keys,
     );
+  }
+
+  /**
+   * Variante de un solo documento de resolveAlreadyInSiigoByProviderInvoice
+   * — usada por SiigoDocumentPreparationService.prepareSupplierAndAccounts
+   * para volver a chequear, cada vez que se prepara un documento (no solo
+   * al importar), si su provider_invoice ya apareció en SIIGO. El chequeo
+   * de import (createFromPurchaseInvoiceRows) es solo una FOTO del momento
+   * de importar — si el sync de historial de compras trae esa factura
+   * DESPUÉS, sin este segundo chequeo el documento seguiría su camino
+   * normal (validar proveedor, mapear cuenta, y eventualmente intentar
+   * crearla en SIIGO) arriesgándose a duplicarla.
+   */
+  async resolveAlreadyInSiigoMatch(
+    document: { companyId: string; payload: ElectronicDocumentPayload },
+    companyId: string,
+  ): Promise<HistorialFacturaProviderInvoiceMatch | null> {
+    const provider = await this.resolveDocumentProvider(companyId);
+
+    if (provider !== IntegrationProvider.SIIGO) {
+      // El historial de compras solo se sincroniza para SIIGO — Jarvis no
+      // tiene este concepto de "factura ya existente" que detectar.
+      return null;
+    }
+
+    const matches = await this.resolveAlreadyInSiigoByProviderInvoice(
+      companyId,
+      [document],
+    );
+
+    return matches.get(this.buildProviderInvoiceKey(document.payload.invoice)) ?? null;
   }
 
   async resolveDocumentProvider(
