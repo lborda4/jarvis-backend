@@ -34,7 +34,7 @@ const HISTORICAL_EXAMPLES_LIMIT = 5;
 // Respuesta angosta (itemType + accountCode nada más): alcanza con pocos
 // tokens de salida — probado en vivo con openai/gpt-4o-mini en ~15-20 tokens
 // reales de respuesta.
-const ITEM_CLASSIFICATION_MAX_TOKENS = 40;
+const ITEM_CLASSIFICATION_MAX_TOKENS = 500;
 // Empresas con catálogo de productos grande (ej. una textilera con miles de
 // referencias de tela) hacen que mandar el catálogo COMPLETO en cada
 // clasificación explote en tokens — caso real reportado: 3139 productos ≈

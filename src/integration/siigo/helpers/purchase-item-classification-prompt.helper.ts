@@ -45,7 +45,9 @@ export interface ParsedPurchaseItemClassification {
 // ofrece "Producto" como opción: así la IA razona directo en términos de
 // cuenta contable desde el principio, en vez de necesitar reinterpretar una
 // respuesta ya descartada.
-const SYSTEM_PROMPT_WITH_PRODUCTS = `Clasificas un ítem de una factura de compra colombiana para SIIGO. En SIIGO un ítem se registra como "Cuenta" (gasto/costo, va a una cuenta PUC) o "Producto" (inventariable, va a un código del catálogo de productos). Decide cuál es, y según cuál sea, elige el código correspondiente del catálogo dado.
+const SYSTEM_PROMPT_WITH_PRODUCTS = `Clasificas UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems listados). En SIIGO se registra como "Cuenta" (gasto/costo, va a una cuenta PUC) o "Producto" (inventariable, va a un código del catálogo de productos). Decide cuál es, y según cuál sea, elige el código correspondiente del catálogo dado.
+
+Tu respuesta es UN SOLO objeto para la factura completa, nunca uno por ítem — no existe un campo para eso. Si hay varios ítems, elegí la cuenta/producto que mejor represente el conjunto (normalmente comparten el mismo concepto de gasto); no dejes de responder ni expliques la duda, solo elegí la mejor opción única.
 
 Reglas generales: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno.
 
@@ -57,7 +59,9 @@ Si es Cuenta, productCode siempre null; si es Producto, accountCode siempre null
 
 Responde SOLO este JSON, sin texto extra: {"itemType":"Account"|"Product"|null,"accountCode":string|null,"productCode":string|null}`;
 
-const SYSTEM_PROMPT_ACCOUNTS_ONLY = `Clasificas un ítem de una factura de compra colombiana para SIIGO, eligiendo la cuenta PUC (gasto/costo) que le corresponde. Esta empresa NO tiene catálogo de productos en SIIGO, así que itemType es SIEMPRE "Account" — nunca "Product", aunque el ítem sea un bien físico (ej. alimentos, bebidas, insumos): sin catálogo de productos, siempre se contabiliza como cuenta de gasto o costo.
+const SYSTEM_PROMPT_ACCOUNTS_ONLY = `Clasificas UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems listados), eligiendo la cuenta PUC (gasto/costo) que le corresponde. Esta empresa NO tiene catálogo de productos en SIIGO, así que itemType es SIEMPRE "Account" — nunca "Product", aunque el ítem sea un bien físico (ej. alimentos, bebidas, insumos): sin catálogo de productos, siempre se contabiliza como cuenta de gasto o costo.
+
+Tu respuesta es UN SOLO objeto para la factura completa, nunca uno por ítem — no existe un campo para eso. Si hay varios ítems, elegí la cuenta que mejor represente el conjunto (normalmente comparten el mismo concepto de gasto); no dejes de responder ni expliques la duda, solo elegí la mejor opción única.
 
 Reglas: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. Las cuentas PUC son categorías amplias de gasto/costo (ej. "Alimentos y bebidas", "Comercio al por mayor y al por menor", "Servicios"), no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. Dejá accountCode null solo si de verdad ninguna categoría del catálogo aplica.
 
