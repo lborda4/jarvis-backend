@@ -12,6 +12,7 @@ import { CompaniesRepository } from '../company/repositories/companies.repositor
 import { Integration } from '../integration/entities/integration.entity';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
 import {
+  ensureBoldIntegration,
   ensureJarvisIntegration,
   ensureSiigoIntegration,
 } from '../integration/helpers/integration-setup.helper';
@@ -49,6 +50,7 @@ import {
 const ALLOWED_INTEGRATIONS = new Set<IntegrationProvider>([
   IntegrationProvider.SIIGO,
   IntegrationProvider.JARVIS,
+  IntegrationProvider.BOLD,
 ]);
 
 @Injectable()
@@ -152,7 +154,7 @@ export class AdminService {
 
     if (integrations.length === 0) {
       throw new BadRequestException(
-        'Debe seleccionar al menos una integración (SIIGO, Jarvis o ambas).',
+        'Debe seleccionar al menos una integración (SIIGO, Jarvis o Bold).',
       );
     }
 
@@ -245,6 +247,15 @@ export class AdminService {
             integration.subscriptionStartedAt = new Date();
             await integrationsRepository.save(integration);
           }
+        }
+
+        // Bold no maneja plan/cupo de documentos ni credenciales propias
+        // todavía (la llave de identidad la ingresa el admin cada vez desde
+        // el panel, no se persiste) — solo marca que la empresa tiene esta
+        // integración activa, igual que SIIGO/Jarvis lo hacen para sus
+        // propios flujos.
+        if (provider === IntegrationProvider.BOLD) {
+          await ensureBoldIntegration(manager, createdCompany.id);
         }
       }
 
@@ -511,6 +522,10 @@ export class AdminService {
 
       if (provider === IntegrationProvider.JARVIS) {
         normalized.push(IntegrationProvider.JARVIS);
+      }
+
+      if (provider === IntegrationProvider.BOLD) {
+        normalized.push(IntegrationProvider.BOLD);
       }
     }
 

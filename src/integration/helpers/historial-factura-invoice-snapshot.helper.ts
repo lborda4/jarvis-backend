@@ -1,7 +1,6 @@
 import { HistorialFactura } from '../entities/historial-factura.entity';
 import { HistorialFacturaTipo } from '../enums/historial-factura-tipo.enum';
 import type { HistorialFacturaTaxDetail } from '../interfaces/historial-factura-impuestos.interface';
-import { SiigoPaymentTypeCatalogItemDto } from '../siigo/dto/list-siigo-payment-types.dto';
 import { SupplierPaymentMethodPreference } from '../interfaces/supplier-mapping-value.interface';
 import {
   isAllowedAccountCode,
@@ -45,33 +44,26 @@ function resolveConsistentTax(
   return allMatch ? (first.impuestos?.[campo] ?? null) : null;
 }
 
-/** Medio de pago real de la factura (SiigoPurchaseResponse.payments[0], ver
- * historial-factura.entity.ts) cruzado contra el catálogo VIGENTE de medios
- * de pago — historial solo guarda id+nombre tal como estaban en el momento
- * del sync, sin `type`/`dueDate` (necesarios para saber si es a crédito), así
- * que si el medio de pago ya no existe en el catálogo actual se deja sin
- * sugerir en vez de inventar esos campos. */
+/** Medio de pago real de la factura (SiigoPurchaseResponse.payments[0]) —
+ * se lee ENTERAMENTE de la fila de historial (id/nombre/type/dueDate, ver
+ * HistorialFactura.metodoPagoType), sin cruzar contra el catálogo en vivo:
+ * esta factura ya está creada en SIIGO, así que lo que se sincronizó en su
+ * momento es un hecho consumado, no una sugerencia que dependa de que la
+ * caché de catálogos esté tibia. `type` ausente (facturas sincronizadas
+ * antes de que se empezara a guardar, o medio de pago ya borrado en SIIGO al
+ * momento del sync) se deja sin sugerir en vez de inventar el campo. */
 function resolvePaymentMethodFromHistorial(
   line: HistorialFactura,
-  paymentTypesCatalog: SiigoPaymentTypeCatalogItemDto[],
 ): SupplierPaymentMethodPreference | null {
-  if (line.metodoPagoId == null) {
-    return null;
-  }
-
-  const catalogEntry = paymentTypesCatalog.find(
-    (paymentType) => paymentType.id === line.metodoPagoId,
-  );
-
-  if (!catalogEntry) {
+  if (line.metodoPagoId == null || !line.metodoPagoType) {
     return null;
   }
 
   return {
-    id: catalogEntry.id,
-    name: catalogEntry.name,
-    type: catalogEntry.type,
-    dueDate: catalogEntry.dueDate,
+    id: line.metodoPagoId,
+    name: line.metodoPagoNombre ?? String(line.metodoPagoId),
+    type: line.metodoPagoType,
+    dueDate: line.metodoPagoDueDate ?? undefined,
   };
 }
 
@@ -89,7 +81,6 @@ function resolvePaymentMethodFromHistorial(
  */
 export function buildInvoiceSnapshotFromHistorialLines(
   lines: HistorialFactura[],
-  paymentTypesCatalog: SiigoPaymentTypeCatalogItemDto[],
 ): HistorialFacturaInvoiceSnapshot {
   if (lines.length === 0) {
     return { account: null, paymentMethod: null, itemConfig: null };
@@ -119,10 +110,7 @@ export function buildInvoiceSnapshotFromHistorialLines(
       : null;
   const productCode = isProductType && consistentCuenta ? consistentCuenta : null;
 
-  const paymentMethod = resolvePaymentMethodFromHistorial(
-    lines[0],
-    paymentTypesCatalog,
-  );
+  const paymentMethod = resolvePaymentMethodFromHistorial(lines[0]);
 
   return {
     account: accountCode

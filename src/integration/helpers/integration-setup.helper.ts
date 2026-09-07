@@ -30,6 +30,17 @@ export async function ensureJarvisIntegration(
   );
 }
 
+/** Bold no persiste credenciales todavía — la llave de identidad (x-api-key)
+ * la ingresa el admin en el panel cada vez que hace falta y viaja solo en
+ * esa llamada puntual (ver BoldController/BoldTerminalsService), nunca se
+ * guarda acá. Esta integración solo marca que la empresa tiene Bold activo. */
+export async function ensureBoldIntegration(
+  manager: EntityManager,
+  companyId: string,
+): Promise<Integration> {
+  return ensureIntegration(manager, companyId, IntegrationProvider.BOLD, {});
+}
+
 async function ensureIntegration(
   manager: EntityManager,
   companyId: string,

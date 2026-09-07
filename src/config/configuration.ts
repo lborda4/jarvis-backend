@@ -80,6 +80,15 @@ export interface OpenRouterConfig {
   enabled: boolean;
 }
 
+/** Integración con la API de pagos de Bold (datáfono) — ver
+ * BoldHttpClient.getPaymentMethods. Todavía no tenemos credenciales reales:
+ * sin `apiKey`, BoldHttpClient.isConfigured() es false y los llamadores
+ * caen a datos mock en vez de intentar pegarle a la API real. */
+export interface BoldConfig {
+  apiKey?: string;
+  baseUrl: string;
+}
+
 export interface AppConfiguration {
   app: AppConfig;
   database: DatabaseConfig;
@@ -88,6 +97,7 @@ export interface AppConfiguration {
   redis: RedisConfig;
   nextPyme: NextPymeConfig;
   openRouter: OpenRouterConfig;
+  bold: BoldConfig;
   purchaseInvoiceImport: PurchaseInvoiceImportConfig;
   siigoPurchaseHistoryAutoSync: SiigoPurchaseHistoryAutoSyncConfig;
 }
@@ -197,6 +207,13 @@ export default (): AppConfiguration => ({
       trimOptional(process.env.OPENROUTER_BASE_URL) ??
       'https://openrouter.ai/api/v1',
     enabled: parseBoolean(process.env.AI_CLASSIFICATION_ENABLED, true),
+  },
+  bold: {
+    apiKey: trimOptional(process.env.BOLD_API_KEY),
+    // Sin URL real confirmada todavía (esperando documentación/credenciales
+    // de Bold) — se deja configurable por env en vez de adivinar un
+    // dominio, para no arriesgarse a hardcodear uno equivocado.
+    baseUrl: trimOptional(process.env.BOLD_API_BASE_URL) ?? '',
   },
   purchaseInvoiceImport: {
     batchSize: parsePositiveInteger(

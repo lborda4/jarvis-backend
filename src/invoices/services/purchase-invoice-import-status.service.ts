@@ -110,7 +110,12 @@ export class PurchaseInvoiceImportStatusService {
     return {
       jobId: job.id,
       status: job.status,
-      processedRows: job.processedRows,
+      // Derivado de los MISMOS conteos que successCount/errorCount, no de la
+      // columna job.processedRows: esa la mantiene el worker por separado y
+      // podía quedar desfasada, dejando a la vista un "0 de 12 procesados"
+      // junto a "12 exitosas" y la barra al 100% (bug real reportado). Lo
+      // procesado ES lo que ya terminó bien o mal, así que sale de ahí.
+      processedRows: successCount + errorCount,
       totalRows: job.totalRows,
       successCount,
       errorCount,

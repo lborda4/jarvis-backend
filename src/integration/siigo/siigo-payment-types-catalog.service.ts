@@ -23,4 +23,17 @@ export class SiigoPaymentTypesCatalogService {
       companyId,
     );
   }
+
+  /** No bloqueante: ver SiigoConfigurationCacheService.getPaymentTypesFromCacheOnly. */
+  listPaymentTypesFromCacheOnly(
+    query: ListSiigoPaymentTypesQueryDto,
+    companyId: string,
+  ): SiigoPaymentTypeCatalogItemDto[] {
+    const documentType = resolveSiigoPaymentDocumentType(query.documentType);
+
+    return this.siigoConfigurationCacheService.getPaymentTypesFromCacheOnly(
+      documentType,
+      companyId,
+    );
+  }
 }

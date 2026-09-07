@@ -261,6 +261,9 @@ export class SiigoAiAccountSuggestionService {
     companyId: string,
   ): Promise<ItemTypeAndAccountClassification> {
     if (!this.openRouterHttpClient.isConfigured()) {
+      console.log(
+        `[AI-CLASSIFY] [documentId=${documentId}] Omitido: OpenRouter no está configurado (falta OPENROUTER_API_KEY).`,
+      );
       return EMPTY_ITEM_CLASSIFICATION;
     }
 
@@ -295,6 +298,9 @@ export class SiigoAiAccountSuggestionService {
     );
 
     if (transactionalAccounts.length === 0) {
+      console.log(
+        `[AI-CLASSIFY] [documentId=${documentId}] Omitido: 0 cuentas transaccionales permitidas (clase 5/6/7) para companyId=${companyId} — no se llamó a la IA.`,
+      );
       return EMPTY_ITEM_CLASSIFICATION;
     }
 
@@ -332,13 +338,26 @@ export class SiigoAiAccountSuggestionService {
       })),
     });
 
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] ANTES de llamar a OpenRouter — ${new Date().toISOString()} — items=${JSON.stringify(itemDescriptions)}, cuentasEnPrompt=${transactionalAccounts.length}, productosEnPrompt=${productsForPrompt.length}`,
+    );
+
     const rawText = await this.openRouterHttpClient.createChatCompletion(
       prompt,
       {
         maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS,
       },
     );
+
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de llamar a OpenRouter — ${new Date().toISOString()} — respuesta cruda: ${rawText}`,
+    );
+
     const parsed = parsePurchaseItemClassificationResponse(rawText);
+
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] Respuesta parseada: ${JSON.stringify(parsed)}`,
+    );
 
     if (parsed.itemType === 'Product') {
       if (!parsed.productCode) {

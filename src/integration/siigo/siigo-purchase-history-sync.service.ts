@@ -34,6 +34,7 @@ import {
 } from './interfaces/siigo-api.interface';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoPaymentTypesCatalogService } from './siigo-payment-types-catalog.service';
+import { SiigoPaymentTypeCatalogItemDto } from './dto/list-siigo-payment-types.dto';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { HistorialFacturaTaxDetail } from '../interfaces/historial-factura-impuestos.interface';
 import { SupplierFieldVariability } from '../interfaces/supplier-field-variability.interface';
@@ -173,6 +174,18 @@ export class SiigoPurchaseHistorySyncService {
         companyId,
       );
       const taxCatalogById = buildTaxCatalogById(taxesCatalog);
+      // Mismo catálogo ('FC') que recomputeSupplierSummaries — se resuelve
+      // UNA vez acá (no en cada carga del listado de documentos) para poder
+      // guardar type/dueDate en historial_facturas junto con id/nombre, ver
+      // HistorialFactura.metodoPagoType.
+      const paymentTypesCatalog =
+        await this.siigoPaymentTypesCatalogService.listPaymentTypes(
+          { documentType: 'FC' },
+          companyId,
+        );
+      const paymentTypeById = new Map(
+        paymentTypesCatalog.map((paymentType) => [paymentType.id, paymentType]),
+      );
       const cutoffDate = this.buildCutoffDate();
 
       // Página 1 aparte: hace falta para saber total_results antes de poder
@@ -189,6 +202,7 @@ export class SiigoPurchaseHistorySyncService {
         firstPage.results ?? [],
         cutoffDate,
         taxCatalogById,
+        paymentTypeById,
       );
       await this.updateJob(jobId, { syncedCount });
 
@@ -209,6 +223,7 @@ export class SiigoPurchaseHistorySyncService {
               response.results ?? [],
               cutoffDate,
               taxCatalogById,
+              paymentTypeById,
             );
 
             syncedCount += pageSynced;
@@ -290,6 +305,7 @@ export class SiigoPurchaseHistorySyncService {
     purchases: SiigoPurchaseResponse[],
     cutoffDate: string,
     taxCatalogById: ReturnType<typeof buildTaxCatalogById>,
+    paymentTypeById: Map<number, SiigoPaymentTypeCatalogItemDto>,
   ): Promise<number> {
     const relevantPurchases = purchases.filter(
       (purchase) => purchase.date >= cutoffDate && purchase.items?.length,
@@ -314,6 +330,8 @@ export class SiigoPurchaseHistorySyncService {
       facturaIds.push(purchase.id);
 
       const payment = purchase.payments?.[0];
+      const paymentTypeCatalogEntry =
+        payment?.id != null ? paymentTypeById.get(payment.id) : undefined;
       const providerInvoicePrefix =
         purchase.provider_invoice?.prefix?.trim() || null;
       const providerInvoiceNumber =
@@ -336,6 +354,8 @@ export class SiigoPurchaseHistorySyncService {
             ),
             metodoPagoId: payment?.id ?? null,
             metodoPagoNombre: payment?.name?.trim() || null,
+            metodoPagoType: paymentTypeCatalogEntry?.type ?? null,
+            metodoPagoDueDate: paymentTypeCatalogEntry?.dueDate ?? null,
             providerInvoicePrefix,
             providerInvoiceNumber,
             siigoNumero: Number.isFinite(purchase.number) ? purchase.number : null,
@@ -420,13 +440,6 @@ export class SiigoPurchaseHistorySyncService {
     const paymentTypeById = new Map(
       paymentTypesCatalog.map((paymentType) => [paymentType.id, paymentType]),
     );
-    const impuestosPorCampo = new Map(
-      IMPUESTO_CAMPOS.map((campo) => [
-        campo,
-        pickDominantGroups(impuestoGroupsByCampo.get(campo) ?? []),
-      ]),
-    );
-
     // Se trae UNA vez el catálogo completo de preferencias en vez de una
     // consulta por proveedor (antes eran N consultas repitiendo el mismo
     // SELECT completo de la tabla, una por proveedor distinto).
@@ -539,7 +552,7 @@ export class SiigoPurchaseHistorySyncService {
           integrationId,
           proveedorNit,
           campo,
-          impuestosPorCampo.get(campo)!,
+          impuestoGroupsByCampo.get(campo) ?? [],
         );
       }
 
@@ -580,27 +593,52 @@ export class SiigoPurchaseHistorySyncService {
   }
 
   /** Variabilidad + valor fijo (si aplica) de UNA categoría de impuesto para
-   * un proveedor — `taxId: null` ganador (la categoría consistentemente no
-   * aplica) es un resultado fijo válido, no se consulta nada más para él.
-   * `undefined` significa que esa categoría nunca apareció en el historial
+   * un proveedor. El umbral del 70% se evalúa SOLO entre las facturas que sí
+   * traen esta categoría de impuesto — las que consistentemente no la traen
+   * no cuentan en contra de la variabilidad, porque no compiten por CUÁL es
+   * el valor cuando el impuesto no está presente. Así, un proveedor con
+   * mitad de facturas sin IVA y la otra mitad siempre con "IVA Servicios"
+   * queda fijo en "IVA Servicios" (aplica cuando la factura sí trae IVA) en
+   * vez de "variable" solo porque la mitad no lo trae.
+   *
+   * Si NINGUNA factura del proveedor trae esta categoría, se preserva el
+   * comportamiento previo: fijo, sin valor (consistentemente no aplica).
+   * `undefined` significa que esta categoría nunca apareció en el historial
    * de este proveedor (ni siquiera como "ausente"). */
   private async resolveImpuestoCampoEntry(
     companyId: string,
     integrationId: string,
     proveedorNit: string,
     campo: HistorialFacturaImpuestoCampo,
-    grouped: DominantGroupsResult<HistorialFacturaImpuestoCampoGroup>,
+    groupsForCampo: HistorialFacturaImpuestoCampoGroup[],
   ): Promise<
     { variable: boolean; valor: HistorialFacturaTaxDetail | null } | undefined
   > {
-    const best = grouped.bestByProveedor.get(proveedorNit);
-    const total = grouped.totalsByProveedor.get(proveedorNit) ?? 0;
+    const groupsForProveedor = groupsForCampo.filter(
+      (group) => group.proveedorNit === proveedorNit,
+    );
 
-    if (!best) {
+    if (groupsForProveedor.length === 0) {
       return undefined;
     }
 
-    if (!isFieldFixed(best.count, total)) {
+    const presentGroups = groupsForProveedor.filter(
+      (group) => group.taxId !== null,
+    );
+    const presentTotal = presentGroups.reduce(
+      (sum, group) => sum + group.count,
+      0,
+    );
+
+    if (presentTotal === 0) {
+      return { variable: false, valor: null };
+    }
+
+    const best = presentGroups.reduce((champion, group) =>
+      group.count > champion.count ? group : champion,
+    );
+
+    if (!isFieldFixed(best.count, presentTotal)) {
       return { variable: true, valor: null };
     }
 

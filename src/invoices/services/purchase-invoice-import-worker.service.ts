@@ -318,13 +318,27 @@ export class PurchaseInvoiceImportWorkerService
       // createFromPurchaseInvoiceRows) — no van al pipeline de
       // clasificación/envío automático de más abajo, ya están listos.
       const documentIdsAlreadyInSiigo: string[] = [];
+      // Documentos REUSADOS (mismo CUFE que un ElectronicDocument ya
+      // existente, ver existingDocumentIdByCufe en
+      // createFromPurchaseInvoiceRows) — ya se procesaron en un import
+      // anterior; reimportar el mismo Excel no debe volver a disparar
+      // validación de proveedor/cuenta, ni hacer que el frontend se quede
+      // esperando un cambio de estado que nunca va a llegar (bug real
+      // reportado: "la revisión de proveedores está tardando más de lo
+      // normal" al reimportar facturas que ya estaban en BD).
+      const documentIdsReused: string[] = [];
 
       successfulRows.forEach(({ row, jobRow }) => {
         const creationRow = row.cufe ? resultByCufe.get(row.cufe) : undefined;
 
         if (creationRow?.documentId) {
           jobRow.documentId = creationRow.documentId;
-          createdDocumentIds.push(creationRow.documentId);
+
+          if (creationRow.reused) {
+            documentIdsReused.push(creationRow.documentId);
+          } else {
+            createdDocumentIds.push(creationRow.documentId);
+          }
 
           if (creationRow.alreadyInSiigo) {
             documentIdsAlreadyInSiigo.push(creationRow.documentId);
@@ -369,6 +383,12 @@ export class PurchaseInvoiceImportWorkerService
       if (documentIdsAlreadyInSiigo.length > 0) {
         this.logger.log(
           `[job=${job.id}] ${documentIdsAlreadyInSiigo.length} factura(s) ya existían en SIIGO — creadas directo como listas, sin pasar por clasificación/envío automático.`,
+        );
+      }
+
+      if (documentIdsReused.length > 0) {
+        this.logger.log(
+          `[job=${job.id}] ${documentIdsReused.length} factura(s) reusaron un documento ya existente (mismo CUFE) — no vuelven a pasar por validación de proveedor/cuenta.`,
         );
       }
 
@@ -419,15 +439,23 @@ export class PurchaseInvoiceImportWorkerService
   }
 
   private async finalizeJob(job: PurchaseInvoiceImportJob): Promise<void> {
+    const counts =
+      await this.purchaseInvoiceImportJobRowsRepository.countByStatus(job.id);
+    const successCount =
+      counts.find(
+        (entry) => entry.status === PurchaseInvoiceImportRowStatus.SUCCESS,
+      )?.count ?? 0;
     const failedCount =
-      (
-        await this.purchaseInvoiceImportJobRowsRepository.countByStatus(job.id)
-      ).find((entry) => entry.status === PurchaseInvoiceImportRowStatus.FAILED)
-        ?.count ?? 0;
+      counts.find(
+        (entry) => entry.status === PurchaseInvoiceImportRowStatus.FAILED,
+      )?.count ?? 0;
 
     await this.purchaseInvoiceImportJobsRepository.patch(job.id, {
       status: PurchaseInvoiceImportJobStatus.COMPLETED,
-      processedRows: job.totalRows ?? 0,
+      // Filas realmente terminadas, mismo criterio que notifyBatchProgress.
+      // Antes se guardaba job.totalRows, que con un job todavía sin ese dato
+      // en memoria escribía 0 aunque hubiera filas procesadas.
+      processedRows: successCount + failedCount,
       completedAt: new Date(),
     });
 

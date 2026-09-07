@@ -50,4 +50,13 @@ describe('resolveSuggestedTaxForItem', () => {
     const suggestion = resolveSuggestedTaxForItem(0, buildCatalog());
     expect(suggestion?.id).toBe(3);
   });
+
+  it('returns null when multiple active IVA taxes share the same percentage (ambiguous)', () => {
+    const catalog: SiigoTaxCatalogItemDto[] = [
+      ...buildCatalog(),
+      { id: 6, name: 'IVA Activo Fijo', type: 'IVA', percentage: 19, active: true },
+    ];
+
+    expect(resolveSuggestedTaxForItem(19, catalog)).toBeNull();
+  });
 });

@@ -60,7 +60,6 @@ import {
 import { SiigoTaxesCatalogService } from '../integration/siigo/siigo-taxes-catalog.service';
 import { SiigoPaymentTypesCatalogService } from '../integration/siigo/siigo-payment-types-catalog.service';
 import { SiigoProductsCatalogService } from '../integration/siigo/siigo-products-catalog.service';
-import { SiigoProductCatalogItemDto } from '../integration/siigo/dto/list-siigo-products.dto';
 import { SiigoPaymentTypeCatalogItemDto } from '../integration/siigo/dto/list-siigo-payment-types.dto';
 import { resolveSiigoPaymentDocumentType } from '../integration/siigo/helpers/siigo-payment-document-type.helper';
 import { resolveCreditFallbackPaymentMethod } from '../integration/siigo/helpers/siigo-credit-payment-method.helper';
@@ -626,6 +625,12 @@ export class ElectronicDocumentService {
        * debe mandarlo al pipeline de clasificación/envío automático, ya
        * está hecho. */
       alreadyInSiigo: boolean;
+      /** true si esta fila reusó un ElectronicDocument YA EXISTENTE (mismo
+       * CUFE, ver existingDocumentIdByCufe) en vez de crear uno nuevo — el
+       * llamador tampoco debe mandarlo al pipeline de preparación: ya se
+       * procesó en un import anterior, reimportar el mismo Excel no debe
+       * disparar una revisión de proveedor/cuenta de nuevo. */
+      reused: boolean;
     }>;
   }> {
     if (!rows.length) {
@@ -856,6 +861,7 @@ export class ElectronicDocumentService {
           documentId: existingDocumentIdByCufe.get(cufe) as string,
           skippedByPlanLimit: false,
           alreadyInSiigo: false,
+          reused: true,
         };
       }
 
@@ -865,6 +871,7 @@ export class ElectronicDocumentService {
           documentId: createdDocumentIdByCufe.get(cufe) as string,
           skippedByPlanLimit: false,
           alreadyInSiigo: cufesAlreadyInSiigo.has(cufe),
+          reused: false,
         };
       }
 
@@ -873,6 +880,7 @@ export class ElectronicDocumentService {
         documentId: null,
         skippedByPlanLimit: cufe ? skippedCufes.has(cufe) : false,
         alreadyInSiigo: false,
+        reused: false,
       };
     });
 
@@ -1258,9 +1266,15 @@ export class ElectronicDocumentService {
           buildAccountNameByCode(siigoAccounts),
         );
 
-        const productsCatalog = await this.siigoProductsCatalogService
-          .listProducts(companyId)
-          .catch((): SiigoProductCatalogItemDto[] => []);
+        // *FromCacheOnly (no bloqueante): esta función arma sugerencias para
+        // el listado de documentos, cuya consulta a la BD ya es rápida por sí
+        // sola — no vale la pena retrasar la respuesta esperando un refresh
+        // en frío de estos catálogos (que puede tardar varios segundos,
+        // sobre todo el de productos, que pagina el catálogo completo de
+        // SIIGO). Si la caché está fría, se refresca en segundo plano y esta
+        // respuesta sale con lo que haya (o sin sugerencia todavía).
+        const productsCatalog =
+          this.siigoProductsCatalogService.listProductsFromCacheOnly(companyId);
         productNameByCodeByCompanyId.set(
           companyId,
           new Map(
@@ -1270,7 +1284,7 @@ export class ElectronicDocumentService {
 
         taxesCatalogByCompanyId.set(
           companyId,
-          await this.siigoTaxesCatalogService.listTaxes({}, companyId),
+          this.siigoTaxesCatalogService.listTaxesFromCacheOnly({}, companyId),
         );
 
         // Catálogo de medios de pago, precargado una sola vez por empresa +
@@ -1288,9 +1302,11 @@ export class ElectronicDocumentService {
         );
 
         for (const documentType of documentTypesForCompany) {
-          const paymentTypesCatalog = await this.siigoPaymentTypesCatalogService
-            .listPaymentTypes({ documentType }, companyId)
-            .catch(() => []);
+          const paymentTypesCatalog =
+            this.siigoPaymentTypesCatalogService.listPaymentTypesFromCacheOnly(
+              { documentType },
+              companyId,
+            );
           paymentTypesCatalogByKey.set(
             `${companyId}|${documentType}`,
             paymentTypesCatalog,
@@ -1369,20 +1385,20 @@ export class ElectronicDocumentService {
           );
 
         if (historialLines.length > 0) {
-          const documentType = resolveSiigoPaymentDocumentType(
-            document.electronicDocumentType ?? undefined,
-          );
-
           historialSnapshot = buildInvoiceSnapshotFromHistorialLines(
             historialLines,
-            paymentTypesCatalogByKey.get(
-              `${document.companyId}|${documentType}`,
-            ) ?? [],
           );
         }
       }
 
-      const suggestedProduct = resolveSuggestedProductForDocument(document);
+      const suggestedProduct =
+        historialSnapshot?.itemConfig?.productCode
+          ? {
+              code: historialSnapshot.itemConfig.productCode,
+              name: historialSnapshot.itemConfig.productName ??
+                historialSnapshot.itemConfig.productCode,
+            }
+          : resolveSuggestedProductForDocument(document);
       products.set(
         document.id,
         suggestedProduct

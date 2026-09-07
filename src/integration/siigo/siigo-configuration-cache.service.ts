@@ -154,6 +154,61 @@ export class SiigoConfigurationCacheService {
     this.memoryCacheByCompany.delete(companyId);
   }
 
+  /** Versión "mejor esfuerzo" y no bloqueante de getTaxes/getPaymentTypes —
+   * para consumidores donde el catálogo es una sugerencia (ej. enriquecer el
+   * listado de documentos) y no vale la pena retrasar una respuesta que ya
+   * de por sí es rápida (la consulta a la BD) esperando un refresh en frío
+   * que puede tardar varios segundos. Si la caché existe (fresca o no), se
+   * devuelve tal cual; si no existe todavía, se devuelve null. En ambos
+   * casos, si hace falta refrescar, el refresh se dispara en segundo plano
+   * sin esperarlo (syncCompanyCache ya deduplica si hay uno en curso). */
+  private peekCompanyCache(companyId: string): SiigoCompanyMemoryCache | null {
+    const cached = this.memoryCacheByCompany.get(companyId);
+    const isFresh =
+      cached &&
+      isSiigoMemoryCacheFresh(cached.fetchedAt) &&
+      hasUsableSiigoCatalogCache(cached.catalog) &&
+      isValidSiigoConfigurationId(cached.supportDocumentId) &&
+      isValidSiigoConfigurationId(cached.purchaseDocumentId);
+
+    if (!isFresh) {
+      this.syncCompanyCache(companyId).catch((error) => {
+        this.logger.warn(
+          `[companyId=${companyId}] Refresh en segundo plano de caché SIIGO falló.`,
+          error instanceof Error ? error.message : error,
+        );
+      });
+    }
+
+    return cached ?? null;
+  }
+
+  getTaxesFromCacheOnly(
+    typeFilter: string | undefined,
+    companyId: string,
+  ): SiigoTaxCatalogItemDto[] {
+    const taxes = this.peekCompanyCache(companyId)?.catalog.taxes ?? [];
+    const normalizedFilter = typeFilter?.trim().toLowerCase();
+
+    if (!normalizedFilter) {
+      return taxes;
+    }
+
+    return taxes.filter(
+      (tax) => tax.type?.trim().toLowerCase() === normalizedFilter,
+    );
+  }
+
+  getPaymentTypesFromCacheOnly(
+    documentType: string,
+    companyId: string,
+  ): SiigoPaymentTypeCatalogItemDto[] {
+    const normalizedDocumentType = documentType.trim().toUpperCase();
+    const cache = this.peekCompanyCache(companyId);
+
+    return cache?.catalog.paymentTypes?.[normalizedDocumentType] ?? [];
+  }
+
   private async ensureCompanyCache(companyId: string): Promise<SiigoCompanyMemoryCache> {
     const cached = this.memoryCacheByCompany.get(companyId);
 
@@ -205,19 +260,25 @@ export class SiigoConfigurationCacheService {
       companyId,
     );
 
-    const [
-      ,
-      paymentTypes,
-      taxes,
-      supportDocumentId,
-      purchaseDocumentId,
-    ] = await Promise.all([
-      this.syncRecentAccountsFromBalanceTrial(company.id),
-      this.syncPaymentTypesCatalog(companyId),
-      this.syncTaxesCatalog(companyId),
-      this.syncSupportDocumentTypeId(companyId),
-      this.syncPurchaseDocumentTypeId(companyId),
-    ]);
+    // syncRecentAccountsFromBalanceTrial NUNCA lanza (tiene su propio
+    // try/catch) y su resultado ni siquiera se usa acá — el catálogo de
+    // cuentas real sale de syncAccountsCatalog más abajo. Es un side-effect
+    // de "mejor esfuerzo" (rellenar cuentas nuevas vistas en el balance de
+    // prueba), pero implica generar y descargar hasta 2 reportes de SIIGO
+    // (mes actual + anterior) — real y lento (varios segundos). Antes
+    // bloqueaba TODA la carga de la página (esta caché gatea el listado de
+    // documentos) en cada caché fría, aunque nada de lo que devuelve se
+    // necesite para responder — se dispara en paralelo sin esperarlo, en
+    // vez de adentro del Promise.all bloqueante.
+    void this.syncRecentAccountsFromBalanceTrial(company.id);
+
+    const [paymentTypes, taxes, supportDocumentId, purchaseDocumentId] =
+      await Promise.all([
+        this.syncPaymentTypesCatalog(companyId),
+        this.syncTaxesCatalog(companyId),
+        this.syncSupportDocumentTypeId(companyId),
+        this.syncPurchaseDocumentTypeId(companyId),
+      ]);
 
     const accounts = await this.syncAccountsCatalog(company.id, integration.id);
 

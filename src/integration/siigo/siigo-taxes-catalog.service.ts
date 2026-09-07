@@ -17,4 +17,15 @@ export class SiigoTaxesCatalogService {
   ): Promise<SiigoTaxCatalogItemDto[]> {
     return this.siigoConfigurationCacheService.getTaxes(query.type, companyId);
   }
+
+  /** No bloqueante: ver SiigoConfigurationCacheService.getTaxesFromCacheOnly. */
+  listTaxesFromCacheOnly(
+    query: ListSiigoTaxesQueryDto,
+    companyId: string,
+  ): SiigoTaxCatalogItemDto[] {
+    return this.siigoConfigurationCacheService.getTaxesFromCacheOnly(
+      query.type,
+      companyId,
+    );
+  }
 }

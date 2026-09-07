@@ -64,6 +64,17 @@ export class Integration {
   @Column({ default: true })
   active: boolean;
 
+  /** Última vez que corrió el auto-sync de cuentas desde el balance de
+   * prueba (ver SiigoAccountsBalanceSyncService.syncAccountsFromRecentMonths).
+   * Persistido para que el throttle sobreviva a un reinicio del backend —
+   * la caché en memoria de catálogos SIIGO no lo hace. */
+  @Column({
+    name: 'last_balance_trial_auto_sync_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  lastBalanceTrialAutoSyncAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

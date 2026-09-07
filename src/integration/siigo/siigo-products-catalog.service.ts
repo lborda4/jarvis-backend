@@ -24,6 +24,7 @@ export class SiigoProductsCatalogService {
     string,
     ProductsMemoryCacheEntry
   >();
+  private readonly refreshInProgressByCompany = new Map<string, Promise<void>>();
 
   constructor(
     private readonly siigoAuthService: SiigoAuthService,
@@ -45,6 +46,36 @@ export class SiigoProductsCatalogService {
     });
 
     return items;
+  }
+
+  /** No bloqueante: para consumidores donde el catálogo es una sugerencia
+   * (ej. enriquecer el listado de documentos) y no vale la pena retrasar una
+   * respuesta que ya de por sí es rápida esperando a paginar TODO el
+   * catálogo de productos de SIIGO en frío. Devuelve lo que haya en caché
+   * (aunque esté vencido) o [] si nunca se sincronizó, y dispara el refresh
+   * completo en segundo plano (deduplicado) para la próxima consulta. */
+  listProductsFromCacheOnly(companyId: string): SiigoProductCatalogItemDto[] {
+    const cached = this.memoryCacheByCompany.get(companyId);
+    const isFresh =
+      cached && Date.now() - cached.fetchedAt < SIIGO_PRODUCTS_CACHE_TTL_MS;
+
+    if (!isFresh && !this.refreshInProgressByCompany.has(companyId)) {
+      const refreshPromise = this.listProducts(companyId)
+        .then(() => undefined)
+        .catch((error) => {
+          this.logger.warn(
+            `[companyId=${companyId}] Refresh en segundo plano de catálogo de productos SIIGO falló.`,
+            error instanceof Error ? error.message : error,
+          );
+        })
+        .finally(() => {
+          this.refreshInProgressByCompany.delete(companyId);
+        });
+
+      this.refreshInProgressByCompany.set(companyId, refreshPromise);
+    }
+
+    return cached?.items ?? [];
   }
 
   private async fetchPage(companyId: string, page: number) {

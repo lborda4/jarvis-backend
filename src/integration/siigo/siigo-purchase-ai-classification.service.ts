@@ -54,8 +54,8 @@ export class SiigoPurchaseAiClassificationService {
     }
 
     if (!this.openRouterHttpClient.isConfigured()) {
-      this.logger.warn(
-        `[companyId=${companyId}] Clasificación automática con IA omitida: OpenRouter no está configurado (falta OPENROUTER_API_KEY).`,
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] Omitido para ${documentIds.join(', ')}: OpenRouter no está configurado (falta OPENROUTER_API_KEY).`,
       );
 
       return;
@@ -70,8 +70,8 @@ export class SiigoPurchaseAiClassificationService {
       );
       integrationId = integration.id;
     } catch {
-      this.logger.log(
-        `[companyId=${companyId}] Clasificación automática con IA omitida: la empresa no tiene integración SIIGO.`,
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] Omitido para ${documentIds.join(', ')}: la empresa no tiene integración SIIGO.`,
       );
 
       // Empresas sin integración SIIGO (p.ej. Jarvis) no usan esta clasificación.
@@ -101,6 +101,10 @@ export class SiigoPurchaseAiClassificationService {
     companyId: string,
     integrationId: string,
   ): Promise<void> {
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] classifyOne iniciado — ${new Date().toISOString()}`,
+    );
+
     const document = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
@@ -110,8 +114,8 @@ export class SiigoPurchaseAiClassificationService {
     );
 
     if (!supplierNit) {
-      this.logger.warn(
-        `[documentId=${documentId}] Clasificación automática con IA omitida: el documento no tiene NIT de proveedor en el payload.`,
+      console.log(
+        `[AI-CLASSIFY] [documentId=${documentId}] Omitido: el documento no tiene NIT de proveedor en el payload.`,
       );
 
       return;
@@ -135,16 +139,20 @@ export class SiigoPurchaseAiClassificationService {
     // Cuenta ya resuelta con una regla exacta por ítem, y medio de pago fijo
     // por el sync de historial: la preferencia ya sincronizada alcanza, no
     // hace falta gastar una llamada a la IA.
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] needsAi=${needsAi}`,
+    );
+
     if (!needsAi) {
-      this.logger.log(
-        `[documentId=${documentId}] Clasificación automática con IA omitida: cuenta y medio de pago ya resueltos con confianza por el historial.`,
+      console.log(
+        `[AI-CLASSIFY] [documentId=${documentId}] Omitido, NO se llamó a la IA: cuenta y medio de pago ya resueltos con confianza por el historial.`,
       );
 
       return;
     }
 
-    this.logger.log(
-      `[documentId=${documentId}] Consultando IA (OpenRouter) para clasificar tipo de ítem + cuenta contable...`,
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] ANTES de invocar classifyItemTypeAndAccount — ${new Date().toISOString()}`,
     );
 
     const classification =
@@ -153,13 +161,13 @@ export class SiigoPurchaseAiClassificationService {
         companyId,
       );
 
-    this.logger.log(
-      `[documentId=${documentId}] Respuesta de IA: itemType=${classification.itemType ?? 'null'}, accountCode=${classification.accountCode ?? 'null'}, accountName=${classification.accountName ?? 'null'}, productCode=${classification.productCode ?? 'null'}, productName=${classification.productName ?? 'null'}`,
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de invocar classifyItemTypeAndAccount — ${new Date().toISOString()} — itemType=${classification.itemType ?? 'null'}, accountCode=${classification.accountCode ?? 'null'}, accountName=${classification.accountName ?? 'null'}, productCode=${classification.productCode ?? 'null'}, productName=${classification.productName ?? 'null'}`,
     );
 
     if (!classification.accountCode && !classification.productCode) {
-      this.logger.log(
-        `[documentId=${documentId}] IA no encontró una cuenta contable ni un producto seguros (tipo=${classification.itemType ?? 'desconocido'}); se deja sin sugerencia automática.`,
+      console.log(
+        `[AI-CLASSIFY] [documentId=${documentId}] IA no encontró una cuenta contable ni un producto seguros (tipo=${classification.itemType ?? 'desconocido'}); se deja sin sugerencia automática.`,
       );
       return;
     }
@@ -234,10 +242,16 @@ export class SiigoPurchaseAiClassificationService {
     supplierNit: string,
   ): Promise<boolean> {
     if (resolveSuggestedPaymentMethodFromSync(configuration) === null) {
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=true: sin medio de pago fijo por historial para proveedor ${supplierNit}.`,
+      );
       return true;
     }
 
     if (payload.items.length === 0) {
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=true: el documento no tiene ítems.`,
+      );
       return true;
     }
 
@@ -258,10 +272,16 @@ export class SiigoPurchaseAiClassificationService {
       );
 
       if (!resolved || resolved.source !== 'exact') {
+        console.log(
+          `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=true: ítem "${item.descripcion}" sin regla exacta (source=${resolved?.source ?? 'ninguna'}).`,
+        );
         return true;
       }
     }
 
+    console.log(
+      `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=false: proveedor ${supplierNit} — medio de pago y TODOS los ítems ya resueltos con regla exacta.`,
+    );
     return false;
   }
 }

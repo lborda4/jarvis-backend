@@ -39,6 +39,10 @@ export interface SiigoAccountsBalanceSyncSummary {
   reportsProcessed: number;
 }
 
+/** Mismo período que la caché de catálogo SIIGO en memoria — no tiene
+ * sentido persistir un throttle más corto que eso. */
+const RECENT_MONTHS_AUTO_SYNC_TTL_MS = 24 * 60 * 60 * 1000;
+
 interface PersistBalanceTrialOptions {
   onlyMissing?: boolean;
 }
@@ -60,6 +64,29 @@ export class SiigoAccountsBalanceSyncService {
   async syncAccountsFromRecentMonths(
     companyId: string,
   ): Promise<SiigoAccountsBalanceSyncSummary> {
+    const integration = await getSiigoIntegration(
+      this.integrationsRepository,
+      companyId,
+    );
+
+    if (
+      integration.lastBalanceTrialAutoSyncAt &&
+      Date.now() - integration.lastBalanceTrialAutoSyncAt.getTime() <
+        RECENT_MONTHS_AUTO_SYNC_TTL_MS
+    ) {
+      this.logger.log(
+        `[companyId=${companyId}] Auto-sync de balance de prueba omitido, ya corrió recientemente (lastRun=${integration.lastBalanceTrialAutoSyncAt.toISOString()})`,
+      );
+
+      return {
+        processedRows: 0,
+        accountsCreated: 0,
+        accountsUpdated: 0,
+        skippedRows: 0,
+        reportsProcessed: 0,
+      };
+    }
+
     const reportRequests = buildBalanceTrialAutoSyncReportRequests();
 
     this.logger.log(
@@ -67,9 +94,16 @@ export class SiigoAccountsBalanceSyncService {
       reportRequests,
     );
 
-    return this.syncAccountsFromSiigoReports(companyId, reportRequests, {
-      onlyMissing: true,
-    });
+    const summary = await this.syncAccountsFromSiigoReports(
+      companyId,
+      reportRequests,
+      { onlyMissing: true },
+    );
+
+    integration.lastBalanceTrialAutoSyncAt = new Date();
+    await this.integrationsRepository.save(integration);
+
+    return summary;
   }
 
   async syncAccountsFromManualImport(

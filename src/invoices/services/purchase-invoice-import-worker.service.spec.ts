@@ -231,6 +231,76 @@ describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, ví
     expect(nextPymeApiClient.getInvoiceByCufe).toHaveBeenCalledTimes(2);
   });
 
+  it('no vuelve a disparar preparación de proveedor/cuenta para una fila reusada (mismo CUFE que un documento ya existente) — bug real reportado: reimportar facturas ya en BD hacía que el frontend esperara una revisión de proveedor que nunca iba a pasar', async () => {
+    const reusedRow = buildJobRow({
+      id: 'row-1',
+      rowIndex: 1,
+      cufe: 'cufe-reused',
+      rawRow: buildRawRow({ cufe: 'cufe-reused' }),
+    });
+
+    const {
+      service,
+      siigoDocumentPreparationService,
+      jobRowsRepository,
+      jobsRepository,
+    } = buildService({
+        jobRowsRepository: {
+          countOutstandingByJob: jest.fn().mockResolvedValue(1),
+          claimPendingBatch: jest.fn().mockResolvedValue([reusedRow]),
+        },
+        nextPymeApiClient: {
+          getInvoiceByCufe: jest.fn().mockResolvedValue({
+            outcome: 'found',
+            data: {
+              seller: { identification_number: '900123456' },
+              legal_monetary_totals: { payable_amount: '100000' },
+              invoice_lines: [],
+            },
+            attempts: 1,
+            retryDelayMs: 0,
+          }),
+        },
+        electronicDocumentService: {
+          createFromPurchaseInvoiceRows: jest.fn().mockResolvedValue({
+            documentsCreated: 0,
+            documentsReused: 1,
+            itemsTotal: 1,
+            documentsSkippedByPlanLimit: 0,
+            rows: [
+              {
+                cufe: 'cufe-reused',
+                documentId: 'doc-existing-1',
+                skippedByPlanLimit: false,
+                alreadyInSiigo: false,
+                reused: true,
+              },
+            ],
+          }),
+        },
+      });
+
+    await (service as any).processOneBatchForJob(buildJob());
+
+    expect(
+      siigoDocumentPreparationService.prepareDocumentsInBackground,
+    ).not.toHaveBeenCalled();
+
+    // Sí queda guardado el documentId en la fila del job (para mostrarlo en
+    // la tabla), solo que sin disparar ninguna preparación nueva sobre él.
+    const [savedRows] = jobRowsRepository.saveMany.mock.calls[0];
+    expect(savedRows[0].documentId).toBe('doc-existing-1');
+
+    // Tampoco entra al job.documentIds — es lo que el frontend usa para
+    // ESPERAR a que termine la revisión de proveedor (watchImportedDocuments);
+    // un documento reusado nunca va a cambiar de estado en este import, así
+    // que incluirlo ahí solo lo dejaría esperando hasta el timeout.
+    const patchCall = jobsRepository.patch.mock.calls.find(
+      ([, patch]: [string, any]) => patch.documentIds !== undefined,
+    );
+    expect(patchCall?.[1].documentIds).not.toContain('doc-existing-1');
+  });
+
   it('no aborta ni consulta el cupo del plan al importar, aunque el plan ya esté agotado', async () => {
     // El cupo del plan ya no se descuenta/valida al importar — solo al
     // ENVIAR a SIIGO (ver assertCanCreateDocuments en

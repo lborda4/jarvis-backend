@@ -83,6 +83,18 @@ export class HistorialFactura {
   @Column({ name: 'metodo_pago_nombre', type: 'varchar', nullable: true })
   metodoPagoNombre: string | null;
 
+  /** type/dueDate del catálogo de medios de pago de SIIGO en el momento del
+   * sync — se guardan acá (en vez de resolverse contra el catálogo en vivo
+   * cada vez que se muestra esta factura) para que una factura ya creada en
+   * SIIGO se pueda mostrar completa leyendo SOLO esta tabla, sin depender de
+   * que la caché de catálogos esté tibia (ver
+   * buildInvoiceSnapshotFromHistorialLines). */
+  @Column({ name: 'metodo_pago_type', type: 'varchar', nullable: true })
+  metodoPagoType: string | null;
+
+  @Column({ name: 'metodo_pago_due_date', type: 'boolean', nullable: true })
+  metodoPagoDueDate: boolean | null;
+
   /** provider_invoice.prefix/number de la respuesta de SIIGO — el prefijo y
    * número de la factura del TERCERO (ej. "FE"/"652"), no el consecutivo
    * interno de SIIGO ("FC-3-93"). Se repite en todas las líneas de una
