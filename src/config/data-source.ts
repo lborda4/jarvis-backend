@@ -5,6 +5,7 @@ import { Company } from '../company/entities/company.entity';
 import { ElectronicDocument } from '../electronic-document/entities/electronic-document.entity';
 import { HistorialFactura } from '../integration/entities/historial-factura.entity';
 import { Integration } from '../integration/entities/integration.entity';
+import { AiGenerationLog } from '../integration/openrouter/entities/ai-generation-log.entity';
 import { SiigoAccount } from '../integration/entities/siigo-account.entity';
 import { SiigoPurchaseSyncJob } from '../integration/entities/siigo-purchase-sync-job.entity';
 import { SupplierConfiguration } from '../integration/entities/supplier-configuration.entity';
@@ -42,6 +43,7 @@ export default new DataSource({
     JarvisTercero,
     PurchaseInvoiceImportJob,
     PurchaseInvoiceImportJobRow,
+    AiGenerationLog,
     User,
     UserCompany,
   ],

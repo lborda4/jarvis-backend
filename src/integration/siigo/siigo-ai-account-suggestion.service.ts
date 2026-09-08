@@ -198,8 +198,14 @@ export class SiigoAiAccountSuggestionService {
       })),
     });
 
-    const rawText =
-      await this.openRouterHttpClient.createChatCompletion(prompt);
+    const { content: rawText } =
+      await this.openRouterHttpClient.createChatCompletion(prompt, {
+        context: {
+          companyId,
+          documentId,
+          purpose: 'purchase-full-classification',
+        },
+      });
     const parsed = parsePurchaseClassificationResponse(rawText);
 
     const matchedAccount = parsed.accountCode
@@ -342,12 +348,15 @@ export class SiigoAiAccountSuggestionService {
       `[AI-CLASSIFY] [documentId=${documentId}] ANTES de llamar a OpenRouter — ${new Date().toISOString()} — items=${JSON.stringify(itemDescriptions)}, cuentasEnPrompt=${transactionalAccounts.length}, productosEnPrompt=${productsForPrompt.length}`,
     );
 
-    const rawText = await this.openRouterHttpClient.createChatCompletion(
-      prompt,
-      {
+    const { content: rawText } =
+      await this.openRouterHttpClient.createChatCompletion(prompt, {
         maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS,
-      },
-    );
+        context: {
+          companyId,
+          documentId,
+          purpose: 'purchase-item-classification',
+        },
+      });
 
     console.log(
       `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de llamar a OpenRouter — ${new Date().toISOString()} — respuesta cruda: ${rawText}`,
