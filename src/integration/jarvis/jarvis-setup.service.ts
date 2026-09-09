@@ -12,6 +12,8 @@ import { JarvisTaxResponsibility } from './enums/jarvis-tax-responsibility.enum'
 import { JarvisVatRegime } from './enums/jarvis-vat-regime.enum';
 import { JarvisCredentialsStatusResponseDto } from './dto/jarvis-credentials-status.dto';
 import {
+  JarvisAvailableResolutionDto,
+  ListJarvisAvailableResolutionsResponseDto,
   SaveJarvisResolutionRequestDto,
   SaveJarvisResolutionResponseDto,
 } from './dto/jarvis-resolution.dto';
@@ -185,6 +187,68 @@ export class JarvisSetupService {
     };
   }
 
+  /** Resoluciones habilitadas hoy en la DIAN según NextPyme. Reemplaza al
+   * cargue del PDF: en vez de que el contador transcriba la autorización, se
+   * consultan y él solo elige cuál usar para cada tipo de documento. Se
+   * devuelven todas las vigentes sin clasificar — la DIAN identifica cada
+   * rango por prefijo y no dice cuál es de factura y cuál de documento
+   * soporte, así que adivinarlo (por el prefijo o por si trae clave técnica)
+   * sería una corazonada, no un dato. */
+  async listAvailableResolutions(): Promise<ListJarvisAvailableResolutionsResponseDto> {
+    const resolutions =
+      await this.nextPymeMasterCatalogService.listResolutions();
+    const today = new Date().toISOString().slice(0, 10);
+
+    const available = resolutions
+      .filter((item) => this.isResolutionActive(item, today))
+      .map((item) => this.mapAvailableResolution(item));
+
+    return { resolutions: available };
+  }
+
+  /** Vigente = hoy cae dentro del rango autorizado. Una resolución sin
+   * fechas no se descarta: NextPyme no siempre las reporta y esconderla
+   * dejaría al usuario sin nada que elegir. */
+  private isResolutionActive(item: NextPymeResolution, today: string): boolean {
+    const from = item.date_from?.slice(0, 10);
+    const to = item.date_to?.slice(0, 10);
+
+    if (from && today < from) {
+      return false;
+    }
+
+    if (to && today > to) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private mapAvailableResolution(
+    item: NextPymeResolution,
+  ): JarvisAvailableResolutionDto {
+    const fromNumber = Number(item.from ?? item.number);
+    const toNumber = Number(item.to ?? fromNumber);
+    const nextConsecutive = Number(item.next_consecutive ?? item.number);
+
+    return {
+      id: `${item.prefix}-${item.resolution ?? item.id}`,
+      prefix: item.prefix,
+      formNumber: item.resolution ?? null,
+      fromNumber: Number.isFinite(fromNumber) ? fromNumber : 0,
+      toNumber: Number.isFinite(toNumber) ? toNumber : 0,
+      nextConsecutive: Number.isFinite(nextConsecutive)
+        ? nextConsecutive
+        : null,
+      technicalKey: item.technical_key ?? null,
+      authorizedAt: item.resolution_date ?? null,
+      dateFrom: item.date_from ?? null,
+      dateTo: item.date_to ?? null,
+      documentTypeLabel: item.type_document?.name?.trim() || null,
+      typeDocumentId: item.type_document?.id ?? item.type_document_id ?? null,
+    };
+  }
+
   async saveResolution(
     request: SaveJarvisResolutionRequestDto,
     companyId: string,
@@ -228,8 +292,13 @@ export class JarvisSetupService {
       );
     }
 
-    if (!technicalKey) {
-      throw new BadRequestException('La clave técnica es obligatoria.');
+    // Solo factura electrónica: la DIAN no asigna clave técnica a las
+    // resoluciones de documento soporte (las devuelve en null, ver
+    // GetNumberingRange), así que exigirla ahí bloqueaba un caso legítimo.
+    if (!technicalKey && request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE) {
+      throw new BadRequestException(
+        'La clave técnica es obligatoria para la resolución de factura electrónica.',
+      );
     }
 
     if (!dateFrom || !DATE_PATTERN.test(dateFrom)) {

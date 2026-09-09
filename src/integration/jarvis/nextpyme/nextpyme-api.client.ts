@@ -16,6 +16,7 @@ import {
   normalizeRecordValue,
   UnknownRecord,
 } from './nextpyme-record-scan.helper';
+import { parseDianValidationResult } from './nextpyme-dian-validation.helper';
 
 export interface NextPymeMasterRow {
   id: number;
@@ -25,8 +26,16 @@ export interface NextPymeMasterRow {
   [key: string]: unknown;
 }
 
+/** type_document_id de una resolución que vino en el sobre DIAN
+ * (GetNumberingRangeResponse), donde ese dato no existe: ahí la DIAN
+ * identifica cada rango por prefijo, no por el tipo de documento de
+ * NextPyme. Sirve para que `find(type_document_id === X)` no la confunda
+ * nunca con una resolución de tipo conocido. */
+export const NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID = 0;
+
 export interface NextPymeResolution {
   id: number;
+  /** NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID cuando la respuesta no lo trae. */
   type_document_id: number;
   prefix: string;
   number: number;
@@ -51,7 +60,8 @@ export interface NextPymeConfigResolutionPayload {
   prefix: string;
   resolution: string;
   resolution_date: string;
-  technical_key: string;
+  /** Documento soporte no lleva clave técnica (la DIAN no se la asigna). */
+  technical_key?: string;
   from: number;
   to: number;
   generated_to_date?: number;
@@ -107,6 +117,80 @@ export interface NextPymeSupportDocumentCreatePayload {
     line_extension_amount: number | string;
     free_of_charge_indicator: boolean;
     description: string;
+    code: string;
+    type_item_identification_id: number;
+    price_amount: number | string;
+    base_quantity: number | string;
+    type_generation_transmition_id?: number;
+    start_date?: string;
+    tax_totals?: Array<{
+      tax_id: number;
+      tax_amount: string;
+      taxable_amount: string;
+      percent: string;
+    }>;
+  }>;
+}
+
+export interface NextPymeInvoiceCreatePayload {
+  type_document_id: number;
+  number: number;
+  date?: string;
+  time?: string;
+  prefix?: string;
+  notes?: string;
+  head_note?: string;
+  foot_note?: string;
+  type_currency_id?: number;
+  customer: {
+    identification_number: number | string;
+    dv?: number | string;
+    name: string;
+    phone?: string;
+    address?: string;
+    email?: string;
+    merchant_registration?: string;
+    type_document_identification_id: number;
+    type_organization_id: number;
+    municipality_id: number;
+    type_liability_id: number;
+    type_regime_id: number;
+  };
+  payment_form?: {
+    payment_form_id: number;
+    payment_method_id: number;
+    payment_due_date?: string;
+    duration_measure?: string | number;
+  };
+  allowance_charges?: Array<{
+    discount_id: number;
+    charge_indicator: boolean;
+    allowance_charge_reason: string;
+    amount: string;
+    base_amount: string;
+  }>;
+  legal_monetary_totals: {
+    line_extension_amount: string;
+    tax_exclusive_amount: string;
+    tax_inclusive_amount: string;
+    payable_amount: string;
+    allowance_total_amount?: string;
+    charge_total_amount?: string;
+    pre_paid_amount?: number | string;
+  };
+  tax_totals?: Array<{
+    tax_id: number;
+    tax_amount: string;
+    taxable_amount: string;
+    percent: string;
+  }>;
+  invoice_lines: Array<{
+    unit_measure_id: number;
+    invoiced_quantity: number | string;
+    line_extension_amount: number | string;
+    free_of_charge_indicator: boolean;
+    description: string;
+    notes?: string;
     code: string;
     type_item_identification_id: number;
     price_amount: number | string;
@@ -421,11 +505,38 @@ export class NextPymeApiClient {
   async createSupportDocument(
     payload: NextPymeSupportDocumentCreatePayload,
   ): Promise<UnknownRecord> {
+    return this.postDianUblDocument(
+      'support-document',
+      payload,
+      'el documento soporte',
+    );
+  }
+
+  async createInvoice(
+    payload: NextPymeInvoiceCreatePayload,
+  ): Promise<UnknownRecord> {
+    return this.postDianUblDocument('invoice', payload, 'la factura de venta');
+  }
+
+  /**
+   * POST genérico a un endpoint ubl2.1 que emite un documento ante la DIAN
+   * (support-document, invoice — misma forma de respuesta/validación en
+   * ambos). Compartido para no duplicar el chequeo de `IsValid`: NextPyme
+   * responde HTTP 200 con `success: true` incluso cuando la DIAN RECHAZÓ el
+   * documento — el resultado real viaja anidado en `ResponseDian`. Sin este
+   * chequeo, un documento rechazado se marcaba igual como enviado con
+   * éxito. Ver parseDianValidationResult.
+   */
+  private async postDianUblDocument(
+    endpointPath: string,
+    payload: unknown,
+    documentLabelForErrors: string,
+  ): Promise<UnknownRecord> {
     const token = this.requireToken();
     const baseUrl = this.getBaseUrl();
 
     this.logger.log(
-      `[support-document] POST ${baseUrl}/support-document body=${JSON.stringify(
+      `[${endpointPath}] POST ${baseUrl}/${endpointPath} body=${JSON.stringify(
         payload,
         null,
         2,
@@ -434,7 +545,7 @@ export class NextPymeApiClient {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.post<unknown>(`${baseUrl}/support-document`, payload, {
+        this.httpService.post<unknown>(`${baseUrl}/${endpointPath}`, payload, {
           headers: this.buildAuthHeaders(token),
           timeout: 60000,
           validateStatus: () => true,
@@ -442,7 +553,7 @@ export class NextPymeApiClient {
       );
 
       this.logger.log(
-        `[support-document] status=${response.status} respuesta=${this.preview(
+        `[${endpointPath}] status=${response.status} respuesta=${this.preview(
           response.data,
         )}`,
       );
@@ -451,11 +562,32 @@ export class NextPymeApiClient {
         const detail = this.extractErrorMessage(response.data);
         throw new BadGatewayException(
           detail ||
-            `No se pudo crear el documento soporte (código ${response.status}).`,
+            `No se pudo crear ${documentLabelForErrors} (código ${response.status}).`,
         );
       }
 
-      return (response.data as UnknownRecord) ?? {};
+      const data = (response.data as UnknownRecord) ?? {};
+      const dianValidation = parseDianValidationResult(data);
+
+      if (dianValidation?.isValid === false) {
+        const reason =
+          dianValidation.errorMessage ||
+          dianValidation.statusDescription ||
+          dianValidation.statusMessage ||
+          'La DIAN rechazó el documento.';
+
+        this.logger.error(
+          `[${endpointPath}] DIAN rechazó el documento (statusCode=${
+            dianValidation.statusCode ?? 'n/a'
+          }): ${reason}`,
+        );
+
+        throw new BadGatewayException(
+          `La DIAN rechazó ${documentLabelForErrors}: ${reason}`,
+        );
+      }
+
+      return data;
     } catch (error) {
       if (
         error instanceof BadGatewayException ||
@@ -465,7 +597,7 @@ export class NextPymeApiClient {
       }
 
       throw new BadGatewayException(
-        'No fue posible crear el documento soporte. Intenta nuevamente.',
+        `No fue posible crear ${documentLabelForErrors}. Intenta nuevamente.`,
       );
     }
   }
@@ -670,7 +802,94 @@ export class NextPymeApiClient {
     return results;
   }
 
+  /** GET /reports/resolutions responde en DOS formatos según la cuenta: la
+   * lista propia de NextPyme (`{ data: [...] }`) o el sobre crudo de la DIAN
+   * (GetNumberingRangeResponse), que no trae id, type_document_id ni number y
+   * por eso el parseo de lista lo descartaba entero, dejando la consulta en
+   * cero resoluciones. Se intentan los dos. */
   private parseResolutions(payload: unknown): NextPymeResolution[] {
+    const listResolutions = this.parseResolutionList(payload);
+
+    return listResolutions.length > 0
+      ? listResolutions
+      : this.parseDianNumberingRanges(payload);
+  }
+
+  /** Rangos de numeración tal como los devuelve la DIAN, anidados en
+   * ResponseDian.Envelope.Body...ResponseList.NumberRangeResponse. */
+  private parseDianNumberingRanges(payload: unknown): NextPymeResolution[] {
+    const ranges = this.readDianNumberRangeList(payload);
+
+    return ranges
+      .map((range, index) => {
+        const fromNumber = Number(range.FromNumber);
+        const toNumber = Number(range.ToNumber);
+        const prefix = String(range.Prefix ?? '').trim();
+        const technicalKey =
+          range.TechnicalKey != null ? String(range.TechnicalKey) : undefined;
+
+        return {
+          // La DIAN no numera los rangos; el índice solo sirve como clave
+          // estable dentro de esta misma respuesta.
+          id: index + 1,
+          type_document_id: NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID,
+          prefix,
+          number: fromNumber,
+          from: Number.isFinite(fromNumber) ? fromNumber : undefined,
+          to: Number.isFinite(toNumber) ? toNumber : undefined,
+          resolution:
+            range.ResolutionNumber != null
+              ? String(range.ResolutionNumber)
+              : undefined,
+          resolution_date:
+            range.ResolutionDate != null
+              ? String(range.ResolutionDate)
+              : undefined,
+          // La resolución de documento soporte no lleva clave técnica: la
+          // DIAN la devuelve en null y así se conserva.
+          technical_key: technicalKey?.trim() ? technicalKey : undefined,
+          date_from:
+            range.ValidDateFrom != null
+              ? String(range.ValidDateFrom)
+              : undefined,
+          date_to:
+            range.ValidDateTo != null ? String(range.ValidDateTo) : undefined,
+        } satisfies NextPymeResolution;
+      })
+      .filter((item) => item.prefix.length > 0 && Number.isFinite(item.number));
+  }
+
+  private readDianNumberRangeList(payload: unknown): UnknownRecord[] {
+    const path = [
+      'ResponseDian',
+      'Envelope',
+      'Body',
+      'GetNumberingRangeResponse',
+      'GetNumberingRangeResult',
+      'ResponseList',
+      'NumberRangeResponse',
+    ];
+
+    let node: unknown = payload;
+
+    for (const key of path) {
+      if (!node || typeof node !== 'object') {
+        return [];
+      }
+
+      node = (node as UnknownRecord)[key];
+    }
+
+    // Con un solo rango, la conversión XML→JSON devuelve el objeto suelto en
+    // vez de un arreglo de uno.
+    const ranges = Array.isArray(node) ? node : node ? [node] : [];
+
+    return ranges.filter(
+      (item): item is UnknownRecord => Boolean(item) && typeof item === 'object',
+    );
+  }
+
+  private parseResolutionList(payload: unknown): NextPymeResolution[] {
     const root = (payload ?? {}) as UnknownRecord;
     const data = Array.isArray(root.data)
       ? root.data

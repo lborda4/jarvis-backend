@@ -117,10 +117,12 @@ export class SaveJarvisResolutionRequestDto {
   @ApiPropertyOptional({ example: '2026-08-05' })
   authorizedAt?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'f5c872ebe43572e30c3f5c872ebe43572e65738132efc1864d3c536',
+    description:
+      'Obligatoria solo en factura electrónica: documento soporte no lleva clave técnica.',
   })
-  technicalKey: string;
+  technicalKey?: string;
 
   @ApiProperty({ example: '2026-08-05' })
   dateFrom: string;
@@ -135,4 +137,63 @@ export class SaveJarvisResolutionResponseDto {
 
   @ApiProperty({ type: JarvisResolutionDto })
   resolution: JarvisResolutionDto;
+}
+
+/** Resolución habilitada en la DIAN, tal como la reporta NextPyme. No trae
+ * `kind`: la DIAN identifica cada rango por prefijo y no dice si es de
+ * factura o de documento soporte, así que quién es cuál lo elige el usuario
+ * en la pantalla de configuración. */
+export class JarvisAvailableResolutionDto {
+  @ApiProperty({
+    example: 'DSJ-18764113677707',
+    description: 'Clave estable para identificar la resolución en la lista',
+  })
+  id: string;
+
+  @ApiProperty({ example: 'DSJ' })
+  prefix: string;
+
+  @ApiPropertyOptional({ example: '18764113677707', nullable: true })
+  formNumber?: string | null;
+
+  @ApiProperty({ example: 1 })
+  fromNumber: number;
+
+  @ApiProperty({ example: 10000 })
+  toNumber: number;
+
+  @ApiPropertyOptional({ example: 42, nullable: true })
+  nextConsecutive?: number | null;
+
+  @ApiPropertyOptional({
+    example: 'a2e4cf48298098fdd401d2e03b14ae13a048c58b6e6b2d122b39aca2a0250c1a',
+    nullable: true,
+    description: 'Null en documento soporte: la DIAN no le asigna clave',
+  })
+  technicalKey?: string | null;
+
+  @ApiPropertyOptional({ example: '2026-08-05', nullable: true })
+  authorizedAt?: string | null;
+
+  @ApiPropertyOptional({ example: '2026-08-05', nullable: true })
+  dateFrom?: string | null;
+
+  @ApiPropertyOptional({ example: '2028-08-05', nullable: true })
+  dateTo?: string | null;
+
+  @ApiPropertyOptional({ example: 'DOCUMENTO SOPORTE', nullable: true })
+  documentTypeLabel?: string | null;
+
+  @ApiPropertyOptional({
+    example: 11,
+    nullable: true,
+    description:
+      'type_document_id crudo de NextPyme — clave estable para agrupar por tipo de documento (documentTypeLabel es el nombre legible, pero podría repetirse; esto no).',
+  })
+  typeDocumentId?: number | null;
+}
+
+export class ListJarvisAvailableResolutionsResponseDto {
+  @ApiProperty({ type: [JarvisAvailableResolutionDto] })
+  resolutions: JarvisAvailableResolutionDto[];
 }

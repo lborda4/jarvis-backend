@@ -21,6 +21,10 @@ import {
   JarvisCatalogsResponseDto,
 } from './dto/create-jarvis-support-document.dto';
 import {
+  CreateJarvisInvoiceRequestDto,
+  CreateJarvisInvoiceResponseDto,
+} from './dto/create-jarvis-invoice.dto';
+import {
   CreateJarvisTerceroRequestDto,
   CreateJarvisTerceroResponseDto,
   JarvisTercerosListResponseDto,
@@ -28,6 +32,7 @@ import {
   LookupJarvisTerceroNitResponseDto,
 } from './dto/jarvis-tercero.dto';
 import {
+  ListJarvisAvailableResolutionsResponseDto,
   ParseJarvisResolutionResponseDto,
   ParseJarvisResolutionUploadDto,
   SaveJarvisResolutionRequestDto,
@@ -38,6 +43,7 @@ import {
   SaveJarvisCredentialsResponseDto,
 } from './dto/save-jarvis-credentials.dto';
 import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
+import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 import { JarvisResolutionParserService } from './jarvis-resolution-parser.service';
 import { JarvisSetupService } from './jarvis-setup.service';
 import { JarvisSupportDocumentSendService } from './jarvis-support-document-send.service';
@@ -50,6 +56,7 @@ export class JarvisController {
     private readonly jarvisSetupService: JarvisSetupService,
     private readonly jarvisTercerosService: JarvisTercerosService,
     private readonly jarvisSupportDocumentSendService: JarvisSupportDocumentSendService,
+    private readonly jarvisInvoiceSendService: JarvisInvoiceSendService,
     private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
     private readonly jarvisResolutionParserService: JarvisResolutionParserService,
   ) {}
@@ -101,6 +108,16 @@ export class JarvisController {
     @UploadedFile() file: Express.Multer.File | undefined,
   ): Promise<ParseJarvisResolutionResponseDto> {
     return this.jarvisResolutionParserService.parse(file);
+  }
+
+  @Get('resolutions/available')
+  @ApiOperation({
+    summary: 'Resoluciones DIAN habilitadas',
+    description:
+      'Consulta en NextPyme las resoluciones vigentes de la empresa para elegir cuál usar en factura electrónica y en documento soporte.',
+  })
+  listAvailableResolutions(): Promise<ListJarvisAvailableResolutionsResponseDto> {
+    return this.jarvisSetupService.listAvailableResolutions();
   }
 
   @Post('resolutions')
@@ -205,6 +222,22 @@ export class JarvisController {
     @Body() request: CreateManualJarvisSupportDocumentRequestDto,
   ): Promise<CreateManualJarvisSupportDocumentResponseDto> {
     return this.jarvisSupportDocumentSendService.createManualSupportDocument(
+      request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('invoices')
+  @ApiOperation({
+    summary: 'Crear y enviar factura de venta',
+    description:
+      'Construye el payload UBL de factura electrónica de venta y la emite de una vez con NextPyme invoice.create.',
+  })
+  createInvoice(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: CreateJarvisInvoiceRequestDto,
+  ): Promise<CreateJarvisInvoiceResponseDto> {
+    return this.jarvisInvoiceSendService.createAndSendInvoice(
       request,
       getAuthenticatedCompanyId(user),
     );

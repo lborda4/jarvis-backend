@@ -151,3 +151,96 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
     });
   });
 });
+
+/** Respuesta real de GET /reports/resolutions: el sobre crudo de la DIAN,
+ * sin id/type_document_id/number. La de documento soporte (DSJ) viene con
+ * TechnicalKey en null. */
+const DIAN_NUMBERING_RANGE_RESPONSE = {
+  success: true,
+  message: 'Consulta generada con éxito',
+  ResponseDian: {
+    Envelope: {
+      Body: {
+        GetNumberingRangeResponse: {
+          GetNumberingRangeResult: {
+            OperationCode: '100',
+            ResponseList: {
+              NumberRangeResponse: [
+                {
+                  ResolutionNumber: '18764113677707',
+                  ResolutionDate: '2026-08-05',
+                  Prefix: 'DSJ',
+                  FromNumber: '1',
+                  ToNumber: '10000',
+                  ValidDateFrom: '2026-08-05',
+                  ValidDateTo: '2028-08-05',
+                  TechnicalKey: null,
+                },
+                {
+                  ResolutionNumber: '18764113677438',
+                  ResolutionDate: '2026-08-05',
+                  Prefix: 'FVJ',
+                  FromNumber: '1',
+                  ToNumber: '10000',
+                  ValidDateFrom: '2026-08-05',
+                  ValidDateTo: '2028-08-05',
+                  TechnicalKey: 'a2e4cf48298098fdd401d2e03b14ae13a048c58b',
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+describe('NextPymeApiClient.listResolutions', () => {
+  function buildClientWithGet(data: unknown) {
+    const { client } = buildClient();
+    const httpGet = jest.fn().mockReturnValue(of({ status: 200, data }));
+    (client as any).httpService = { get: httpGet };
+    return { client, httpGet };
+  }
+
+  it('lee el sobre DIAN, que no trae id ni type_document_id', async () => {
+    const { client } = buildClientWithGet(DIAN_NUMBERING_RANGE_RESPONSE);
+
+    const resolutions = await client.listResolutions();
+
+    expect(resolutions).toHaveLength(2);
+    expect(resolutions[0]).toMatchObject({
+      prefix: 'DSJ',
+      resolution: '18764113677707',
+      from: 1,
+      to: 10000,
+      date_from: '2026-08-05',
+      date_to: '2028-08-05',
+    });
+    // Documento soporte no lleva clave técnica.
+    expect(resolutions[0].technical_key).toBeUndefined();
+    expect(resolutions[1].technical_key).toBe(
+      'a2e4cf48298098fdd401d2e03b14ae13a048c58b',
+    );
+  });
+
+  it('sigue leyendo el formato de lista propio de NextPyme', async () => {
+    const { client } = buildClientWithGet({
+      data: [
+        {
+          id: 7,
+          type_document_id: 11,
+          prefix: 'DSJ',
+          number: 42,
+          resolution: '18764113677707',
+        },
+      ],
+    });
+
+    const resolutions = await client.listResolutions();
+
+    expect(resolutions).toEqual([
+      expect.objectContaining({ id: 7, type_document_id: 11, number: 42 }),
+    ]);
+  });
+});

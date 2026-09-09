@@ -12,29 +12,17 @@ async function bootstrap() {
   const configService = app.get(ConfigService<AppConfiguration, true>);
 
   const port = configService.get('app.port', { infer: true });
+  const corsOrigins = configService.get('app.corsOrigins', { infer: true });
 
   app.enableCors({
-  origin: [
-    'http://localhost:5173',
-    'https://pos.siigo.com',
-    'https://www.jarviscol.com',
-  ],
-  credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'rquid'],
-});
+    origin: corsOrigins,
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'rquid'],
+  });
 
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  app.useWebSocketAdapter(
-    new SocketIoAdapter(
-      app,
-      [
-        'http://localhost:5173',
-        'https://pos.siigo.com',
-        'https://www.jarviscol.com',
-      ],
-    ),
-  );
+  app.useWebSocketAdapter(new SocketIoAdapter(app, corsOrigins));
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Backend API')

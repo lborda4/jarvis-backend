@@ -37,6 +37,15 @@ import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { JarvisSetupService } from './jarvis-setup.service';
+import {
+  daysBetweenLocalDates,
+  formatMoney,
+  readNextPymeCreatedConsecutive,
+  readNextPymeCreatedId,
+  readNextPymeCreatedNumber,
+  readNextPymeCreatedUniqueCode,
+  toMoney,
+} from './helpers/jarvis-nextpyme-response.helper';
 import type {
   GroupedSupportDocument,
   SupportDocumentExcelRow,
@@ -183,7 +192,7 @@ export class JarvisSupportDocumentSendService {
         );
       }
 
-      const lineTotal = this.toMoney(quantity * unitValue - discount);
+      const lineTotal = toMoney(quantity * unitValue - discount);
       const itemCode = item.code?.trim();
 
       return {
@@ -200,9 +209,9 @@ export class JarvisSupportDocumentSendService {
         itemDescription: description,
         ...(itemCode ? { itemCode } : {}),
         quantity,
-        unitValue: this.toMoney(unitValue),
+        unitValue: toMoney(unitValue),
         lineTotal,
-        taxAmount: this.toMoney(taxAmount),
+        taxAmount: toMoney(taxAmount),
         ...(request.observations?.trim()
           ? { observations: request.observations.trim() }
           : {}),
@@ -487,7 +496,7 @@ export class JarvisSupportDocumentSendService {
                     payment_method_id: request.payment.id,
                     payment_due_date: request.payment.due_date || issueDate,
                     duration_measure: String(
-                      this.daysBetween(
+                      daysBetweenLocalDates(
                         issueDate,
                         request.payment.due_date || issueDate,
                       ),
@@ -514,18 +523,22 @@ export class JarvisSupportDocumentSendService {
           this.logger.log(
             `[documentId=${documentId}] Respuesta NextPyme ${JSON.stringify(created)}`,
           );
-          const createdId = this.readCreatedId(created, numbering.number);
-          const createdConsecutive = this.readCreatedConsecutive(
+          const createdId = readNextPymeCreatedId(
             created,
             numbering.prefix,
             numbering.number,
           );
-          const createdNumber = this.readCreatedNumber(
+          const createdConsecutive = readNextPymeCreatedConsecutive(
+            created,
+            numbering.prefix,
+            numbering.number,
+          );
+          const createdNumber = readNextPymeCreatedNumber(
             created,
             numbering.number,
             createdConsecutive,
           );
-          const createdCude = this.readCreatedCude(created);
+          const createdCude = readNextPymeCreatedUniqueCode(created);
 
           await this.jarvisSetupService.commitResolutionNumber(
             companyId,
@@ -598,17 +611,17 @@ export class JarvisSupportDocumentSendService {
       ReturnType<ElectronicDocumentService['requireById']>
     >['payload'],
   ) {
-    const lineExtension = this.toMoney(payload.totals.subtotal);
-    const taxAmount = this.toMoney(payload.totals.iva);
-    const payable = this.toMoney(
+    const lineExtension = toMoney(payload.totals.subtotal);
+    const taxAmount = toMoney(payload.totals.iva);
+    const payable = toMoney(
       payload.totals.total || lineExtension + taxAmount,
     );
 
     return {
-      line_extension_amount: this.formatMoney(lineExtension),
-      tax_exclusive_amount: this.formatMoney(lineExtension),
-      tax_inclusive_amount: this.formatMoney(payable),
-      payable_amount: this.formatMoney(payable),
+      line_extension_amount: formatMoney(lineExtension),
+      tax_exclusive_amount: formatMoney(lineExtension),
+      tax_inclusive_amount: formatMoney(payable),
+      payable_amount: formatMoney(payable),
       allowance_total_amount: '0.00',
       charge_total_amount: '0.00',
       pre_paid_amount: '0.00',
@@ -628,16 +641,16 @@ export class JarvisSupportDocumentSendService {
       percent: string;
     }> = [];
 
-    const taxable = this.toMoney(payload.totals.subtotal);
-    const ivaAmount = this.toMoney(payload.totals.iva);
+    const taxable = toMoney(payload.totals.subtotal);
+    const ivaAmount = toMoney(payload.totals.iva);
 
     if (ivaAmount > 0 && taxable > 0) {
       const percent = (ivaAmount / taxable) * 100;
       totals.push({
         tax_id: this.nextPymeMasterCatalogService.getIvaTaxId(),
-        tax_amount: this.formatMoney(ivaAmount),
-        taxable_amount: this.formatMoney(taxable),
-        percent: this.formatMoney(percent),
+        tax_amount: formatMoney(ivaAmount),
+        taxable_amount: formatMoney(taxable),
+        percent: formatMoney(percent),
       });
     }
 
@@ -648,13 +661,13 @@ export class JarvisSupportDocumentSendService {
 
       const percentage = Number(retention.percentage ?? 0);
       const taxAmount =
-        percentage > 0 ? this.toMoney((taxable * percentage) / 100) : 0;
+        percentage > 0 ? toMoney((taxable * percentage) / 100) : 0;
 
       totals.push({
         tax_id: retention.id,
-        tax_amount: this.formatMoney(taxAmount),
-        taxable_amount: this.formatMoney(taxable),
-        percent: this.formatMoney(percentage),
+        tax_amount: formatMoney(taxAmount),
+        taxable_amount: formatMoney(taxable),
+        percent: formatMoney(percentage),
       });
     }
 
@@ -691,10 +704,10 @@ export class JarvisSupportDocumentSendService {
 
     return sourceItems.map((item, index) => {
       const quantity = item.cantidad > 0 ? item.cantidad : 1;
-      const lineExtension = this.toMoney(
+      const lineExtension = toMoney(
         item.total > 0 ? item.total : quantity * item.valorUnitario,
       );
-      const unitValue = this.toMoney(
+      const unitValue = toMoney(
         item.valorUnitario > 0 ? item.valorUnitario : lineExtension / quantity,
       );
 
@@ -719,7 +732,7 @@ export class JarvisSupportDocumentSendService {
                 {
                   tax_id: ivaTax.tax_id,
                   tax_amount: ivaTax.tax_amount,
-                  taxable_amount: this.formatMoney(lineExtension),
+                  taxable_amount: formatMoney(lineExtension),
                   percent: ivaTax.percent,
                 },
               ],
@@ -729,124 +742,4 @@ export class JarvisSupportDocumentSendService {
     });
   }
 
-  private readCreatedId(
-    payload: Record<string, unknown>,
-    fallbackNumber: number,
-  ): string {
-    const candidates = [
-      payload.uuid,
-      payload.cude,
-      payload.cuds,
-      payload.id,
-      (payload.data as Record<string, unknown> | undefined)?.uuid,
-      (payload.data as Record<string, unknown> | undefined)?.cude,
-      (payload.data as Record<string, unknown> | undefined)?.id,
-    ];
-
-    for (const candidate of candidates) {
-      if (candidate != null && String(candidate).trim()) {
-        return String(candidate).trim();
-      }
-    }
-
-    return `NP-DS-${fallbackNumber}`;
-  }
-
-  private readCreatedNumber(
-    payload: Record<string, unknown>,
-    fallbackNumber: number,
-    consecutive?: string | null,
-  ): number {
-    const candidates = [
-      payload.number,
-      (payload.data as Record<string, unknown> | undefined)?.number,
-      (payload.resolution as Record<string, unknown> | undefined)?.number,
-    ];
-
-    for (const candidate of candidates) {
-      const parsed = Number(candidate);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-
-    if (consecutive) {
-      const digits = consecutive.match(/(\d+)\s*$/)?.[1];
-      const parsed = digits ? Number(digits) : NaN;
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-
-    return fallbackNumber;
-  }
-
-  private readCreatedConsecutive(
-    payload: Record<string, unknown>,
-    prefix: string,
-    fallbackNumber: number,
-  ): string {
-    const normalizedPrefix = prefix.trim().toUpperCase();
-    const message = typeof payload.message === 'string' ? payload.message : '';
-    const messageMatch = message.match(/#\s*([A-Za-z0-9_-]+)/);
-    if (messageMatch?.[1]) {
-      return messageMatch[1].trim().toUpperCase();
-    }
-
-    const nested = [
-      payload.next_consecutive,
-      payload.consecutive,
-      (payload.data as Record<string, unknown> | undefined)?.next_consecutive,
-      (payload.data as Record<string, unknown> | undefined)?.consecutive,
-      (payload.resolution as Record<string, unknown> | undefined)
-        ?.next_consecutive,
-    ];
-
-    for (const candidate of nested) {
-      if (candidate != null && String(candidate).trim()) {
-        return String(candidate).trim().toUpperCase();
-      }
-    }
-
-    const number = this.readCreatedNumber(payload, fallbackNumber);
-    return `${normalizedPrefix}${number}`;
-  }
-
-  private readCreatedCude(payload: Record<string, unknown>): string | null {
-    const candidates = [
-      payload.cude,
-      payload.cuds,
-      (payload.data as Record<string, unknown> | undefined)?.cude,
-      (payload.data as Record<string, unknown> | undefined)?.cuds,
-    ];
-
-    for (const candidate of candidates) {
-      if (candidate != null && String(candidate).trim()) {
-        return String(candidate).trim();
-      }
-    }
-
-    return null;
-  }
-
-  private toMoney(value: number): number {
-    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-  }
-
-  private formatMoney(value: number): string {
-    return this.toMoney(value).toFixed(2);
-  }
-
-  private daysBetween(fromDate: string, toDate: string): number {
-    const from = new Date(`${fromDate}T00:00:00`);
-    const to = new Date(`${toDate}T00:00:00`);
-    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-      return 0;
-    }
-
-    return Math.max(
-      0,
-      Math.round((to.getTime() - from.getTime()) / 86_400_000),
-    );
-  }
 }

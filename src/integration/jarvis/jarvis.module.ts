@@ -9,6 +9,7 @@ import { IntegrationModule } from '../integration.module';
 import { JarvisTercero } from './entities/jarvis-tercero.entity';
 import { JarvisController } from './jarvis.controller';
 import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
+import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 import { JarvisResolutionParserService } from './jarvis-resolution-parser.service';
 import { JarvisSetupService } from './jarvis-setup.service';
 import { JarvisSupportDocumentSendService } from './jarvis-support-document-send.service';
@@ -34,6 +35,7 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     JarvisTercerosService,
     JarvisDocumentPreparationService,
     JarvisSupportDocumentSendService,
+    JarvisInvoiceSendService,
     JarvisResolutionParserService,
     NextPymeApiClient,
     NextPymeMasterCatalogService,
