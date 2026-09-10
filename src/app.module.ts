@@ -18,6 +18,7 @@ import { JarvisModule } from './integration/jarvis/jarvis.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { AdminModule } from './admin/admin.module';
 import { BoldModule } from './bold/bold.module';
+import { ProductsModule } from './products/products.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { BoldModule } from './bold/bold.module';
     JarvisModule,
     AdminModule,
     BoldModule,
+    ProductsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
