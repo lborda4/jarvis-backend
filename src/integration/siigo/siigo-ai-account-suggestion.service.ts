@@ -34,7 +34,7 @@ const HISTORICAL_EXAMPLES_LIMIT = 5;
 // Respuesta angosta (itemType + accountCode nada más): alcanza con pocos
 // tokens de salida — probado en vivo con openai/gpt-4o-mini en ~15-20 tokens
 // reales de respuesta.
-const ITEM_CLASSIFICATION_MAX_TOKENS = 500;
+const ITEM_CLASSIFICATION_MAX_TOKENS = 2000;
 // Empresas con catálogo de productos grande (ej. una textilera con miles de
 // referencias de tela) hacen que mandar el catálogo COMPLETO en cada
 // clasificación explote en tokens — caso real reportado: 3139 productos ≈
@@ -66,6 +66,9 @@ export interface ItemTypeAndAccountClassification {
   accountName: string | null;
   productCode: string | null;
   productName: string | null;
+  /** 0-100 — ver ParsedPurchaseItemClassification.confidence. null cuando
+   * no hubo clasificación en absoluto (ej. sin catálogo de cuentas). */
+  confidence: number | null;
 }
 
 const EMPTY_ITEM_CLASSIFICATION: ItemTypeAndAccountClassification = {
@@ -74,6 +77,7 @@ const EMPTY_ITEM_CLASSIFICATION: ItemTypeAndAccountClassification = {
   accountName: null,
   productCode: null,
   productName: null,
+  confidence: null,
 };
 
 function extractKeywords(descriptions: string[]): string[] {
@@ -396,6 +400,7 @@ export class SiigoAiAccountSuggestionService {
         itemType: parsed.itemType,
         productCode: matchedProduct.code,
         productName: matchedProduct.name,
+        confidence: parsed.confidence,
       };
     }
 
@@ -431,6 +436,7 @@ export class SiigoAiAccountSuggestionService {
         matchedAccount.name,
         accountNameByCode,
       ),
+      confidence: parsed.confidence,
     };
   }
 }

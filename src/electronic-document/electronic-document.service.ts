@@ -36,6 +36,10 @@ import {
   SuggestedPurchaseItemConfig,
 } from '../integration/helpers/supplier-preference.helper';
 import { indexSupplierItemAccountMappings } from '../integration/helpers/supplier-item-account-mapping.helper';
+import {
+  SaveElectronicDocumentDraftRequestDto,
+  SaveElectronicDocumentDraftResponseDto,
+} from './dto/save-electronic-document-draft.dto';
 import { SupplierItemAccountMapping } from '../integration/entities/supplier-item-account-mapping.entity';
 import { SupplierItemAccountMappingsRepository } from '../integration/repositories/supplier-item-account-mappings.repository';
 import {
@@ -338,6 +342,48 @@ export class ElectronicDocumentService {
    * Elimina un documento electrónico local que aún no está en estado "lista"
    * (PURCHASE_CREATED). Aplica a Documento soporte y Factura de compra.
    */
+  /**
+   * Guarda el borrador de contabilización (lo que el contador ajustó en el
+   * panel de detalle) en electronic_documents.draft. El historial de SIIGO
+   * NO se toca acá: ese se escribe solo cuando el envío salió bien y SIIGO
+   * confirmó, porque registra lo que pasó de verdad, no lo que se está
+   * preparando.
+   */
+  async saveDraft(
+    documentId: string,
+    companyId: string,
+    request: SaveElectronicDocumentDraftRequestDto,
+  ): Promise<SaveElectronicDocumentDraftResponseDto> {
+    const document = await this.requireById(documentId, companyId);
+
+    if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+      throw new BadRequestException(
+        'No se puede editar un documento que ya se envió a SIIGO.',
+      );
+    }
+
+    const savedAt = new Date().toISOString();
+
+    document.draft = {
+      items: request.items,
+      accountCode: request.accountCode ?? null,
+      paymentMethodId: request.paymentMethodId ?? null,
+      dueDate: request.dueDate ?? null,
+      observations: request.observations ?? null,
+      retentionTaxIds: request.retentionTaxIds,
+      documentDiscount: request.documentDiscount ?? null,
+      savedAt,
+    };
+
+    await this.electronicDocumentsRepository.save(document);
+
+    this.logger.log(
+      `[documentId=${document.id}] Borrador guardado (items=${request.items?.length ?? 0}, cuenta=${request.accountCode ?? '—'})`,
+    );
+
+    return { success: true, status: document.status, savedAt };
+  }
+
   async deleteLocalDocument(
     documentId: string,
     companyId: string,

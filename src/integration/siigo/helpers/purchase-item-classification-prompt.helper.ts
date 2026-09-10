@@ -28,6 +28,12 @@ export interface ParsedPurchaseItemClassification {
   itemType: 'Account' | 'Product' | null;
   accountCode: string | null;
   productCode: string | null;
+  /** 0-100, qué tan segura está la IA de esta elección — null si la
+   * respuesta no trajo un valor válido. Ver SiigoPurchaseAiClassificationService:
+   * decide si el documento queda "Pendiente" (≥80) o "Requiere revisión"
+   * (<80) para que el contador sepa cuáles mirar con más cuidado, sin dejar
+   * de sugerir nada nunca. */
+  confidence: number | null;
 }
 
 // Respuesta mínima a propósito (sin IVA/retenciones/rationale/confidence):
@@ -49,23 +55,27 @@ const SYSTEM_PROMPT_WITH_PRODUCTS = `Clasificas UNA factura de compra colombiana
 
 Tu respuesta es UN SOLO objeto para la factura completa, nunca uno por ítem — no existe un campo para eso. Si hay varios ítems, elegí la cuenta/producto que mejor represente el conjunto (normalmente comparten el mismo concepto de gasto); no dejes de responder ni expliques la duda, solo elegí la mejor opción única.
 
-Reglas generales: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno.
+Reglas generales: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. SIEMPRE tenés que elegir una cuenta o un producto — dejar accountCode y productCode los dos en null solo es válido si genuinamente NINGÚN código del catálogo aplica, algo que casi nunca debería pasar (las cuentas PUC son categorías amplias). Si no estás seguro, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada.
 
-Cuenta: las cuentas PUC son categorías amplias de gasto/costo (ej. "Alimentos y bebidas", "Servicios", "Papelería"), no una descripción exacta del ítem — si el ítem es claramente un gasto/costo, elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. Dejá accountCode null solo si de verdad ninguna categoría del catálogo aplica.
+Cuenta: las cuentas PUC son categorías amplias de gasto/costo (ej. "Alimentos y bebidas", "Servicios", "Papelería"), no una descripción exacta del ítem — si el ítem es claramente un gasto/costo, elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra.
 
-Producto: a diferencia de Cuenta, un código de producto identifica un ítem específico del inventario — elegilo solo si el nombre del catálogo coincide claramente con la descripción del ítem. Si no hay una coincidencia clara, productCode null — acá sí es mejor vacío que mal puesto (un producto equivocado es un dato más específico y más difícil de detectar después).
+Producto: a diferencia de Cuenta, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo.
 
 Si es Cuenta, productCode siempre null; si es Producto, accountCode siempre null.
 
-Responde SOLO este JSON, sin texto extra: {"itemType":"Account"|"Product"|null,"accountCode":string|null,"productCode":string|null}`;
+confidence: entero de 0 a 100, qué tan segura estás de la elección. 90-100 = hay un ejemplo previo de este proveedor con la misma descripción o casi idéntica. 60-89 = coincide bien por tipo de gasto/producto pero sin ejemplo previo exacto. Por debajo de 50 = es una decisión forzada, sin señal fuerte, elegiste la menos mala entre varias opciones parecidas. Sé honesta: es más útil reportar baja confianza en una elección dudosa que inflarla.
+
+Responde SOLO este JSON, sin texto extra: {"itemType":"Account"|"Product"|null,"accountCode":string|null,"productCode":string|null,"confidence":number}`;
 
 const SYSTEM_PROMPT_ACCOUNTS_ONLY = `Clasificas UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems listados), eligiendo la cuenta PUC (gasto/costo) que le corresponde. Esta empresa NO tiene catálogo de productos en SIIGO, así que itemType es SIEMPRE "Account" — nunca "Product", aunque el ítem sea un bien físico (ej. alimentos, bebidas, insumos): sin catálogo de productos, siempre se contabiliza como cuenta de gasto o costo.
 
 Tu respuesta es UN SOLO objeto para la factura completa, nunca uno por ítem — no existe un campo para eso. Si hay varios ítems, elegí la cuenta que mejor represente el conjunto (normalmente comparten el mismo concepto de gasto); no dejes de responder ni expliques la duda, solo elegí la mejor opción única.
 
-Reglas: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. Las cuentas PUC son categorías amplias de gasto/costo (ej. "Alimentos y bebidas", "Comercio al por mayor y al por menor", "Servicios"), no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. Dejá accountCode null solo si de verdad ninguna categoría del catálogo aplica.
+Reglas: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. Las cuentas PUC son categorías amplias de gasto/costo (ej. "Alimentos y bebidas", "Comercio al por mayor y al por menor", "Servicios"), no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. SIEMPRE tenés que elegir una cuenta — dejar accountCode null solo es válido si genuinamente NINGUNA categoría del catálogo aplica, algo que casi nunca debería pasar. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada.
 
-Responde SOLO este JSON, sin texto extra: {"itemType":"Account"|null,"accountCode":string|null,"productCode":null}`;
+confidence: entero de 0 a 100, qué tan segura estás de la elección. 90-100 = hay un ejemplo previo de este proveedor con la misma descripción o casi idéntica. 60-89 = coincide bien por tipo de gasto pero sin ejemplo previo exacto. Por debajo de 50 = es una decisión forzada, sin señal fuerte. Sé honesta: es más útil reportar baja confianza en una elección dudosa que inflarla.
+
+Responde SOLO este JSON, sin texto extra: {"itemType":"Account"|null,"accountCode":string|null,"productCode":null,"confidence":number}`;
 
 export function buildPurchaseItemClassificationPrompt(
   params: PurchaseItemClassificationPromptParams,
@@ -134,7 +144,22 @@ const EMPTY_PARSED_RESULT: ParsedPurchaseItemClassification = {
   itemType: null,
   accountCode: null,
   productCode: null,
+  confidence: null,
 };
+
+/** Clampeado a [0, 100] en vez de descartar valores fuera de rango — un
+ * modelo que responde 105 o -5 claramente quiso decir "muy alta"/"muy baja",
+ * no un dato corrupto que deba tirarse. `undefined`/no numérico → null (no
+ * se puede decidir Pendiente vs Requiere revisión sin esto). */
+function toConfidenceOrNull(value: unknown): number | null {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(parsed)));
+}
 
 export function parsePurchaseItemClassificationResponse(
   rawText: string,
@@ -171,6 +196,7 @@ export function parsePurchaseItemClassificationResponse(
     record.productCode.trim()
       ? record.productCode.trim()
       : null;
+  const confidence = toConfidenceOrNull(record.confidence);
 
-  return { itemType, accountCode, productCode };
+  return { itemType, accountCode, productCode, confidence };
 }

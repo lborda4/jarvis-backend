@@ -162,7 +162,7 @@ export class SiigoPurchaseAiClassificationService {
       );
 
     console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de invocar classifyItemTypeAndAccount — ${new Date().toISOString()} — itemType=${classification.itemType ?? 'null'}, accountCode=${classification.accountCode ?? 'null'}, accountName=${classification.accountName ?? 'null'}, productCode=${classification.productCode ?? 'null'}, productName=${classification.productName ?? 'null'}`,
+      `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de invocar classifyItemTypeAndAccount — ${new Date().toISOString()} — itemType=${classification.itemType ?? 'null'}, accountCode=${classification.accountCode ?? 'null'}, accountName=${classification.accountName ?? 'null'}, productCode=${classification.productCode ?? 'null'}, productName=${classification.productName ?? 'null'}, confidence=${classification.confidence ?? 'null'}`,
     );
 
     if (!classification.accountCode && !classification.productCode) {
@@ -205,6 +205,7 @@ export class SiigoPurchaseAiClassificationService {
               }
             : null,
           retentions: [],
+          confidence: classification.confidence,
         },
       },
       companyId,

@@ -64,11 +64,8 @@ import { SiigoPurchaseSendService } from './siigo-purchase-send.service';
 import { SiigoSupplierCreationService } from './siigo-supplier-creation.service';
 import { SiigoValidationService } from './siigo-validation.service';
 import { SiigoAuthService } from './siigo-auth.service';
-import { SiigoBalanceTrialImportService } from './siigo-balance-trial-import.service';
-import {
-  ImportBalanceTrialRequestDto,
-  ImportBalanceTrialResponseDto,
-} from './dto/import-balance-trial-response.dto';
+import { SiigoAccountsImportService } from './siigo-accounts-import.service';
+import { ImportSiigoAccountsResponseDto } from './dto/import-siigo-accounts-response.dto';
 import {
   ListSiigoAccountsQueryDto,
   SiigoAccountCatalogItemDto,
@@ -142,7 +139,7 @@ export class SiigoController {
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
     private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
-    private readonly siigoBalanceTrialImportService: SiigoBalanceTrialImportService,
+    private readonly siigoAccountsImportService: SiigoAccountsImportService,
     private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
     private readonly siigoAiAccountSuggestionService: SiigoAiAccountSuggestionService,
     private readonly siigoPurchaseHistorySyncService: SiigoPurchaseHistorySyncService,
@@ -488,22 +485,20 @@ export class SiigoController {
     );
   }
 
-  @Post('balance-trial/import')
+  @Post('accounts/import')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Importar Balance de Prueba general',
+    summary: 'Importar cuentas contables desde Excel',
     description:
-      'Sin archivo: solicita el reporte a SIIGO (últimos 3 años), descarga el Excel y sincroniza cuentas contables en siigo_accounts. Con archivo: procesa el Excel subido manualmente.',
+      'Lee el Excel del plan de cuentas y guarda en siigo_accounts las de clase 1, 2, 5, 6 y 7 que no manejan vencimientos, están activas y son de nivel transaccional.',
   })
-  importBalanceTrial(
+  importAccounts(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() request: ImportBalanceTrialRequestDto,
-  ): Promise<ImportBalanceTrialResponseDto> {
-    return this.siigoBalanceTrialImportService.importBalanceTrial(
+  ): Promise<ImportSiigoAccountsResponseDto> {
+    return this.siigoAccountsImportService.importFromExcel(
       file,
-      request,
       getAuthenticatedCompanyId(user),
     );
   }

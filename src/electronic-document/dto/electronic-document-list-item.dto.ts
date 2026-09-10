@@ -5,6 +5,7 @@ import {
   SupplierRetentionPreference,
 } from '../../integration/interfaces/supplier-mapping-value.interface';
 import { ElectronicDocumentListItemItemDto } from './electronic-document-list-item-item.dto';
+import type { ElectronicDocumentDraft } from '../interfaces/electronic-document-draft.interface';
 import {
   SuggestedProduct,
   SuggestedPurchaseItemConfig,
@@ -39,6 +40,10 @@ export class ElectronicDocumentListItemDto {
    * envió desde Jarvis — el frontend lo muestra como "Existente en SIIGO"
    * en vez de "Lista" (ver mapDocumentToImportRowStatus). */
   alreadyInSiigo: boolean;
+  /** Ajustes guardados por el contador y todavía sin enviar. El panel de
+   * detalle arranca de acá en vez de recalcular las sugerencias, para que lo
+   * que escribió siga ahí después de recargar. */
+  draft: ElectronicDocumentDraft | null;
   suggestedAccount: SuggestedAccount | null;
   /** Sugerencia de producto (solo cuando la clasificación con IA determinó
    * itemType='Product') — a diferencia de `suggestedAccount`, no tiene un
@@ -55,6 +60,13 @@ export class ElectronicDocumentListItemDto {
    * fijos siguen llegando completos. El objeto entero es null solo si el
    * proveedor es nuevo o nunca se sincronizó. */
   suggestedItemConfig: SuggestedPurchaseItemConfig | null;
+  /** 0-100, confianza que reportó la clasificación automática con IA para
+   * suggestedAccount/suggestedProduct — null si esa clasificación nunca
+   * corrió para este documento (ej. ya tenía cuenta resuelta por historial,
+   * o es un tipo de documento que no pasa por esa clasificación). El
+   * frontend la usa para mostrar "Requiere revisión" en vez de "Pendiente"
+   * cuando queda por debajo del umbral (hoy 80). */
+  aiConfidence: number | null;
   observations?: string | null;
   items?: ElectronicDocumentListItemItemDto[];
   createdAt: string;

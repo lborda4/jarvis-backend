@@ -15,7 +15,7 @@ import { SiigoSupplierCreationService } from './siigo-supplier-creation.service'
 import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
 import { SiigoDocumentPreparationService } from './siigo-document-preparation.service';
 import { SiigoDocumentResumeService } from './siigo-document-resume.service';
-import { SiigoBalanceTrialImportService } from './siigo-balance-trial-import.service';
+import { SiigoAccountsImportService } from './siigo-accounts-import.service';
 import { SiigoAccountsBalanceSyncService } from './siigo-accounts-balance-sync.service';
 import { SiigoValidationService } from './siigo-validation.service';
 import { SiigoSupportDocumentSendService } from './siigo-support-document-send.service';
@@ -84,7 +84,7 @@ import { OpenRouterModule } from '../openrouter/openrouter.module';
     SiigoCostCentersCatalogService,
     SiigoProductsCatalogService,
     SiigoTaxesCatalogService,
-    SiigoBalanceTrialImportService,
+    SiigoAccountsImportService,
     SiigoAccountsBalanceSyncService,
     SiigoAiAccountSuggestionService,
     SiigoPurchaseHistorySyncService,

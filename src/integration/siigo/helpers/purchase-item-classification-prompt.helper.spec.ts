@@ -19,17 +19,34 @@ describe('buildPurchaseItemClassificationPrompt', () => {
     expect(messages[1].content).toContain('51356001');
   });
 
-  it('no pide confidence/rationale/IVA/retenciones en el prompt', () => {
+  it('pide confidence (para decidir Pendiente vs Requiere revisión), pero no rationale/IVA/retenciones', () => {
     const messages = buildPurchaseItemClassificationPrompt({
       supplierName: 'Proveedor S.A.S',
       items: [{ descripcion: 'X' }],
       accounts: [],
     });
 
-    expect(messages[0].content).not.toMatch(/confidence/i);
+    expect(messages[0].content).toMatch(/confidence/i);
     expect(messages[0].content).not.toMatch(/rationale/i);
     expect(messages[0].content).not.toMatch(/IVA/);
     expect(messages[0].content).not.toMatch(/retenci/i);
+  });
+
+  it('instruye a siempre elegir una opción en vez de dejar todo en null', () => {
+    const withProducts = buildPurchaseItemClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      items: [{ descripcion: 'X' }],
+      accounts: [],
+      products: [{ code: 'PROD-001', name: 'Producto de prueba' }],
+    });
+    const accountsOnly = buildPurchaseItemClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      items: [{ descripcion: 'X' }],
+      accounts: [],
+    });
+
+    expect(withProducts[0].content).toMatch(/SIEMPRE tenés que elegir/);
+    expect(accountsOnly[0].content).toMatch(/SIEMPRE tenés que elegir/);
   });
 
   it('incluye los ejemplos históricos cuando se proveen', () => {
@@ -88,15 +105,16 @@ describe('buildPurchaseItemClassificationPrompt', () => {
 });
 
 describe('parsePurchaseItemClassificationResponse', () => {
-  it('parsea un JSON válido de tipo Cuenta con su código', () => {
+  it('parsea un JSON válido de tipo Cuenta con su código y confidence', () => {
     const result = parsePurchaseItemClassificationResponse(
-      '{"itemType": "Account", "accountCode": "51356001"}',
+      '{"itemType": "Account", "accountCode": "51356001", "confidence": 92}',
     );
 
     expect(result).toEqual({
       itemType: 'Account',
       accountCode: '51356001',
       productCode: null,
+      confidence: 92,
     });
   });
 
@@ -109,7 +127,28 @@ describe('parsePurchaseItemClassificationResponse', () => {
       itemType: 'Product',
       accountCode: null,
       productCode: 'PROD-001',
+      confidence: null,
     });
+  });
+
+  it('clampea confidence fuera de [0, 100] en vez de descartarlo', () => {
+    const tooHigh = parsePurchaseItemClassificationResponse(
+      '{"itemType": "Account", "accountCode": "51356001", "confidence": 140}',
+    );
+    const tooLow = parsePurchaseItemClassificationResponse(
+      '{"itemType": "Account", "accountCode": "51356001", "confidence": -20}',
+    );
+
+    expect(tooHigh.confidence).toBe(100);
+    expect(tooLow.confidence).toBe(0);
+  });
+
+  it('confidence queda null si no es numérico', () => {
+    const result = parsePurchaseItemClassificationResponse(
+      '{"itemType": "Account", "accountCode": "51356001", "confidence": "muy segura"}',
+    );
+
+    expect(result.confidence).toBeNull();
   });
 
   it('ignora accountCode si el tipo es Producto, y productCode si el tipo es Cuenta', () => {
@@ -135,6 +174,7 @@ describe('parsePurchaseItemClassificationResponse', () => {
       itemType: 'Account',
       accountCode: '51356001',
       productCode: null,
+      confidence: null,
     });
   });
 
@@ -147,6 +187,7 @@ describe('parsePurchaseItemClassificationResponse', () => {
       itemType: null,
       accountCode: null,
       productCode: null,
+      confidence: null,
     });
   });
 
@@ -159,6 +200,7 @@ describe('parsePurchaseItemClassificationResponse', () => {
       itemType: null,
       accountCode: null,
       productCode: null,
+      confidence: null,
     });
   });
 });

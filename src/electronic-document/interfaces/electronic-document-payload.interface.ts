@@ -16,6 +16,12 @@ export interface AiSuggestionSnapshot {
   account?: { code: string; name: string } | null;
   product?: { code: string; name: string } | null;
   retentions: SupplierRetentionPreference[];
+  /** 0-100, qué tan segura estuvo la IA de account/product — ver
+   * SiigoPurchaseAiClassificationService.classifyOne. Decide si el
+   * documento se ve como "Pendiente" (≥80) o "Requiere revisión" (<80) en
+   * el listado. null en snapshots viejos (de antes de este campo) o cuando
+   * la clasificación automática nunca corrió para este documento. */
+  confidence?: number | null;
 }
 
 export interface ElectronicDocumentSupplier {
