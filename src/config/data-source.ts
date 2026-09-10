@@ -14,6 +14,9 @@ import { JarvisTercero } from '../integration/jarvis/entities/jarvis-tercero.ent
 import { PurchaseInvoiceImportJob } from '../invoices/entities/purchase-invoice-import-job.entity';
 import { PurchaseInvoiceImportJobRow } from '../invoices/entities/purchase-invoice-import-job-row.entity';
 import { Plan } from '../plan/entities/plan.entity';
+import { Product } from '../products/entities/product.entity';
+import { ProductCategory } from '../products/entities/product-category.entity';
+import { ProductPriceList } from '../products/entities/product-price-list.entity';
 import { loadEnvironmentVariables } from './env-file.util';
 
 loadEnvironmentVariables();
@@ -46,6 +49,9 @@ export default new DataSource({
     AiGenerationLog,
     User,
     UserCompany,
+    Product,
+    ProductCategory,
+    ProductPriceList,
   ],
   migrations: ['src/migrations/*.ts'],
 });
