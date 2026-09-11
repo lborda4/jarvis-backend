@@ -104,6 +104,13 @@ export class NextPymeMasterCatalogService {
     return this.getTable('municipalities');
   }
 
+  /** Unidades de medida DIAN (tabla maestra `unit_measures`). El catálogo es
+   * el mismo para todas las empresas (dato maestro DIAN), por eso se cachea
+   * global; el token solo se usa en la primera carga contra NextPyme. */
+  async getUnitMeasures(tokenOverride?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable('unit_measures', tokenOverride);
+  }
+
   async getTypeLiabilities(): Promise<NextPymeMasterRow[]> {
     return this.getTable('type_liabilities');
   }
@@ -237,7 +244,10 @@ export class NextPymeMasterCatalogService {
     return this.resolutionsInFlight;
   }
 
-  private async getTable(table: string): Promise<NextPymeMasterRow[]> {
+  private async getTable(
+    table: string,
+    tokenOverride?: string,
+  ): Promise<NextPymeMasterRow[]> {
     const now = Date.now();
     const cached = this.cache.get(table);
 
@@ -251,7 +261,7 @@ export class NextPymeMasterCatalogService {
     }
 
     const request = this.nextPymeApiClient
-      .fetchMasterTable(table)
+      .fetchMasterTable(table, tokenOverride)
       .then((value) => {
         this.cache.set(table, { loadedAt: now, value });
         return value;

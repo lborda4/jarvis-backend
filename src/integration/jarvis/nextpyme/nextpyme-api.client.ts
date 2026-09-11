@@ -346,8 +346,13 @@ export class NextPymeApiClient {
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
-  async fetchMasterTable(table: string): Promise<NextPymeMasterRow[]> {
-    const token = this.requireToken();
+  async fetchMasterTable(
+    table: string,
+    tokenOverride?: string,
+  ): Promise<NextPymeMasterRow[]> {
+    // Prioriza el token propio de la empresa (companies.next_pyme_token); si
+    // no tiene uno configurado, cae al NEXTPYME_API_TOKEN global.
+    const token = tokenOverride?.trim() || this.requireToken();
     const baseUrl = this.getBaseUrl();
 
     try {
