@@ -138,7 +138,7 @@ export class JarvisTercerosService {
   /**
    * Candidatos a crear para el modal de creación masiva: un proveedor
    * distinto por cada documento en "Requiere proveedor" (ver
-   * findPendingJarvisSuppliers), enriquecido con la consulta a NextPyme —
+   * findPendingSupplierCandidates), enriquecido con la consulta a NextPyme —
    * igual que el autocompletado del modal uno por uno (ver
    * CreateJarvisTerceroModal en el frontend), pero para todos los pendientes
    * de una vez. Si NextPyme falla para un proveedor puntual, ese proveedor
@@ -152,7 +152,7 @@ export class JarvisTercerosService {
     await this.requireJarvisIntegration(trimmedCompanyId);
 
     const pendingRows =
-      await this.electronicDocumentsRepository.findPendingJarvisSuppliers(
+      await this.electronicDocumentsRepository.findPendingSupplierCandidates(
         trimmedCompanyId,
       );
     const companyToken = await this.resolveCompanyNextPymeToken(

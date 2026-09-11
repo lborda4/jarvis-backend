@@ -289,14 +289,16 @@ export class ElectronicDocumentsRepository {
    * Un candidato por proveedor distinto (NIT + tipo de documento) que sigue
    * en "Requiere proveedor" (mismo criterio que el bracket REQUIERE_PROVEEDOR
    * de applyImportStatusFilters: supplierExistsInSiigo=false o status
-   * SUPPLIER_NOT_FOUND, sin contar fallidos/completados) — pensado para el
-   * modal de creación masiva de terceros Jarvis: agrupa las filas repetidas
-   * de un mismo proveedor en un solo candidato a crear, con el id del
-   * documento más reciente para poder reanudar su preparación (y la de sus
-   * hermanos, ver resolvePendingSiblings en JarvisDocumentPreparationService)
-   * apenas se cree el tercero.
+   * SUPPLIER_NOT_FOUND, sin contar fallidos/completados) — pensado para los
+   * modales de creación masiva de terceros (tanto Jarvis como SIIGO, de ahí
+   * que no tenga nada específico de ninguno de los dos proveedores): agrupa
+   * las filas repetidas de un mismo proveedor en un solo candidato a crear,
+   * con el id del documento más reciente para poder reanudar su preparación
+   * (y la de sus hermanos, ver resolvePendingSiblings en
+   * JarvisDocumentPreparationService / SiigoSupplierCreationService) apenas
+   * se cree el tercero.
    */
-  async findPendingJarvisSuppliers(companyId: string): Promise<
+  async findPendingSupplierCandidates(companyId: string): Promise<
     Array<{
       documentId: string;
       documentNumberThird: string;

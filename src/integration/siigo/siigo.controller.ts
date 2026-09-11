@@ -30,6 +30,11 @@ import { DeleteSiigoPurchaseResponseDto } from './dto/delete-siigo-purchase.dto'
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
 import {
+  CreateSiigoSuppliersBulkRequestDto,
+  CreateSiigoSuppliersBulkResponseDto,
+  ListPendingSiigoSuppliersResponseDto,
+} from './dto/create-siigo-suppliers-bulk.dto';
+import {
   ListAutoCreatedSuppliersQueryDto,
   ListAutoCreatedSuppliersResponseDto,
 } from './dto/list-auto-created-suppliers.dto';
@@ -333,6 +338,36 @@ export class SiigoController {
   ): Promise<CreateSiigoSupplierResponseDto> {
     return this.siigoSupplierCreationService.createSupplier(
       request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('suppliers/pending')
+  @ApiOperation({
+    summary: 'Listar proveedores pendientes de crear en SIIGO',
+    description:
+      'Un candidato por cada proveedor distinto (NIT + tipo de documento) que aparece en documentos con estado "Requiere proveedor", enriquecido con la consulta a NextPyme — para el modal de creación masiva de terceros SIIGO.',
+  })
+  listPendingSuppliers(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ListPendingSiigoSuppliersResponseDto> {
+    return this.siigoSupplierCreationService.listPendingSuppliers(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('suppliers/bulk')
+  @ApiOperation({
+    summary: 'Crear terceros en SIIGO en lote',
+    description:
+      'Crea varios terceros en SIIGO a la vez (no uno por uno) a partir de los document_id devueltos por GET suppliers/pending.',
+  })
+  createSuppliersBulk(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: CreateSiigoSuppliersBulkRequestDto,
+  ): Promise<CreateSiigoSuppliersBulkResponseDto> {
+    return this.siigoSupplierCreationService.createSuppliersBulk(
+      request.documentIds,
       getAuthenticatedCompanyId(user),
     );
   }

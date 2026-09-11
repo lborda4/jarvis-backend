@@ -2,7 +2,7 @@ import { JarvisTercerosService } from './jarvis-terceros.service';
 import { JarvisDocumentType } from './enums/jarvis-document-type.enum';
 
 function buildService(overrides: {
-  findPendingJarvisSuppliers?: jest.Mock;
+  findPendingSupplierCandidates?: jest.Mock;
   lookupDocument?: jest.Mock;
   findByCompanyAndDocument?: jest.Mock;
   save?: jest.Mock;
@@ -27,8 +27,8 @@ function buildService(overrides: {
       jest.fn().mockResolvedValue({ found: false, document_number: '' }),
   };
   const electronicDocumentsRepository = {
-    findPendingJarvisSuppliers:
-      overrides.findPendingJarvisSuppliers ?? jest.fn().mockResolvedValue([]),
+    findPendingSupplierCandidates:
+      overrides.findPendingSupplierCandidates ?? jest.fn().mockResolvedValue([]),
   };
   const jarvisDocumentPreparationService = {
     prepareDocumentsInBackground:
@@ -56,7 +56,7 @@ function buildService(overrides: {
 describe('JarvisTercerosService.listPendingSuppliers', () => {
   it('enriquece cada proveedor pendiente con el nombre/correo de NextPyme cuando lo encuentra', async () => {
     const { service } = buildService({
-      findPendingJarvisSuppliers: jest.fn().mockResolvedValue([
+      findPendingSupplierCandidates: jest.fn().mockResolvedValue([
         {
           documentId: 'doc-1',
           documentNumberThird: '900123456',
@@ -87,7 +87,7 @@ describe('JarvisTercerosService.listPendingSuppliers', () => {
 
   it('si NextPyme no encuentra nada, conserva el nombre que ya traía el documento importado y deja el correo vacío', async () => {
     const { service } = buildService({
-      findPendingJarvisSuppliers: jest.fn().mockResolvedValue([
+      findPendingSupplierCandidates: jest.fn().mockResolvedValue([
         {
           documentId: 'doc-1',
           documentNumberThird: '900123456',
@@ -126,7 +126,7 @@ describe('JarvisTercerosService.listPendingSuppliers', () => {
       });
 
     const { service } = buildService({
-      findPendingJarvisSuppliers: jest.fn().mockResolvedValue([
+      findPendingSupplierCandidates: jest.fn().mockResolvedValue([
         {
           documentId: 'doc-1',
           documentNumberThird: '900123456',

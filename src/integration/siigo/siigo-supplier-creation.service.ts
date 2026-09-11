@@ -4,10 +4,12 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocument } from '../../electronic-document/entities/electronic-document.entity';
 import { resolveSupplierDocumentFromPayload } from '../../electronic-document/helpers/electronic-document-supplier.helper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
+import { ElectronicDocumentsRepository } from '../../electronic-document/repositories/electronic-documents.repository';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { LookupJarvisTerceroNitResponseDto } from '../jarvis/dto/jarvis-tercero.dto';
 import { JarvisDocumentType } from '../jarvis/enums/jarvis-document-type.enum';
@@ -18,6 +20,12 @@ import { SupplierConfiguration } from '../entities/supplier-configuration.entity
 import { SIIGO_DEFAULT_ITEM_TYPE } from './constants/supplier-configuration.constants';
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
+import {
+  CreateSiigoSuppliersBulkResponseDto,
+  CreateSiigoSuppliersBulkResultItemDto,
+  ListPendingSiigoSuppliersResponseDto,
+  PendingSiigoSupplierDto,
+} from './dto/create-siigo-suppliers-bulk.dto';
 import { ListAutoCreatedSuppliersResponseDto } from './dto/list-auto-created-suppliers.dto';
 import {
   getSiigoIntegration,
@@ -68,6 +76,9 @@ function resolveJarvisDocumentType(
   return JarvisDocumentType.NIT;
 }
 
+const PENDING_SUPPLIERS_LOOKUP_CONCURRENCY = 5;
+const SUPPLIERS_BULK_CREATE_CONCURRENCY = 5;
+
 @Injectable()
 export class SiigoSupplierCreationService {
   private readonly logger = new Logger(SiigoSupplierCreationService.name);
@@ -78,6 +89,7 @@ export class SiigoSupplierCreationService {
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
     private readonly electronicDocumentService: ElectronicDocumentService,
+    private readonly electronicDocumentsRepository: ElectronicDocumentsRepository,
     private readonly companiesRepository: CompaniesRepository,
     private readonly nextPymeRutService: NextPymeRutService,
   ) {}
@@ -254,6 +266,118 @@ export class SiigoSupplierCreationService {
           : 'Error inesperado al crear tercero en SIIGO',
       );
     }
+  }
+
+  /**
+   * Candidatos a crear para el modal de creación masiva de terceros SIIGO:
+   * un proveedor distinto por cada documento en "Requiere proveedor" (ver
+   * findPendingSupplierCandidates), enriquecido con RUT/RUES de NextPyme —
+   * mismo dato que createSupplier consulta de todas formas al crear, solo
+   * que acá se hace por adelantado para poder mostrarlo en el modal antes de
+   * confirmar el lote. Un fallo puntual de NextPyme no tumba el listado
+   * completo — ese proveedor queda con el nombre del documento importado.
+   */
+  async listPendingSuppliers(
+    companyId: string,
+  ): Promise<ListPendingSiigoSuppliersResponseDto> {
+    await getSiigoIntegration(this.integrationsRepository, companyId);
+
+    const pendingRows =
+      await this.electronicDocumentsRepository.findPendingSupplierCandidates(
+        companyId,
+      );
+    const company = await this.companiesRepository.findById(companyId);
+    const companyToken = company?.nextPymeToken?.trim() || undefined;
+
+    const items = await mapWithConcurrency<
+      (typeof pendingRows)[number],
+      PendingSiigoSupplierDto
+    >(pendingRows, PENDING_SUPPLIERS_LOOKUP_CONCURRENCY, async (row) => {
+      const documentType = resolveJarvisDocumentType(row.documentTypeThird);
+      const documentNumber = normalizeSupplierDocument(
+        row.documentNumberThird,
+      );
+
+      let name = row.supplierName?.trim() || null;
+      let email: string | null = null;
+
+      if (documentNumber.length >= 5) {
+        try {
+          const lookup = await this.nextPymeRutService.lookupDocument(
+            documentType,
+            documentNumber,
+            companyToken,
+          );
+
+          if (lookup.found) {
+            name = lookup.name?.trim() || name;
+            email = lookup.email?.trim() || null;
+          }
+        } catch {
+          // Ver comentario del método: un fallo puntual no bloquea el resto.
+        }
+      }
+
+      return {
+        document_id: row.documentId,
+        document_type: documentType,
+        document_number: documentNumber,
+        name,
+        email,
+      };
+    });
+
+    return { items };
+  }
+
+  /**
+   * Crea varios terceros en SIIGO a la vez (modal de creación masiva) en vez
+   * de uno por uno — cada createSupplier ya resuelve todo desde el payload
+   * del documento (RUT/RUES, tipo de persona, reutiliza si ya existe en
+   * SIIGO, propaga a los documentos hermanos del mismo NIT), así que acá
+   * solo hace falta dispararlos en paralelo con un límite de concurrencia
+   * (no todos de una, para no saturar la API de SIIGO) y que el fallo de
+   * uno no tumbe el resto del lote.
+   */
+  async createSuppliersBulk(
+    documentIds: string[],
+    companyId: string,
+  ): Promise<CreateSiigoSuppliersBulkResponseDto> {
+    const uniqueIds = Array.from(
+      new Set((documentIds ?? []).map((id) => id?.trim()).filter(Boolean)),
+    );
+
+    const results = await mapWithConcurrency<
+      string,
+      CreateSiigoSuppliersBulkResultItemDto
+    >(uniqueIds, SUPPLIERS_BULK_CREATE_CONCURRENCY, async (documentId) => {
+      try {
+        await this.createSupplier({ documentId }, companyId, 'manual');
+        return { documentId, success: true, errorMessage: null };
+      } catch (error) {
+        this.logger.error(
+          `[documentId=${documentId}] Error al crear tercero en SIIGO (lote)`,
+          error instanceof Error ? error.stack : String(error),
+        );
+
+        return {
+          documentId,
+          success: false,
+          errorMessage:
+            error instanceof Error
+              ? error.message
+              : 'Error inesperado al crear tercero en SIIGO',
+        };
+      }
+    });
+
+    const created = results.filter((result) => result.success).length;
+
+    return {
+      created,
+      failed: results.length - created,
+      results,
+    };
   }
 
   /**
