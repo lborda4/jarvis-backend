@@ -12,6 +12,37 @@ import {
   SuggestedProduct,
   SuggestedPurchaseItemConfig,
 } from '../../integration/helpers/supplier-preference.helper';
+import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
+import { resolvePurchaseInvoiceRequiresReview } from '../helpers/purchase-invoice-review.helper';
+
+/** Extraído para que el service pueda calcular `requiresReview` UNA vez y
+ * reusarlo tanto para filtrar/paginar (ver needsPurchaseInvoiceReviewNarrowing
+ * en electronic-document.service.ts) como para el DTO final — sin esto, el
+ * camino de filtrado tendría que llamarlo de nuevo dentro del mapper con los
+ * mismos argumentos, calculándolo dos veces por documento. */
+export function computeElectronicDocumentRequiresReview(
+  document: ElectronicDocument,
+  isSiigoCompany: boolean,
+  suggestedAccount: SuggestedAccount | null,
+  suggestedProduct: SuggestedProduct | null,
+  suggestedItemConfig: SuggestedPurchaseItemConfig | null,
+  itemAccountSuggestions: Array<SuggestedItemAccount | null>,
+  aiConfidence: number | null,
+): boolean {
+  return (
+    isSiigoCompany &&
+    document.electronicDocumentType === ElectronicDocumentType.PURCHASE_INVOICE &&
+    resolvePurchaseInvoiceRequiresReview({
+      draft: document.draft ?? null,
+      payloadItems: document.payload?.items ?? [],
+      suggestedAccount,
+      suggestedProduct,
+      suggestedItemConfig,
+      itemAccountSuggestions,
+      aiConfidence,
+    })
+  );
+}
 
 export function mapElectronicDocumentToListItem(
   document: ElectronicDocument,
@@ -23,7 +54,28 @@ export function mapElectronicDocumentToListItem(
   suggestedItemConfig: SuggestedPurchaseItemConfig | null = null,
   itemAccountSuggestions: Array<SuggestedItemAccount | null> = [],
   suggestedProduct: SuggestedProduct | null = null,
+  /** true si la empresa activa usa SIIGO (no Jarvis) — "Requiere revisión"
+   * solo existe para Factura de compra + SIIGO; el tipo de documento en sí
+   * lo verifica esta función abajo con el campo real de CADA documento. */
+  isSiigoCompany = false,
+  /** Si el llamador ya calculó requiresReview (ver
+   * computeElectronicDocumentRequiresReview), se usa ese valor en vez de
+   * recalcularlo acá — evita el doble cálculo en el camino de filtrado. */
+  precomputedRequiresReview?: boolean,
 ): ElectronicDocumentListItemDto {
+  const aiConfidence = document.payload?.aiSuggestion?.confidence ?? null;
+  const requiresReview =
+    precomputedRequiresReview ??
+    computeElectronicDocumentRequiresReview(
+      document,
+      isSiigoCompany,
+      suggestedAccount,
+      suggestedProduct,
+      suggestedItemConfig,
+      itemAccountSuggestions,
+      aiConfidence,
+    );
+
   return {
     id: document.id,
     companyId: document.companyId,
@@ -58,7 +110,8 @@ export function mapElectronicDocumentToListItem(
     suggestedRetentions,
     suggestedCostCenter,
     suggestedItemConfig,
-    aiConfidence: document.payload?.aiSuggestion?.confidence ?? null,
+    aiConfidence,
+    requiresReview,
     observations: document.payload?.observations?.trim() || null,
     items: mapDocumentItems(
       document,

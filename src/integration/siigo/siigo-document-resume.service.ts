@@ -5,7 +5,6 @@ import { ElectronicDocumentType } from '../../electronic-document/enums/electron
 import { mapElectronicDocumentToListItem } from '../../electronic-document/mappers/electronic-document-list-item.mapper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { ResumeElectronicDocumentResponseDto } from '../../electronic-document/dto/resume-electronic-document.dto';
-import { ResumeElectronicDocumentsBatchResponseDto } from '../../electronic-document/dto/resume-electronic-documents-batch.dto';
 import {
   SiigoDocumentPreparationService,
   SIIGO_DOCUMENT_PREPARATION_CONCURRENCY,
@@ -25,11 +24,44 @@ export class SiigoDocumentResumeService {
     private readonly siigoAuthService: SiigoAuthService,
   ) {}
 
+  /**
+   * Dispara resumeBatch de fondo y responde de inmediato — a diferencia de
+   * resumeBatch (que el controller usaba directo antes, bloqueando la
+   * respuesta HTTP hasta terminar TODO el lote), acá el llamador no espera
+   * nada: el progreso real se lee vía polling de GET /electronic-documents,
+   * igual que ya hace el frontend (ver watchImportedDocuments). Caso real
+   * reportado: un import de 74 documentos hacía que resumeBatch tardara más
+   * que el timeout de 30s del cliente HTTP (5 en simultáneo contra la API
+   * real de SIIGO, con rate limit) — el request se abortaba del lado del
+   * navegador, pero el trabajo seguía corriendo en el server sin que nada
+   * lo reflejara, dejando documentos "colgados" hasta la próxima recarga.
+   */
+  resumeBatchInBackground(
+    documentIds: string[],
+    companyId: string,
+    options?: { prepareOnly?: boolean },
+  ): void {
+    this.logger.log(
+      `[companyId=${companyId}] resumeBatchInBackground iniciado para ${documentIds.length} documento(s).`,
+    );
+
+    void this.resumeBatch(documentIds, companyId, options).catch((error) => {
+      this.logger.error(
+        `[companyId=${companyId}] Error en resumeBatchInBackground`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    });
+  }
+
+  /** Devuelve el detalle por documento (a diferencia de
+   * ResumeElectronicDocumentsBatchResponseDto, que es solo el ack que
+   * recibe el HTTP caller) — resumeBatchInBackground y el spec de este
+   * servicio siguen necesitando el resultado real de cada resume(). */
   async resumeBatch(
     documentIds: string[],
     companyId: string,
     options?: { prepareOnly?: boolean },
-  ): Promise<ResumeElectronicDocumentsBatchResponseDto> {
+  ): Promise<{ items: ResumeElectronicDocumentResponseDto[] }> {
     const uniqueIds = [
       ...new Set(
         documentIds.map((documentId) => documentId?.trim()).filter(Boolean),

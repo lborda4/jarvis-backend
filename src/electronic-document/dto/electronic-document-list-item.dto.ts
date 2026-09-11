@@ -67,6 +67,14 @@ export class ElectronicDocumentListItemDto {
    * frontend la usa para mostrar "Requiere revisión" en vez de "Pendiente"
    * cuando queda por debajo del umbral (hoy 80). */
   aiConfidence: number | null;
+  /** Solo Factura de compra SIIGO: true si al documento le falta algo por
+   * resolver (cuenta, producto, medio de pago o confianza de IA baja) —
+   * ver resolvePurchaseInvoiceRequiresReview. El frontend lo usa para
+   * mostrar "Requiere revisión" en vez de "Pendiente". Se computa desde lo
+   * último GUARDADO (el borrador, si existe, o si no las sugerencias), así
+   * que cambia recién cuando se guarda el panel de detalle, no mientras se
+   * está escribiendo. Siempre `false` para Documento soporte o Jarvis. */
+  requiresReview: boolean;
   observations?: string | null;
   items?: ElectronicDocumentListItemItemDto[];
   createdAt: string;

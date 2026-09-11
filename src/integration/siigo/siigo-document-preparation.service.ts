@@ -130,6 +130,8 @@ export class SiigoDocumentPreparationService {
           alreadyInSiigo.facturaId,
           companyId,
           alreadyInSiigo.siigoNumero,
+          undefined,
+          true,
         );
 
         this.logger.log(

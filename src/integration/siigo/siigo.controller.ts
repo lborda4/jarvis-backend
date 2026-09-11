@@ -611,16 +611,18 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Reanudar documentos en lote',
     description:
-      'Valida proveedor y cuenta para varios documentos reutilizando el token SIIGO y cacheando proveedores por NIT.',
+      'Encola la validación de proveedor y cuenta para varios documentos en segundo plano y responde de inmediato — el progreso real se consulta con GET /electronic-documents, no con la respuesta de este endpoint.',
   })
   resumeDocumentsBatch(
     @CurrentUser() user: AuthenticatedUser,
     @Body() request: ResumeElectronicDocumentsBatchRequestDto,
-  ): Promise<ResumeElectronicDocumentsBatchResponseDto> {
-    return this.siigoDocumentResumeService.resumeBatch(
+  ): ResumeElectronicDocumentsBatchResponseDto {
+    this.siigoDocumentResumeService.resumeBatchInBackground(
       request.documentIds ?? [],
       getAuthenticatedCompanyId(user),
       { prepareOnly: request.prepareOnly ?? true },
     );
+
+    return { accepted: true };
   }
 }

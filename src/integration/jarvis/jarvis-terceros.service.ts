@@ -5,23 +5,32 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { normalizeSupportDocumentType } from '../../invoices/helpers/support-document-type.helper';
+import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
+import { ElectronicDocumentsRepository } from '../../electronic-document/repositories/electronic-documents.repository';
 import { normalizeJarvisDocumentNumber } from './helpers/jarvis-document-number.helper';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import {
+  CreateJarvisTercerosBulkResponseDto,
   CreateJarvisTerceroRequestDto,
   CreateJarvisTerceroResponseDto,
+  CreateJarvisTercerosBulkRequestDto,
   JarvisTerceroDto,
   JarvisTercerosListResponseDto,
+  ListPendingJarvisSuppliersResponseDto,
   LookupJarvisTerceroNitResponseDto,
+  PendingJarvisSupplierDto,
 } from './dto/jarvis-tercero.dto';
 import { JarvisTercero } from './entities/jarvis-tercero.entity';
 import { JarvisDocumentType } from './enums/jarvis-document-type.enum';
 import { JarvisEntityType } from './enums/jarvis-entity-type.enum';
 import { JarvisTaxRegime } from './enums/jarvis-tax-regime.enum';
 import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
+import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
 import { NextPymeRutService } from './nextpyme-rut.service';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
+
+const PENDING_SUPPLIERS_LOOKUP_CONCURRENCY = 5;
 
 const VALID_DOCUMENT_TYPES = new Set<string>(Object.values(JarvisDocumentType));
 const VALID_ENTITY_TYPES = new Set<string>(Object.values(JarvisEntityType));
@@ -33,6 +42,8 @@ export class JarvisTercerosService {
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly jarvisTercerosRepository: JarvisTercerosRepository,
     private readonly nextPymeRutService: NextPymeRutService,
+    private readonly electronicDocumentsRepository: ElectronicDocumentsRepository,
+    private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
   ) {}
 
   async list(
@@ -122,6 +133,156 @@ export class JarvisTercerosService {
       success: true,
       tercero: this.toDto(tercero),
     };
+  }
+
+  /**
+   * Candidatos a crear para el modal de creación masiva: un proveedor
+   * distinto por cada documento en "Requiere proveedor" (ver
+   * findPendingJarvisSuppliers), enriquecido con la consulta a NextPyme —
+   * igual que el autocompletado del modal uno por uno (ver
+   * CreateJarvisTerceroModal en el frontend), pero para todos los pendientes
+   * de una vez. Si NextPyme falla para un proveedor puntual, ese proveedor
+   * simplemente queda con el nombre que ya traía el documento importado y
+   * sin correo — no tumba el listado completo.
+   */
+  async listPendingSuppliers(
+    companyId: string,
+  ): Promise<ListPendingJarvisSuppliersResponseDto> {
+    const trimmedCompanyId = this.requireCompanyId(companyId);
+    await this.requireJarvisIntegration(trimmedCompanyId);
+
+    const pendingRows =
+      await this.electronicDocumentsRepository.findPendingJarvisSuppliers(
+        trimmedCompanyId,
+      );
+    const companyToken = await this.resolveCompanyNextPymeToken(
+      trimmedCompanyId,
+    );
+
+    const items = await mapWithConcurrency<
+      (typeof pendingRows)[number],
+      PendingJarvisSupplierDto
+    >(pendingRows, PENDING_SUPPLIERS_LOOKUP_CONCURRENCY, async (row) => {
+      const documentType = normalizeSupportDocumentType(
+        row.documentTypeThird ?? undefined,
+      ) as JarvisDocumentType;
+      const documentNumber = normalizeJarvisDocumentNumber(
+        row.documentNumberThird,
+      );
+
+      let name = row.supplierName?.trim() || null;
+      let email: string | null = null;
+
+      if (documentNumber.length >= 5) {
+        try {
+          const lookup = await this.nextPymeRutService.lookupDocument(
+            documentType,
+            documentNumber,
+            companyToken,
+          );
+
+          if (lookup.found) {
+            name = lookup.name?.trim() || name;
+            email = lookup.email?.trim() || null;
+          }
+        } catch {
+          // Ver comentario del método: un fallo puntual no bloquea el resto.
+        }
+      }
+
+      return {
+        document_id: row.documentId,
+        document_type: documentType,
+        document_number: documentNumber,
+        name,
+        email,
+      };
+    });
+
+    return { items };
+  }
+
+  /**
+   * Crea varios terceros de una sola vez desde el modal de creación masiva.
+   * A diferencia de `create`, un proveedor que ya tiene tercero no rompe el
+   * lote entero — se cuenta como "skipped" y se sigue con el resto. Por cada
+   * proveedor creado, reanuda la preparación de UN documento pendiente suyo
+   * (`document_id`, tomado del listado de GET terceros/pending); el resto de
+   * documentos del mismo proveedor se resuelven solos vía
+   * resolvePendingSiblings en JarvisDocumentPreparationService.
+   */
+  async createBulk(
+    request: CreateJarvisTercerosBulkRequestDto,
+    companyId: string,
+  ): Promise<CreateJarvisTercerosBulkResponseDto> {
+    const trimmedCompanyId = this.requireCompanyId(companyId);
+    const integration = await this.requireJarvisIntegration(trimmedCompanyId);
+
+    let created = 0;
+    let skipped = 0;
+    const documentIdsToResume: string[] = [];
+
+    for (const supplier of request.suppliers ?? []) {
+      const documentType = normalizeSupportDocumentType(
+        supplier.document_type,
+      );
+      if (!VALID_DOCUMENT_TYPES.has(documentType)) {
+        continue;
+      }
+
+      const documentNumber = normalizeJarvisDocumentNumber(
+        supplier.document_number,
+      );
+      const name = supplier.name?.trim();
+      if (!documentNumber || !name) {
+        continue;
+      }
+
+      const existing =
+        await this.jarvisTercerosRepository.findByCompanyAndDocument(
+          trimmedCompanyId,
+          documentType,
+          documentNumber,
+        );
+
+      if (existing) {
+        skipped += 1;
+        if (supplier.document_id?.trim()) {
+          documentIdsToResume.push(supplier.document_id.trim());
+        }
+        continue;
+      }
+
+      await this.jarvisTercerosRepository.save(
+        this.jarvisTercerosRepository.create({
+          companyId: trimmedCompanyId,
+          integrationId: integration.id,
+          documentType,
+          documentNumber,
+          checkDigit: null,
+          name,
+          entityType: null,
+          taxRegime: null,
+          email: supplier.email?.trim() || null,
+          phone: null,
+          address: null,
+        }),
+      );
+
+      created += 1;
+      if (supplier.document_id?.trim()) {
+        documentIdsToResume.push(supplier.document_id.trim());
+      }
+    }
+
+    if (documentIdsToResume.length > 0) {
+      this.jarvisDocumentPreparationService.prepareDocumentsInBackground(
+        documentIdsToResume,
+        trimmedCompanyId,
+      );
+    }
+
+    return { created, skipped };
   }
 
   async lookupNit(

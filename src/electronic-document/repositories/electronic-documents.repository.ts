@@ -5,6 +5,8 @@ import { ElectronicDocument } from '../entities/electronic-document.entity';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 import {
   applyImportStatusFilters,
+  COMPLETED_STATUSES,
+  FAILED_STATUSES,
   IMPORT_ROW_STATUS_FILTER,
   ImportRowStatusFilter,
 } from '../helpers/import-status-filter.helper';
@@ -245,16 +247,22 @@ export class ElectronicDocumentsRepository {
       .clone()
       .select('document.status', 'status')
       .addSelect('document.supplierExistsInSiigo', 'supplierExistsInSiigo')
+      .addSelect('document.alreadyInSiigo', 'alreadyInSiigo')
       .getRawMany<{
         status: string;
         supplierExistsInSiigo: boolean | null;
+        alreadyInSiigo: boolean;
       }>();
 
     const importStatuses = new Set<ImportRowStatusFilter>();
 
     for (const row of statusRows) {
       importStatuses.add(
-        mapRawDocumentToImportStatus(row.status, row.supplierExistsInSiigo),
+        mapRawDocumentToImportStatus(
+          row.status,
+          row.supplierExistsInSiigo,
+          row.alreadyInSiigo,
+        ),
       );
     }
 
@@ -275,6 +283,59 @@ export class ElectronicDocumentsRepository {
         }))
         .filter((supplier) => supplier.nit.length > 0),
     };
+  }
+
+  /**
+   * Un candidato por proveedor distinto (NIT + tipo de documento) que sigue
+   * en "Requiere proveedor" (mismo criterio que el bracket REQUIERE_PROVEEDOR
+   * de applyImportStatusFilters: supplierExistsInSiigo=false o status
+   * SUPPLIER_NOT_FOUND, sin contar fallidos/completados) — pensado para el
+   * modal de creación masiva de terceros Jarvis: agrupa las filas repetidas
+   * de un mismo proveedor en un solo candidato a crear, con el id del
+   * documento más reciente para poder reanudar su preparación (y la de sus
+   * hermanos, ver resolvePendingSiblings en JarvisDocumentPreparationService)
+   * apenas se cree el tercero.
+   */
+  async findPendingJarvisSuppliers(companyId: string): Promise<
+    Array<{
+      documentId: string;
+      documentNumberThird: string;
+      documentTypeThird: string | null;
+      supplierName: string | null;
+    }>
+  > {
+    const rows = await this.repository
+      .createQueryBuilder('document')
+      .distinctOn(['document.documentNumberThird', 'document.documentTypeThird'])
+      .select('document.id', 'documentId')
+      .addSelect('document.documentNumberThird', 'documentNumberThird')
+      .addSelect('document.documentTypeThird', 'documentTypeThird')
+      .addSelect("document.payload->'supplier'->>'name'", 'supplierName')
+      .where('document.companyId = :companyId', { companyId })
+      .andWhere('document.documentNumberThird IS NOT NULL')
+      .andWhere("document.documentNumberThird <> ''")
+      .andWhere(
+        new Brackets((qb) => {
+          qb.where('document.supplierExistsInSiigo = false').orWhere(
+            'document.status = :supplierNotFoundStatus',
+            { supplierNotFoundStatus: ElectronicDocumentStatus.SUPPLIER_NOT_FOUND },
+          );
+        }),
+      )
+      .andWhere('document.status NOT IN (:...excludedStatuses)', {
+        excludedStatuses: [...FAILED_STATUSES, ...COMPLETED_STATUSES],
+      })
+      .orderBy('document.documentNumberThird', 'ASC')
+      .addOrderBy('document.documentTypeThird', 'ASC')
+      .addOrderBy('document.createdAt', 'DESC')
+      .getRawMany<{
+        documentId: string;
+        documentNumberThird: string;
+        documentTypeThird: string | null;
+        supplierName: string | null;
+      }>();
+
+    return rows;
   }
 
   findByCompanySupplierAndStatus(
@@ -340,9 +401,16 @@ export class ElectronicDocumentsRepository {
 function mapRawDocumentToImportStatus(
   status: string,
   supplierExistsInSiigo: boolean | null,
+  alreadyInSiigo: boolean,
 ): ImportRowStatusFilter {
   if (status === ElectronicDocumentStatus.PURCHASE_CREATED) {
-    return IMPORT_ROW_STATUS_FILTER.LISTA;
+    // alreadyInSiigo SÍ es una columna real (a diferencia de
+    // "requiresReview"), así que esta distinción no tiene el límite de
+    // "solo se sabe para la página cargada" que sigue aplicando a
+    // REQUIERE_REVISION más abajo (ver comentario al final del archivo).
+    return alreadyInSiigo
+      ? IMPORT_ROW_STATUS_FILTER.EXISTENTE_EN_SIIGO
+      : IMPORT_ROW_STATUS_FILTER.LISTA;
   }
 
   if (

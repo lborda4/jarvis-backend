@@ -100,6 +100,70 @@ export class LookupJarvisTerceroNitRequestDto {
   identification_number: string;
 }
 
+export class PendingJarvisSupplierDto {
+  @ApiProperty({
+    description:
+      'Id de un documento electrónico pendiente de este proveedor — se usa para reanudar su preparación (y la de sus hermanos) apenas se crea el tercero.',
+  })
+  document_id: string;
+
+  @ApiProperty({ enum: JarvisDocumentType })
+  document_type: string;
+
+  @ApiProperty({ example: '900123456' })
+  document_number: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  name: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  email: string | null;
+}
+
+export class ListPendingJarvisSuppliersResponseDto {
+  @ApiProperty({ type: [PendingJarvisSupplierDto] })
+  items: PendingJarvisSupplierDto[];
+}
+
+export class CreateJarvisTercerosBulkItemDto {
+  @ApiProperty({
+    description:
+      'Id de documento devuelto por GET terceros/pending — para reanudar la preparación de ese proveedor apenas se crea el tercero.',
+  })
+  document_id: string;
+
+  @ApiProperty({
+    enum: JarvisDocumentType,
+    example: JarvisDocumentType.NIT,
+  })
+  document_type: JarvisDocumentType;
+
+  @ApiProperty({ example: '900123456' })
+  document_number: string;
+
+  @ApiProperty({ example: 'Proveedor Ejemplo SAS' })
+  name: string;
+
+  @ApiPropertyOptional({ example: 'contacto@ejemplo.com' })
+  email?: string;
+}
+
+export class CreateJarvisTercerosBulkRequestDto {
+  @ApiProperty({ type: [CreateJarvisTercerosBulkItemDto] })
+  suppliers: CreateJarvisTercerosBulkItemDto[];
+}
+
+export class CreateJarvisTercerosBulkResponseDto {
+  @ApiProperty({ description: 'Terceros creados.' })
+  created: number;
+
+  @ApiProperty({
+    description:
+      'Proveedores omitidos porque ya existía un tercero con ese documento (no se considera un error).',
+  })
+  skipped: number;
+}
+
 export class LookupJarvisTerceroNitResponseDto {
   @ApiProperty()
   found: boolean;

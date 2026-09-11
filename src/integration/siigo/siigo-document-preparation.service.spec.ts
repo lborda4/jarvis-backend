@@ -169,6 +169,8 @@ describe('SiigoDocumentPreparationService.prepareSupplierAndAccounts', () => {
       'siigo-purchase-1',
       'company-1',
       42,
+      undefined,
+      true,
     );
     expect(siigoValidationService.validateImport).not.toHaveBeenCalled();
     expect(siigoAccountMappingService.validateAccountMapping).not.toHaveBeenCalled();

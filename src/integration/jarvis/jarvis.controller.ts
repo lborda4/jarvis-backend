@@ -25,9 +25,12 @@ import {
   CreateJarvisInvoiceResponseDto,
 } from './dto/create-jarvis-invoice.dto';
 import {
+  CreateJarvisTercerosBulkRequestDto,
+  CreateJarvisTercerosBulkResponseDto,
   CreateJarvisTerceroRequestDto,
   CreateJarvisTerceroResponseDto,
   JarvisTercerosListResponseDto,
+  ListPendingJarvisSuppliersResponseDto,
   LookupJarvisTerceroNitRequestDto,
   LookupJarvisTerceroNitResponseDto,
 } from './dto/jarvis-tercero.dto';
@@ -176,6 +179,36 @@ export class JarvisController {
       getAuthenticatedCompanyId(user),
       request.document_type,
       request.identification_number,
+    );
+  }
+
+  @Get('terceros/pending')
+  @ApiOperation({
+    summary: 'Listar proveedores pendientes de crear como tercero',
+    description:
+      'Un candidato por cada proveedor distinto (NIT + tipo de documento) que aparece en documentos con estado "Requiere proveedor", enriquecido con la consulta a NextPyme — para el modal de creación masiva de terceros.',
+  })
+  listPendingTerceros(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ListPendingJarvisSuppliersResponseDto> {
+    return this.jarvisTercerosService.listPendingSuppliers(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('terceros/bulk')
+  @ApiOperation({
+    summary: 'Crear terceros Jarvis en lote',
+    description:
+      'Crea varios terceros de una sola vez (modal de creación masiva) y reanuda la preparación de los documentos pendientes de cada proveedor creado.',
+  })
+  createTercerosBulk(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: CreateJarvisTercerosBulkRequestDto,
+  ): Promise<CreateJarvisTercerosBulkResponseDto> {
+    return this.jarvisTercerosService.createBulk(
+      request,
+      getAuthenticatedCompanyId(user),
     );
   }
 
