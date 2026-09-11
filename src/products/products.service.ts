@@ -4,6 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CompaniesRepository } from '../company/repositories/companies.repository';
+import { NextPymeMasterCatalogService } from '../integration/jarvis/nextpyme/nextpyme-master-catalog.service';
 import { Product } from './entities/product.entity';
 import { ProductPriceList } from './entities/product-price-list.entity';
 import { ProductsRepository } from './repositories/products.repository';
@@ -14,6 +16,7 @@ import {
   ProductDto,
   ProductsListResponseDto,
 } from './dto/product.dto';
+import { UnitMeasuresListResponseDto } from './dto/unit-measure.dto';
 
 const VALID_KINDS = new Set(['product', 'service']);
 const VALID_TAX_CLASSIFICATIONS = new Set(['taxed', 'exempt', 'excluded']);
@@ -30,7 +33,38 @@ export class ProductsService {
   constructor(
     private readonly productsRepository: ProductsRepository,
     private readonly categoriesRepository: ProductCategoriesRepository,
+    private readonly companiesRepository: CompaniesRepository,
+    private readonly masterCatalogService: NextPymeMasterCatalogService,
   ) {}
+
+  /**
+   * Unidades de medida DIAN (tabla maestra `unit_measure` de NextPyme). Usa el
+   * token propio de la empresa (companies.next_pyme_token) para la carga; si
+   * no lo tiene, el cliente cae al token global. El catálogo se cachea en el
+   * servicio de catálogo, así que solo la primera empresa dispara la llamada.
+   */
+  async listUnitMeasures(
+    companyId: string,
+  ): Promise<UnitMeasuresListResponseDto> {
+    const trimmedCompanyId = this.requireCompanyId(companyId);
+    const token = await this.resolveCompanyNextPymeToken(trimmedCompanyId);
+
+    const rows = await this.masterCatalogService.getUnitMeasures(token);
+    const items = rows
+      .filter((row) => row.code)
+      .map((row) => ({ code: String(row.code), name: row.name }));
+
+    return { items, total: items.length };
+  }
+
+  /** Token propio de NextPyme de la empresa, si un admin lo configuró; si no,
+   * undefined (el cliente cae al NEXTPYME_API_TOKEN global). */
+  private async resolveCompanyNextPymeToken(
+    companyId: string,
+  ): Promise<string | undefined> {
+    const company = await this.companiesRepository.findById(companyId);
+    return company?.nextPymeToken?.trim() || undefined;
+  }
 
   async list(
     companyId: string,

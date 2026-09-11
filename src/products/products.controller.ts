@@ -14,6 +14,7 @@ import {
   CreateProductResponseDto,
   ProductsListResponseDto,
 } from './dto/product.dto';
+import { UnitMeasuresListResponseDto } from './dto/unit-measure.dto';
 import { ProductCategoriesService } from './product-categories.service';
 import { ProductsService } from './products.service';
 
@@ -82,6 +83,18 @@ export class ProductsController {
     @Query('kind') kind: string,
   ): Promise<{ sku: string }> {
     return this.productsService.nextSku(kind, getAuthenticatedCompanyId(user));
+  }
+
+  @Get('unit-measures')
+  @ApiOperation({
+    summary: 'Unidades de medida DIAN (tabla maestra de NextPyme).',
+  })
+  listUnitMeasures(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<UnitMeasuresListResponseDto> {
+    return this.productsService.listUnitMeasures(
+      getAuthenticatedCompanyId(user),
+    );
   }
 
   @Post()
