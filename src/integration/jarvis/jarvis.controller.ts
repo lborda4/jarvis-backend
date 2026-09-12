@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseInterceptors,
@@ -27,9 +29,12 @@ import {
 import {
   CreateJarvisTerceroRequestDto,
   CreateJarvisTerceroResponseDto,
+  JarvisCatalogListResponseDto,
   JarvisTercerosListResponseDto,
   LookupJarvisTerceroNitRequestDto,
   LookupJarvisTerceroNitResponseDto,
+  UpdateJarvisTerceroRequestDto,
+  UpdateJarvisTerceroResponseDto,
 } from './dto/jarvis-tercero.dto';
 import {
   ListJarvisAvailableResolutionsResponseDto,
@@ -162,6 +167,30 @@ export class JarvisController {
     );
   }
 
+  @Get('terceros/countries')
+  @ApiOperation({
+    summary: 'Listar países (tabla maestra de NextPyme)',
+  })
+  listTerceroCountries(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JarvisCatalogListResponseDto> {
+    return this.jarvisTercerosService.listCountries(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('terceros/municipalities')
+  @ApiOperation({
+    summary: 'Listar municipios (tabla maestra de NextPyme)',
+  })
+  listTerceroMunicipalities(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JarvisCatalogListResponseDto> {
+    return this.jarvisTercerosService.listMunicipalities(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
   @Post('terceros/lookup-nit')
   @ApiOperation({
     summary: 'Consultar tercero por documento en NextPyme',
@@ -190,6 +219,24 @@ export class JarvisController {
     @Body() request: CreateJarvisTerceroRequestDto,
   ): Promise<CreateJarvisTerceroResponseDto> {
     return this.jarvisTercerosService.create(
+      request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Put('terceros/:id')
+  @ApiOperation({
+    summary: 'Editar tercero Jarvis',
+    description:
+      'Actualiza los datos de un tercero existente de la empresa activa. El tipo y número de documento no se modifican.',
+  })
+  updateTercero(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() request: UpdateJarvisTerceroRequestDto,
+  ): Promise<UpdateJarvisTerceroResponseDto> {
+    return this.jarvisTercerosService.update(
+      id,
       request,
       getAuthenticatedCompanyId(user),
     );

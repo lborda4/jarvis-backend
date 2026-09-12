@@ -10,8 +10,11 @@ import {
 } from 'typeorm';
 import { Company } from '../../../company/entities/company.entity';
 import { Integration } from '../../entities/integration.entity';
+import { JarvisClientType } from '../enums/jarvis-client-type.enum';
 import { JarvisEntityType } from '../enums/jarvis-entity-type.enum';
+import { JarvisFiscalRegime } from '../enums/jarvis-fiscal-regime.enum';
 import { JarvisTaxRegime } from '../enums/jarvis-tax-regime.enum';
+import { JarvisVatRegime } from '../enums/jarvis-vat-regime.enum';
 
 @Entity('jarvis_terceros')
 @Index('IDX_jarvis_terceros_company_document', [
@@ -59,6 +62,37 @@ export class JarvisTercero {
   })
   taxRegime: JarvisTaxRegime | null;
 
+  /** Régimen fiscal (ordinario/simple/especial) — validado en el service. */
+  @Column({
+    name: 'fiscal_regime',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
+  fiscalRegime: JarvisFiscalRegime | null;
+
+  /** Responsabilidad de IVA (responsable / no responsable). */
+  @Column({
+    name: 'vat_regime',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
+  vatRegime: JarvisVatRegime | null;
+
+  /** Actividad económica principal (CIIU) — texto libre por ahora. */
+  @Column({
+    name: 'economic_activity',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  economicActivity: string | null;
+
+  /** País del tercero (nombre). */
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  country: string | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   email: string | null;
 
@@ -67,6 +101,23 @@ export class JarvisTercero {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   address: string | null;
+
+  /** Ciudad/municipio del tercero (nombre), elegida del catálogo de NextPyme. */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  city: string | null;
+
+  /** Código DANE del municipio (ej. "11001"), del catálogo de NextPyme. */
+  @Column({ name: 'city_code', type: 'varchar', length: 16, nullable: true })
+  cityCode: string | null;
+
+  /** 'client' | 'supplier' — validado en el service. */
+  @Column({
+    name: 'client_type',
+    type: 'varchar',
+    length: 16,
+    nullable: true,
+  })
+  clientType: JarvisClientType | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

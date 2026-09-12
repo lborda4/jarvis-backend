@@ -39,6 +39,13 @@ export class JarvisTercerosRepository {
     });
   }
 
+  findByIdAndCompany(
+    id: string,
+    companyId: string,
+  ): Promise<JarvisTercero | null> {
+    return this.repository.findOne({ where: { id, companyId } });
+  }
+
   create(
     data: Pick<
       JarvisTercero,
@@ -50,9 +57,16 @@ export class JarvisTercerosRepository {
       | 'name'
       | 'entityType'
       | 'taxRegime'
+      | 'fiscalRegime'
+      | 'vatRegime'
+      | 'economicActivity'
+      | 'clientType'
       | 'email'
       | 'phone'
       | 'address'
+      | 'country'
+      | 'city'
+      | 'cityCode'
     >,
   ): JarvisTercero {
     return this.repository.create(data);

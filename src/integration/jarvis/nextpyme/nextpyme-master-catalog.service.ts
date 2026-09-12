@@ -100,8 +100,14 @@ export class NextPymeMasterCatalogService {
     return byName?.id ?? null;
   }
 
-  async getMunicipalities(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('municipalities');
+  async getMunicipalities(tokenOverride?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable('municipalities', tokenOverride);
+  }
+
+  /** Países (tabla maestra `countries`). Catálogo maestro común a todas las
+   * empresas; el token solo se usa en la primera carga contra NextPyme. */
+  async getCountries(tokenOverride?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable('countries', tokenOverride);
   }
 
   /** Unidades de medida DIAN (tabla maestra `unit_measures`). El catálogo es
