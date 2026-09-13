@@ -127,6 +127,11 @@ export class SiigoSupportDocumentSendService {
       siigoPayload.cost_center = request.cost_center;
     }
 
+    console.log(
+      `[SEND-DEBUG] [documentId=${documentId}] request.cost_center=${request.cost_center ?? 'undefined'} | body a enviar:`,
+      JSON.stringify(siigoPayload),
+    );
+
     // Se guarda la preferencia del proveedor (cuenta, medio de pago,
     // retenciones, centro de costo) ANTES de intentar el envío a SIIGO, no
     // solo si tiene éxito: así la elección del usuario sobrevive aunque el
