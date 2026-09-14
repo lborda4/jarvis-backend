@@ -64,6 +64,9 @@ import {
 import { SiigoTaxesCatalogService } from '../integration/siigo/siigo-taxes-catalog.service';
 import { SiigoPaymentTypesCatalogService } from '../integration/siigo/siigo-payment-types-catalog.service';
 import { SiigoProductsCatalogService } from '../integration/siigo/siigo-products-catalog.service';
+import { SiigoCostCentersCatalogService } from '../integration/siigo/siigo-cost-centers-catalog.service';
+import { SiigoCostCenterCatalogItemDto } from '../integration/siigo/dto/list-siigo-cost-centers.dto';
+import { resolveSiigoCostCenter } from '../integration/siigo/helpers/siigo-cost-center-match.helper';
 import { SiigoPaymentTypeCatalogItemDto } from '../integration/siigo/dto/list-siigo-payment-types.dto';
 import { resolveSiigoPaymentDocumentType } from '../integration/siigo/helpers/siigo-payment-document-type.helper';
 import { resolveCreditFallbackPaymentMethod } from '../integration/siigo/helpers/siigo-credit-payment-method.helper';
@@ -132,6 +135,7 @@ export class ElectronicDocumentService {
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoPaymentTypesCatalogService: SiigoPaymentTypesCatalogService,
     private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
+    private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
   ) {}
 
   async requireById(
@@ -1372,6 +1376,10 @@ export class ElectronicDocumentService {
       string,
       SiigoPaymentTypeCatalogItemDto[]
     >();
+    const costCentersCatalogByCompanyId = new Map<
+      string,
+      SiigoCostCenterCatalogItemDto[]
+    >();
     const companyIds = [
       ...new Set(documents.map((document) => document.companyId)),
     ];
@@ -1448,6 +1456,18 @@ export class ElectronicDocumentService {
         taxesCatalogByCompanyId.set(
           companyId,
           this.siigoTaxesCatalogService.listTaxesFromCacheOnly({}, companyId),
+        );
+
+        // Centro de costos importado del Excel de Documento Soporte (texto
+        // libre, ver ElectronicDocumentPayload.costCenterCode) — se resuelve
+        // acá contra el catálogo real para autocompletar rowCostCenters en
+        // el frontend (buildInitialRowCostCenters lee `suggestedCostCenter`)
+        // sin que el usuario tenga que elegirlo a mano.
+        costCentersCatalogByCompanyId.set(
+          companyId,
+          this.siigoCostCentersCatalogService.listCostCentersFromCacheOnly(
+            companyId,
+          ),
         );
 
         // Catálogo de medios de pago, precargado una sola vez por empresa +
@@ -1691,13 +1711,24 @@ export class ElectronicDocumentService {
           ? suggestedDocumentRetentions
           : invoiceDocumentRetentions,
       );
+      // Un centro de costos explícito en el Excel siempre gana sobre la
+      // sugerencia inferida del historial del proveedor — es un dato que
+      // el usuario escribió (o eligió de la lista desplegable) a propósito
+      // para ESTE documento puntual, no una inferencia genérica.
+      const costCenterFromExcel = document.payload?.costCenterCode
+        ? resolveSiigoCostCenter(
+            document.payload.costCenterCode,
+            costCentersCatalogByCompanyId.get(document.companyId) ?? [],
+          )
+        : null;
       costCenters.set(
         document.id,
-        resolveSuggestedCostCenterForDocument(
-          document,
-          configurationIndex,
-          integrationId,
-        ),
+        costCenterFromExcel ??
+          resolveSuggestedCostCenterForDocument(
+            document,
+            configurationIndex,
+            integrationId,
+          ),
       );
       const suggestedItemConfig =
         historialSnapshot?.itemConfig ??

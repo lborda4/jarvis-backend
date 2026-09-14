@@ -25,6 +25,7 @@ import {
   StartPurchaseInvoiceImportResponseDto,
 } from './dto/purchase-invoice-import-job.dto';
 import { PurchaseInvoiceValidationReportDto } from './dto/purchase-invoice-import-validation.dto';
+import { SupportDocumentValidationReportDto } from './dto/support-document-import-validation.dto';
 import { UploadXmlRequestDto } from './dto/upload-xml-request.dto';
 import { InvoicesService } from './invoices.service';
 
@@ -45,9 +46,13 @@ export class InvoicesController {
     'Content-Type',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   )
-  downloadSupportDocumentTemplate(): StreamableFile {
+  async downloadSupportDocumentTemplate(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<StreamableFile> {
     const { buffer, filename } =
-      this.invoicesService.getSupportDocumentTemplate();
+      await this.invoicesService.getSupportDocumentTemplate(
+        getAuthenticatedCompanyId(user),
+      );
 
     return new StreamableFile(buffer, {
       disposition: `attachment; filename="${filename}"`,
@@ -65,6 +70,18 @@ export class InvoicesController {
       file,
       getAuthenticatedCompanyId(user),
       body,
+    );
+  }
+
+  @Post('support-documents/validate')
+  @UseInterceptors(FileInterceptor('file'))
+  validateSupportDocuments(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<SupportDocumentValidationReportDto> {
+    return this.invoicesService.validateSupportDocumentsExcel(
+      file,
+      getAuthenticatedCompanyId(user),
     );
   }
 

@@ -44,6 +44,9 @@ export function mapGroupedSupportDocumentToPayload(
     ...(group.observations?.trim()
       ? { observations: group.observations.trim() }
       : {}),
+    ...(group.costCenter?.trim()
+      ? { costCenterCode: group.costCenter.trim() }
+      : {}),
   };
 }
 

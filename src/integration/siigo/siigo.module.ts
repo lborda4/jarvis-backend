@@ -102,6 +102,7 @@ import { OpenRouterModule } from '../openrouter/openrouter.module';
     SiigoTaxesCatalogService,
     SiigoPaymentTypesCatalogService,
     SiigoProductsCatalogService,
+    SiigoCostCentersCatalogService,
     SiigoPurchaseAiClassificationService,
   ],
 })

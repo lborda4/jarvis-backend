@@ -229,4 +229,83 @@ describe('SiigoDocumentPreparationService.prepareSupplierAndAccounts', () => {
     expect(electronicDocumentService.resolveAlreadyInSiigoMatch).not.toHaveBeenCalled();
     expect(result.nextStep).toBe('READY');
   });
+
+  it('Documento soporte NUNCA intenta crear el tercero solo — queda en "Requiere proveedor" para creación manual, igual que Factura de compra (pedido explícito: que ambos tipos de documento se comporten igual acá, sin auto-creación)', async () => {
+    const electronicDocumentService = {
+      requireById: jest.fn().mockResolvedValue({
+        ...buildDocumentStub(ElectronicDocumentStatus.PENDING),
+        electronicDocumentType: 'SUPPORT_DOCUMENT',
+      }),
+      resolveAlreadyInSiigoMatch: jest.fn().mockResolvedValue(null),
+      updateStatus: jest.fn(),
+      updateSupplierExistsInSiigo: jest.fn(),
+    };
+    const siigoValidationService = {
+      validateImport: jest.fn().mockResolvedValue({ status: 'THIRD_PARTY_REQUIRED' }),
+    };
+    const siigoSupplierCreationService = { createSupplier: jest.fn() };
+    const service = new SiigoDocumentPreparationService(
+      electronicDocumentService as any,
+      siigoValidationService as any,
+      {} as any,
+      {} as any,
+      siigoSupplierCreationService as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.prepareSupplierAndAccounts('doc-1', 'company-1');
+
+    expect(siigoSupplierCreationService.createSupplier).not.toHaveBeenCalled();
+    expect(electronicDocumentService.updateStatus).toHaveBeenCalledWith(
+      'doc-1',
+      ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
+      'company-1',
+    );
+    expect(result.nextStep).toBe('SUPPLIER_REQUIRED');
+  });
+
+  it('Factura de compra sí intenta crear el tercero solo cuando falta (comportamiento sin cambios)', async () => {
+    const electronicDocumentService = {
+      requireById: jest
+        .fn()
+        .mockResolvedValueOnce({
+          ...buildDocumentStub(ElectronicDocumentStatus.PENDING),
+          electronicDocumentType: 'PURCHASE_INVOICE',
+        })
+        .mockResolvedValueOnce({
+          ...buildDocumentStub(ElectronicDocumentStatus.ACCOUNT_MAPPED),
+          electronicDocumentType: 'PURCHASE_INVOICE',
+        }),
+      resolveAlreadyInSiigoMatch: jest.fn().mockResolvedValue(null),
+      updateStatus: jest.fn(),
+      updateSupplierExistsInSiigo: jest.fn(),
+    };
+    const siigoValidationService = {
+      validateImport: jest.fn().mockResolvedValue({ status: 'THIRD_PARTY_REQUIRED' }),
+    };
+    const siigoAccountMappingService = {
+      validateAccountMapping: jest.fn().mockResolvedValue({ status: 'READY' }),
+    };
+    const siigoSupplierCreationService = {
+      createSupplier: jest.fn().mockResolvedValue({ success: true }),
+    };
+    const service = new SiigoDocumentPreparationService(
+      electronicDocumentService as any,
+      siigoValidationService as any,
+      siigoAccountMappingService as any,
+      {} as any,
+      siigoSupplierCreationService as any,
+      {} as any,
+      {} as any,
+    );
+
+    await service.prepareSupplierAndAccounts('doc-1', 'company-1');
+
+    expect(siigoSupplierCreationService.createSupplier).toHaveBeenCalledWith(
+      { documentId: 'doc-1' },
+      'company-1',
+      'automatic',
+    );
+  });
 });

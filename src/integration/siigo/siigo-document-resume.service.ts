@@ -81,14 +81,70 @@ export class SiigoDocumentResumeService {
     // real reportado: un import de 50 filas disparaba 50 resume() a la vez
     // desde el frontend, saturando el rate limit de SIIGO y volviendo la
     // validación mucho más lenta de lo normal.
+    //
+    // El .catch() por documento es aparte: mapWithConcurrency no aísla
+    // fallas por ítem — si el mapper revienta para UNO, Promise.all rechaza
+    // el lote COMPLETO y los documentos que todavía no habían arrancado se
+    // quedan sin ni siquiera intentarse. Caso real reportado: varios
+    // documentos de un mismo lote se quedaban "Revisando proveedor" para
+    // siempre, sin ningún error visible, porque uno solo (ej. requireById
+    // reventando por un problema transitorio, o el documento borrado a
+    // mitad de camino) tumbaba el resto en silencio.
     const items = await mapWithConcurrency(
       uniqueIds,
       SIIGO_DOCUMENT_PREPARATION_CONCURRENCY,
       (documentId) =>
-        this.resume(documentId, companyId, batchContext, { prepareOnly }),
+        this.resume(documentId, companyId, batchContext, { prepareOnly }).catch(
+          async (error) => {
+            this.logger.error(
+              `[documentId=${documentId}] resume() explotó sin capturar dentro del lote — se aísla para no tumbar el resto`,
+              error instanceof Error ? error.stack : String(error),
+            );
+
+            return this.buildFailedResponseSafely(
+              documentId,
+              companyId,
+              error,
+            );
+          },
+        ),
     );
 
     return { items };
+  }
+
+  /** Último recurso cuando resume() revienta sin capturar internamente (ver
+   * comentario en resumeBatch) — intenta dejar el documento marcado FAILED
+   * (visible en la tabla, con acción "Reintentar") en vez de dejarlo
+   * congelado en su estado anterior. Nunca lanza: si esto también falla, el
+   * documento queda como estaba, pero el resto del lote sigue su curso. */
+  private async buildFailedResponseSafely(
+    documentId: string,
+    companyId: string,
+    originalError: unknown,
+  ): Promise<ResumeElectronicDocumentResponseDto> {
+    try {
+      await this.electronicDocumentService.updateStatus(
+        documentId,
+        ElectronicDocumentStatus.FAILED,
+        companyId,
+      );
+
+      return await this.buildResponse('FAILED', documentId, companyId,
+        originalError instanceof Error
+          ? originalError.message
+          : 'No se pudo reanudar el proceso del documento.',
+      );
+    } catch (fallbackError) {
+      this.logger.error(
+        `[documentId=${documentId}] No se pudo marcar el documento como FAILED tras el error no capturado`,
+        fallbackError instanceof Error
+          ? fallbackError.stack
+          : String(fallbackError),
+      );
+
+      throw originalError;
+    }
   }
 
   async resume(

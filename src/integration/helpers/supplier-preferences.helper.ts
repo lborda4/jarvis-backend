@@ -237,10 +237,17 @@ export function resolveSuggestedRetentionsForDocument(
     );
   }
 
-  if (document.payload.aiSuggestion) {
-    return document.payload.aiSuggestion.retentions ?? [];
-  }
-
+  // A diferencia de account/product, la clasificación con IA
+  // (SiigoPurchaseAiClassificationService) NUNCA decide retenciones — solo
+  // pide cuenta/tipo de ítem, así que aiSuggestion.retentions viene SIEMPRE
+  // en `[]` (ver classifyOne). Devolverlo acá tal cual (como hacían
+  // resolveSuggestedAccountForDocument/resolveSuggestedProductForDocument
+  // con sus propios campos) tapaba la preferencia real guardada del
+  // proveedor apenas el documento tenía un aiSuggestion escrito — bug real
+  // reportado: un proveedor con retenciones configuradas de un envío
+  // anterior dejaba de sugerirlas en cuanto la clasificación automática con
+  // IA corría para un documento nuevo de ese mismo proveedor. Acá SIEMPRE
+  // se resuelve contra la preferencia guardada, sin mirar aiSuggestion.
   const configuration = resolveSupplierConfigurationForDocument(
     document,
     configurationIndex,

@@ -22,6 +22,7 @@ import { IntegrationProvider } from '../integration/enums/integration-provider.e
 import { JarvisDocumentPreparationService } from '../integration/jarvis/jarvis-document-preparation.service';
 import { SiigoDocumentPreparationService } from '../integration/siigo/siigo-document-preparation.service';
 import { SiigoPurchaseAiClassificationService } from '../integration/siigo/siigo-purchase-ai-classification.service';
+import { SiigoCostCentersCatalogService } from '../integration/siigo/siigo-cost-centers-catalog.service';
 import { ImportSessionService } from '../import-session/import-session.service';
 import { ExcelService } from '../common/services/excel.service';
 import { ExtractInvoicesResponseDto } from './dto/extract-invoices-response.dto';
@@ -44,6 +45,8 @@ import {
 } from './dto/purchase-invoice-import-job.dto';
 import { PurchaseInvoiceValidationReportDto } from './dto/purchase-invoice-import-validation.dto';
 import { validatePurchaseInvoiceExcelRows } from './helpers/purchase-invoice-import-validation.helper';
+import { SupportDocumentValidationReportDto } from './dto/support-document-import-validation.dto';
+import { validateSupportDocumentExcelRows } from './helpers/support-document-import-validation.helper';
 import { applySupportDocumentIssueDate } from './helpers/support-document-issue-date.helper';
 import {
   buildSupportDocumentTemplateExcel,
@@ -71,7 +74,38 @@ export class InvoicesService {
     private readonly purchaseInvoiceImportJobsRepository: PurchaseInvoiceImportJobsRepository,
     private readonly purchaseInvoiceImportJobRowsRepository: PurchaseInvoiceImportJobRowsRepository,
     private readonly purchaseInvoiceImportStatusService: PurchaseInvoiceImportStatusService,
+    private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
   ) {}
+
+  /**
+   * Pasada de validación rápida (sin tocar NextPyme/SIIGO) sobre el Excel de
+   * Documento Soporte — mismo criterio que validatePurchaseInvoicesExcel:
+   * se corre ANTES de confirmar la importación, para que el usuario
+   * corrija el archivo (tipo de documento inválido, centro de costos que
+   * no existe en SIIGO) antes de disparar ninguna llamada real.
+   */
+  async validateSupportDocumentsExcel(
+    file: Express.Multer.File | undefined,
+    companyId: string,
+  ): Promise<SupportDocumentValidationReportDto> {
+    if (!file) {
+      throw new MissingFileException();
+    }
+
+    const groups = parseSupportDocumentExcel(file.buffer);
+    const costCenters = await this.siigoCostCentersCatalogService
+      .listCostCenters(companyId)
+      .catch((error) => {
+        this.logger.warn(
+          `[companyId=${companyId}] No se pudo consultar el catálogo de centros de costo para validar el Excel; se valida sin esa regla.`,
+          error instanceof Error ? error.message : error,
+        );
+
+        return [];
+      });
+
+    return validateSupportDocumentExcelRows(groups, costCenters);
+  }
 
   async previewSupportDocumentsFromExcel(
     file?: Express.Multer.File,
@@ -493,12 +527,27 @@ export class InvoicesService {
     };
   }
 
-  getSupportDocumentTemplate(): {
+  async getSupportDocumentTemplate(companyId: string): Promise<{
     buffer: Buffer;
     filename: string;
-  } {
+  }> {
+    // Catálogo real de la empresa para la lista desplegable de "Centro de
+    // costos" — si la empresa no tiene SIIGO configurado (ej. Jarvis) o la
+    // consulta falla, se descarga igual la plantilla sin la lista (texto
+    // libre) en vez de bloquear la descarga por esto.
+    const costCenters = await this.siigoCostCentersCatalogService
+      .listCostCenters(companyId)
+      .catch((error) => {
+        this.logger.warn(
+          `[companyId=${companyId}] No se pudo consultar el catálogo de centros de costo para la plantilla; se descarga sin lista desplegable.`,
+          error instanceof Error ? error.message : error,
+        );
+
+        return [];
+      });
+
     return {
-      buffer: buildSupportDocumentTemplateExcel(),
+      buffer: await buildSupportDocumentTemplateExcel(costCenters),
       filename: SUPPORT_DOCUMENT_TEMPLATE_FILENAME,
     };
   }

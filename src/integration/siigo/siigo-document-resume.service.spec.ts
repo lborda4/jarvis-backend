@@ -21,6 +21,7 @@ function buildDocumentStub(status: ElectronicDocumentStatus) {
 function buildService(status: ElectronicDocumentStatus) {
   const electronicDocumentService = {
     requireById: jest.fn().mockResolvedValue(buildDocumentStub(status)),
+    updateStatus: jest.fn().mockResolvedValue(undefined),
   };
   const siigoDocumentPreparationService = {
     prepareSupplierAndAccounts: jest.fn().mockResolvedValue({
@@ -124,5 +125,50 @@ describe('SiigoDocumentResumeService.resumeBatch', () => {
     ).toHaveBeenCalledTimes(23);
     expect(maxInFlight).toBeLessThanOrEqual(5);
     expect(maxInFlight).toBeGreaterThan(1);
+  });
+
+  it('un documento que revienta sin capturar (ej. requireById falla) no tumba el resto del lote (bug real: varios documentos quedaban "Revisando proveedor" para siempre porque uno solo mataba todo el Promise.all)', async () => {
+    const { service, electronicDocumentService, siigoDocumentPreparationService } =
+      buildService(ElectronicDocumentStatus.ACCOUNT_MAPPED);
+
+    let boomCalls = 0;
+
+    electronicDocumentService.requireById.mockImplementation(
+      (documentId: string) => {
+        if (documentId === 'doc-boom') {
+          boomCalls += 1;
+
+          // Solo revienta la PRIMERA vez (ej. glitch transitorio de BD) —
+          // el segundo requireById (el que hace buildFailedResponseSafely
+          // al armar la respuesta FAILED) sí debe poder leer el documento.
+          if (boomCalls === 1) {
+            return Promise.reject(new Error('DB transitoriamente caída'));
+          }
+        }
+
+        return Promise.resolve(
+          buildDocumentStub(ElectronicDocumentStatus.ACCOUNT_MAPPED),
+        );
+      },
+    );
+
+    const documentIds = ['doc-a', 'doc-boom', 'doc-b', 'doc-c'];
+    const { items } = await service.resumeBatch(documentIds, 'company-1');
+
+    // Los que NO reventaron sí se procesaron — antes, el throw de doc-boom
+    // tumbaba el Promise.all completo y dejaba a los demás sin ni siquiera
+    // intentarse.
+    expect(
+      siigoDocumentPreparationService.prepareSupplierAndAccounts,
+    ).toHaveBeenCalledTimes(3);
+    expect(items).toHaveLength(4);
+
+    // El que reventó queda marcado FAILED en vez de congelado en su estado
+    // anterior — visible en la tabla, con acción "Reintentar".
+    expect(electronicDocumentService.updateStatus).toHaveBeenCalledWith(
+      'doc-boom',
+      ElectronicDocumentStatus.FAILED,
+      'company-1',
+    );
   });
 });

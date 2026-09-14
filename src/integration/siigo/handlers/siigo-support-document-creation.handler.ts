@@ -12,9 +12,11 @@ import { CreateSiigoDocumentResponseDto } from '../dto/create-siigo-document.dto
 import { executeSiigoRequestWithRetries } from '../helpers/siigo-request-retry.helper';
 import { SiigoDocumentCreationHandler } from '../interfaces/siigo-document-creation.handler';
 import { mapElectronicDocumentToSiigoSupportDocument } from '../mappers/electronic-document-to-siigo-support-document.mapper';
+import { resolveSiigoCostCenterId } from '../helpers/siigo-cost-center-match.helper';
 import { SiigoAuthService } from '../siigo-auth.service';
 import { SiigoHttpClient } from '../clients/siigo-http.client';
 import { SiigoConfigurationCacheService } from '../siigo-configuration-cache.service';
+import { SiigoCostCentersCatalogService } from '../siigo-cost-centers-catalog.service';
 
 const ALLOWED_STATUSES = new Set<ElectronicDocumentStatus>([
   ElectronicDocumentStatus.ACCOUNT_MAPPED,
@@ -34,6 +36,7 @@ export class SiigoSupportDocumentCreationHandler implements SiigoDocumentCreatio
     private readonly siigoHttpClient: SiigoHttpClient,
     private readonly electronicDocumentService: ElectronicDocumentService,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
+    private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
   ) {}
 
   async create(
@@ -70,6 +73,29 @@ export class SiigoSupportDocumentCreationHandler implements SiigoDocumentCreatio
       electronicDocument.payload,
       supportDocumentConfig,
     );
+
+    // Texto libre importado del Excel ("Centro de costos"), nunca validado
+    // contra SIIGO hasta este momento — si no matchea ningún centro de
+    // costos activo (typo, o columna vacía) se envía igual sin cost_center
+    // en vez de bloquear el documento entero por un dato opcional.
+    const costCenterCode = electronicDocument.payload.costCenterCode?.trim();
+
+    if (costCenterCode) {
+      const costCenters =
+        await this.siigoCostCentersCatalogService.listCostCenters(companyId);
+      const costCenterId = resolveSiigoCostCenterId(
+        costCenterCode,
+        costCenters,
+      );
+
+      if (costCenterId != null) {
+        supportDocumentPayload.cost_center = costCenterId;
+      } else {
+        this.logger.warn(
+          `[documentId=${documentId}] Centro de costos "${costCenterCode}" del Excel no coincide con ningún centro de costos activo en SIIGO; se envía sin cost_center.`,
+        );
+      }
+    }
 
     try {
       return await this.electronicDocumentService.runExclusiveForDocumentCreation(

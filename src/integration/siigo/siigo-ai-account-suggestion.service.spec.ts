@@ -1,4 +1,8 @@
-import { selectProductsForClassificationPrompt } from './siigo-ai-account-suggestion.service';
+import {
+  SiigoAiAccountSuggestionService,
+  selectProductsForClassificationPrompt,
+} from './siigo-ai-account-suggestion.service';
+import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 
 function buildProduct(code: string, name: string) {
   return { code, name };
@@ -69,5 +73,85 @@ describe('selectProductsForClassificationPrompt', () => {
     const selected = selectProductsForClassificationPrompt(['de'], products);
 
     expect(selected).toEqual([]);
+  });
+});
+
+describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documento soporte nunca clasifica como Producto', () => {
+  function buildService(document: any) {
+    const openRouterHttpClient = {
+      isConfigured: jest.fn().mockReturnValue(true),
+      createChatCompletion: jest.fn().mockResolvedValue({
+        content:
+          '{"itemType":"Account","accountCode":"5135","productCode":null,"confidence":80}',
+      }),
+    };
+    const electronicDocumentService = {
+      requireById: jest.fn().mockResolvedValue(document),
+    };
+    const siigoProductsCatalogService = {
+      listProducts: jest
+        .fn()
+        .mockResolvedValue([{ code: 'P1', name: 'Producto uno' }]),
+    };
+    const integrationsRepository = {
+      findByCompanyAndProvider: jest
+        .fn()
+        .mockResolvedValue({ id: 'integration-1' }),
+    };
+    const historialFacturasRepository = {
+      findRecentBySupplier: jest.fn().mockResolvedValue([]),
+    };
+    const siigoAccountsRepository = {
+      findTransactionalByCompanyAndIntegration: jest
+        .fn()
+        .mockResolvedValue([{ code: '5135', name: 'Gastos diversos' }]),
+    };
+
+    const service = new SiigoAiAccountSuggestionService(
+      openRouterHttpClient as any,
+      electronicDocumentService as any,
+      {} as any,
+      siigoProductsCatalogService as any,
+      {} as any,
+      integrationsRepository as any,
+      historialFacturasRepository as any,
+      siigoAccountsRepository as any,
+    );
+
+    return { service, siigoProductsCatalogService };
+  }
+
+  it('no consulta el catálogo de productos para Documento soporte — fuerza el prompt "solo cuenta" para que la IA nunca elija Producto', async () => {
+    const document = {
+      id: 'doc-1',
+      electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      payload: {
+        supplier: { name: 'Proveedor SAS', documentNumber: '900123456' },
+        items: [{ descripcion: 'Servicio de aseo' }],
+      },
+    };
+    const { service, siigoProductsCatalogService } = buildService(document);
+
+    await service.classifyItemTypeAndAccount('doc-1', 'company-1');
+
+    expect(siigoProductsCatalogService.listProducts).not.toHaveBeenCalled();
+  });
+
+  it('sí consulta el catálogo de productos para Factura de compra (comportamiento sin cambios)', async () => {
+    const document = {
+      id: 'doc-1',
+      electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE,
+      payload: {
+        supplier: { name: 'Proveedor SAS', documentNumber: '900123456' },
+        items: [{ descripcion: 'Servicio de aseo' }],
+      },
+    };
+    const { service, siigoProductsCatalogService } = buildService(document);
+
+    await service.classifyItemTypeAndAccount('doc-1', 'company-1');
+
+    expect(siigoProductsCatalogService.listProducts).toHaveBeenCalledWith(
+      'company-1',
+    );
   });
 });

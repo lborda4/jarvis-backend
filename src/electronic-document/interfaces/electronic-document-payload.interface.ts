@@ -78,6 +78,14 @@ export interface ElectronicDocumentPayload {
   taxes: ElectronicDocumentTax[];
   totals: DianInvoiceTotals;
   observations?: string;
+  /** Texto de la columna "Centro de costos" del Excel de importación —
+   * normalmente "código - nombre" (lista desplegable de la plantilla),
+   * todavía sin validar contra el catálogo real de SIIGO. Se resuelve al
+   * id numérico recién al armar la sugerencia/enviar (ver
+   * resolveSiigoCostCenter) — si no matchea ningún centro de costos
+   * activo, se ignora en vez de bloquear el documento por un dato
+   * opcional. */
+  costCenterCode?: string;
   siigoSendConfiguration?: SupplierPreferenceSnapshot | null;
   /**
    * Sugerencia de IA calculada en segundo plano al importar (solo para

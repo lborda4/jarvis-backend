@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
+import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { HistorialFacturasRepository } from '../repositories/historial-facturas.repository';
 import { HistorialFacturaFuente } from '../enums/historial-factura-fuente.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
@@ -285,15 +286,28 @@ export class SiigoAiAccountSuggestionService {
       this.integrationsRepository,
       companyId,
     );
+    // Documento soporte SIEMPRE se contabiliza a una cuenta (ver
+    // buildSiigoSupportDocumentRequest.ts: items[].type es 'Account' fijo,
+    // nunca 'Product') — a diferencia de Factura de compra, no tiene sentido
+    // ofrecerle "Producto" a la IA acá: si igual lo eligiera, la sugerencia
+    // se perdería entera (accountCode quedaría null, ver
+    // parsePurchaseItemClassificationResponse). No se pasa catálogo de
+    // productos para este tipo de documento, lo que fuerza el prompt
+    // "solo cuenta" que ya existe para empresas sin catálogo de productos
+    // (ver SYSTEM_PROMPT_ACCOUNTS_ONLY en purchase-item-classification-prompt.helper.ts).
+    const isSupportDocument =
+      document.electronicDocumentType === ElectronicDocumentType.SUPPORT_DOCUMENT;
 
     const [allTransactionalAccounts, productsCatalog] = await Promise.all([
       this.siigoAccountsRepository.findTransactionalByCompanyAndIntegration(
         companyId,
         integration.id,
       ),
-      this.siigoProductsCatalogService
-        .listProducts(companyId)
-        .catch((): SiigoProductCatalogItemDto[] => []),
+      isSupportDocument
+        ? Promise.resolve([])
+        : this.siigoProductsCatalogService
+            .listProducts(companyId)
+            .catch((): SiigoProductCatalogItemDto[] => []),
     ]);
 
     // findTransactionalByCompanyAndIntegration no filtra por clase — trae

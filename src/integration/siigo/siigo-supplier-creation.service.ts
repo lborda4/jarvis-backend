@@ -438,6 +438,25 @@ export class SiigoSupplierCreationService {
       createdNow && source === 'automatic',
     );
 
+    // El propio documento que disparó la creación del tercero también debe
+    // quedar con el nombre real — antes solo se lo propagaba a los
+    // "hermanos" (ver resolvePendingSiblings más abajo), así que la fila que
+    // el usuario acababa de resolver seguía mostrando "—" en Proveedor hasta
+    // que se recargaba la página y algo más volvía a tocar su payload (bug
+    // real reportado: se crea el proveedor pero el nombre no aparece).
+    await this.electronicDocumentService.updatePayload(
+      documentId,
+      {
+        ...electronicDocument.payload,
+        supplier: {
+          ...electronicDocument.payload.supplier,
+          name: supplierName,
+          commercialName: supplierName,
+        },
+      },
+      companyId,
+    );
+
     // Nunca pisar un documento que YA quedó PURCHASE_CREATED (enviado de
     // verdad, o ya existía en SIIGO al importar) — sea cual sea el status
     // que traía cuando arrancó esta llamada, se revisa el ACTUAL antes de

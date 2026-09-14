@@ -191,3 +191,108 @@ describe('SiigoSupplierCreationService.createSuppliersBulk', () => {
     expect(result.created).toBe(2);
   });
 });
+
+describe('SiigoSupplierCreationService.createSupplier — nombre en el propio documento', () => {
+  function buildPayload(overrides: Partial<any> = {}) {
+    return {
+      supplier: {
+        documentNumber: '51801794',
+        documentType: 'CC',
+        name: '',
+        ...overrides.supplier,
+      },
+      invoice: {
+        cufe: 'cufe-1',
+        number: 'DS-1',
+        issueDate: '2026-09-01',
+        currency: 'COP',
+      },
+      items: [],
+      taxes: [],
+      totals: { subtotal: 100000, iva: 0, total: 100000 },
+      ...overrides,
+    };
+  }
+
+  function buildFullService(document: any) {
+    const siigoAuthService = {
+      getValidAuthContext: jest
+        .fn()
+        .mockResolvedValue({ accessToken: 'token', partnerId: 'partner-1' }),
+    };
+    const siigoSupplierService = {
+      findSupplierByNit: jest.fn().mockResolvedValue(null),
+      createSupplier: jest.fn().mockResolvedValue({
+        id: 'siigo-customer-1',
+        type: 'Customer',
+        person_type: 'Person',
+        id_type: '13',
+        identification: '51801794',
+        name: ['MARIA PEREZ'],
+        commercial_name: '',
+        active: true,
+      }),
+    };
+    const integrationsRepository = {
+      findByCompanyAndProvider: jest
+        .fn()
+        .mockResolvedValue({ id: 'integration-1' }),
+    };
+    const supplierConfigurationsRepository = {
+      findByCompanyIntegrationAndNormalizedSupplierDocument: jest
+        .fn()
+        .mockResolvedValue(null),
+      create: jest.fn().mockImplementation((entity) => entity),
+      save: jest.fn().mockImplementation((entity) => entity),
+    };
+    const electronicDocumentService = {
+      requireById: jest.fn().mockResolvedValue(document),
+      updatePayload: jest.fn().mockResolvedValue(undefined),
+      updateStatus: jest.fn().mockResolvedValue(undefined),
+      updateSupplierExistsInSiigo: jest.fn().mockResolvedValue(undefined),
+      findSupplierNotFoundSiblings: jest.fn().mockResolvedValue([]),
+    };
+    const companiesRepository = {
+      findById: jest.fn().mockResolvedValue({ cityCode: '11001' }),
+    };
+    const nextPymeRutService = {
+      lookupDocument: jest.fn().mockResolvedValue({ found: false }),
+    };
+
+    const service = new SiigoSupplierCreationService(
+      siigoAuthService as any,
+      siigoSupplierService as any,
+      integrationsRepository as any,
+      supplierConfigurationsRepository as any,
+      electronicDocumentService as any,
+      {} as any,
+      companiesRepository as any,
+      nextPymeRutService as any,
+    );
+
+    return { service, electronicDocumentService };
+  }
+
+  it('actualiza el nombre del proveedor en el PROPIO documento, no solo en los "hermanos" (bug real reportado: se crea el tercero pero la fila sigue mostrando "—" en Proveedor)', async () => {
+    const document = {
+      id: 'doc-1',
+      companyId: 'company-1',
+      status: 'PENDING',
+      payload: buildPayload(),
+    };
+    const { service, electronicDocumentService } = buildFullService(document);
+
+    await service.createSupplier({ documentId: 'doc-1' }, 'company-1');
+
+    expect(electronicDocumentService.updatePayload).toHaveBeenCalledWith(
+      'doc-1',
+      expect.objectContaining({
+        supplier: expect.objectContaining({
+          name: 'MARIA PEREZ',
+          commercialName: 'MARIA PEREZ',
+        }),
+      }),
+      'company-1',
+    );
+  });
+});
