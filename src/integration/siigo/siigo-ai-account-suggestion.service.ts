@@ -1,23 +1,32 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
+import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { HistorialFacturasRepository } from '../repositories/historial-facturas.repository';
 import { HistorialFacturaFuente } from '../enums/historial-factura-fuente.enum';
+import { HistorialFacturaTipo } from '../enums/historial-factura-tipo.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SiigoAccountsRepository } from '../repositories/siigo-accounts.repository';
+import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
 import { OpenRouterHttpClient } from '../openrouter/clients/openrouter-http.client';
 import {
   buildAccountNameByCode,
   isAllowedAccountCode,
   resolveAccountNameFromCatalog,
 } from '../helpers/supplier-accounts-catalog.helper';
+import { resolveSuggestedItemConfigFromConfiguration } from '../helpers/supplier-preference.helper';
 import {
   buildPurchaseClassificationPrompt,
   parsePurchaseClassificationResponse,
 } from './helpers/purchase-classification-prompt.helper';
 import {
-  buildPurchaseItemClassificationPrompt,
-  parsePurchaseItemClassificationResponse,
+  buildAccountCodeClassificationPrompt,
+  buildItemTypeClassificationPrompt,
+  buildProductCodeClassificationPrompt,
+  parseAccountCodeClassificationResponse,
+  parseItemTypeClassificationResponse,
+  parseProductCodeClassificationResponse,
+  type PurchaseItemClassificationPromptItem,
 } from './helpers/purchase-item-classification-prompt.helper';
 import { SuggestPurchaseItemClassificationResponseDto } from './dto/suggest-purchase-item-classification.dto';
 import {
@@ -36,6 +45,10 @@ const HISTORICAL_EXAMPLES_LIMIT = 5;
 // tokens de salida — probado en vivo con openai/gpt-4o-mini en ~15-20 tokens
 // reales de respuesta.
 const ITEM_CLASSIFICATION_MAX_TOKENS = 5000;
+// Paso 1 (decidir SOLO Cuenta vs Producto, sin catálogos) responde un JSON
+// mínimo — un tope bajo alcanza de sobra y evita gastar de más si el modelo
+// se explaya con texto extra.
+const ITEM_TYPE_CLASSIFICATION_MAX_TOKENS = 300;
 // Empresas con catálogo de productos grande (ej. una textilera con miles de
 // referencias de tela) hacen que mandar el catálogo COMPLETO en cada
 // clasificación explote en tokens — caso real reportado: 3139 productos ≈
@@ -136,6 +149,8 @@ export class SiigoAiAccountSuggestionService {
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly historialFacturasRepository: HistorialFacturasRepository,
     private readonly siigoAccountsRepository: SiigoAccountsRepository,
+    private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
+    private readonly companiesRepository: CompaniesRepository,
   ) {}
 
   async suggestForDocument(
@@ -263,9 +278,17 @@ export class SiigoAiAccountSuggestionService {
    * Clasificación angosta para el disparo automático en background (ver
    * SiigoPurchaseAiClassificationService): a diferencia de
    * `suggestForDocument` (botón manual, respuesta amplia con IVA y
-   * retenciones), esta solo pide tipo de ítem (Cuenta/Producto) + código de
-   * cuenta, contra el catálogo de cuentas TRANSACCIONALES únicamente, para
-   * minimizar tokens tanto de entrada como de salida.
+   * retenciones), esta solo pide tipo de ítem (Cuenta/Producto) + código.
+   *
+   * Se separa en DOS llamadas a la IA en vez de una sola con ambos catálogos
+   * completos (diseño anterior) — caso real reportado: mandar TODAS las
+   * cuentas Y TODOS los productos en un solo prompt saturaba el límite de
+   * tokens de la empresa, dejando poco espacio para que el modelo razone.
+   * Paso 1 decide SOLO el tipo (sin catálogos, prompt mínimo) — y ni
+   * siquiera llama a la IA si ya se puede resolver desde la base de datos
+   * (ver resolveSuggestedItemConfigFromConfiguration/campoVariabilidad.
+   * tipoItem, calculado por el sync de historial de compras). Paso 2 manda
+   * SOLO el catálogo que corresponde según el tipo ya decidido.
    */
   async classifyItemTypeAndAccount(
     documentId: string,
@@ -289,26 +312,25 @@ export class SiigoAiAccountSuggestionService {
     // Documento soporte SIEMPRE se contabiliza a una cuenta (ver
     // buildSiigoSupportDocumentRequest.ts: items[].type es 'Account' fijo,
     // nunca 'Product') — a diferencia de Factura de compra, no tiene sentido
-    // ofrecerle "Producto" a la IA acá: si igual lo eligiera, la sugerencia
-    // se perdería entera (accountCode quedaría null, ver
-    // parsePurchaseItemClassificationResponse). No se pasa catálogo de
-    // productos para este tipo de documento, lo que fuerza el prompt
-    // "solo cuenta" que ya existe para empresas sin catálogo de productos
-    // (ver SYSTEM_PROMPT_ACCOUNTS_ONLY en purchase-item-classification-prompt.helper.ts).
+    // ofrecerle "Producto" a la IA acá ni siquiera en el paso 1: se fuerza
+    // "Account" directo, sin gastar esa llamada.
     const isSupportDocument =
-      document.electronicDocumentType === ElectronicDocumentType.SUPPORT_DOCUMENT;
+      document.electronicDocumentType ===
+      ElectronicDocumentType.SUPPORT_DOCUMENT;
 
-    const [allTransactionalAccounts, productsCatalog] = await Promise.all([
-      this.siigoAccountsRepository.findTransactionalByCompanyAndIntegration(
-        companyId,
-        integration.id,
-      ),
-      isSupportDocument
-        ? Promise.resolve([])
-        : this.siigoProductsCatalogService
-            .listProducts(companyId)
-            .catch((): SiigoProductCatalogItemDto[] => []),
-    ]);
+    const [allTransactionalAccounts, productsCatalog, company] =
+      await Promise.all([
+        this.siigoAccountsRepository.findTransactionalByCompanyAndIntegration(
+          companyId,
+          integration.id,
+        ),
+        isSupportDocument
+          ? Promise.resolve([])
+          : this.siigoProductsCatalogService
+              .listProducts(companyId)
+              .catch((): SiigoProductCatalogItemDto[] => []),
+        this.companiesRepository.findById(companyId),
+      ]);
 
     // findTransactionalByCompanyAndIntegration no filtra por clase — trae
     // TODAS las cuentas transaccionales (activo, pasivo, patrimonio, ingreso,
@@ -343,55 +365,67 @@ export class SiigoAiAccountSuggestionService {
     const itemDescriptions = document.payload.items.map(
       (item) => item.descripcion,
     );
-    const productsForPrompt = selectProductsForClassificationPrompt(
-      itemDescriptions,
-      productsCatalog,
-    );
+    const promptItems = itemDescriptions.map((descripcion) => ({
+      descripcion,
+    }));
+    const supplierName = document.payload.supplier.name || 'Desconocido';
+    const ourCompanyName = company?.name || 'nuestra empresa';
+    const hasProductsCatalog = productsCatalog.length > 0;
 
-    const prompt = buildPurchaseItemClassificationPrompt({
-      supplierName: document.payload.supplier.name || 'Desconocido',
-      items: itemDescriptions.map((descripcion) => ({ descripcion })),
-      accounts: transactionalAccounts.map((account) => ({
-        code: account.code,
-        name: account.name,
-      })),
-      products: productsForPrompt,
-      historicalExamples: historicalRows.map((row) => ({
-        descripcionItem: row.descripcionItem,
-        cuentaPuc: row.cuentaPuc,
-      })),
+    const itemType = await this.resolveItemType({
+      documentId,
+      companyId,
+      integrationId: integration.id,
+      supplierNit,
+      supplierDocumentType: document.payload.supplier.documentType,
+      isSupportDocument,
+      hasProductsCatalog,
+      supplierName,
+      promptItems,
     });
 
-    console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] ANTES de llamar a OpenRouter — ${new Date().toISOString()} — items=${JSON.stringify(itemDescriptions)}, cuentasEnPrompt=${transactionalAccounts.length}, productosEnPrompt=${productsForPrompt.length}`,
-    );
+    if (itemType === 'Product') {
+      const productsForPrompt = selectProductsForClassificationPrompt(
+        itemDescriptions,
+        productsCatalog,
+      );
+      const productHistoricalExamples = historicalRows
+        .filter((row) => row.tipo === HistorialFacturaTipo.PRODUCTO)
+        .map((row) => ({
+          descripcionItem: row.descripcionItem,
+          cuentaPuc: row.cuentaPuc,
+        }));
 
-    const { content: rawText } =
-      await this.openRouterHttpClient.createChatCompletion(prompt, {
-        maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS,
-        context: {
-          companyId,
-          documentId,
-          purpose: 'purchase-item-classification',
-        },
+      const prompt = buildProductCodeClassificationPrompt({
+        supplierName,
+        ourCompanyName,
+        items: promptItems,
+        products: productsForPrompt,
+        historicalExamples: productHistoricalExamples,
       });
 
-    console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de llamar a OpenRouter — ${new Date().toISOString()} — respuesta cruda: ${rawText}`,
-    );
+      console.log(
+        `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Producto) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, productosEnPrompt=${productsForPrompt.length}`,
+      );
 
-    const parsed = parsePurchaseItemClassificationResponse(rawText);
+      const { content: rawText } =
+        await this.openRouterHttpClient.createChatCompletion(prompt, {
+          maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS,
+          context: {
+            companyId,
+            documentId,
+            purpose: 'purchase-item-product-code-classification',
+          },
+        });
 
-    console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] Respuesta parseada: ${JSON.stringify(parsed)}`,
-    );
+      console.log(
+        `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Producto) DESPUÉS de llamar a OpenRouter — respuesta cruda: ${rawText}`,
+      );
 
-    if (parsed.itemType === 'Product') {
+      const parsed = parseProductCodeClassificationResponse(rawText);
+
       if (!parsed.productCode) {
-        return {
-          ...EMPTY_ITEM_CLASSIFICATION,
-          itemType: parsed.itemType,
-        };
+        return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
       }
 
       const matchedProduct = productsCatalog.find(
@@ -403,26 +437,58 @@ export class SiigoAiAccountSuggestionService {
           `[documentId=${documentId}] IA sugirió producto "${parsed.productCode}" que no existe en el catálogo; se descarta.`,
         );
 
-        return {
-          ...EMPTY_ITEM_CLASSIFICATION,
-          itemType: parsed.itemType,
-        };
+        return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
       }
 
       return {
         ...EMPTY_ITEM_CLASSIFICATION,
-        itemType: parsed.itemType,
+        itemType,
         productCode: matchedProduct.code,
         productName: matchedProduct.name,
         confidence: parsed.confidence,
       };
     }
 
-    if (parsed.itemType !== 'Account' || !parsed.accountCode) {
-      return {
-        ...EMPTY_ITEM_CLASSIFICATION,
-        itemType: parsed.itemType,
-      };
+    const accountHistoricalExamples = historicalRows
+      .filter((row) => row.tipo === HistorialFacturaTipo.CUENTA)
+      .map((row) => ({
+        descripcionItem: row.descripcionItem,
+        cuentaPuc: row.cuentaPuc,
+      }));
+
+    const prompt = buildAccountCodeClassificationPrompt({
+      supplierName,
+      ourCompanyName,
+      items: promptItems,
+      accounts: transactionalAccounts.map((account) => ({
+        code: account.code,
+        name: account.name,
+      })),
+      historicalExamples: accountHistoricalExamples,
+    });
+
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Cuenta) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, cuentasEnPrompt=${transactionalAccounts.length}`,
+    );
+
+    const { content: rawText } =
+      await this.openRouterHttpClient.createChatCompletion(prompt, {
+        maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS,
+        context: {
+          companyId,
+          documentId,
+          purpose: 'purchase-item-account-code-classification',
+        },
+      });
+
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Cuenta) DESPUÉS de llamar a OpenRouter — respuesta cruda: ${rawText}`,
+    );
+
+    const parsed = parseAccountCodeClassificationResponse(rawText);
+
+    if (!parsed.accountCode) {
+      return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
     }
 
     const accountNameByCode = buildAccountNameByCode(transactionalAccounts);
@@ -435,15 +501,12 @@ export class SiigoAiAccountSuggestionService {
         `[documentId=${documentId}] IA sugirió cuenta "${parsed.accountCode}" que no existe en el catálogo transaccional; se descarta.`,
       );
 
-      return {
-        ...EMPTY_ITEM_CLASSIFICATION,
-        itemType: parsed.itemType,
-      };
+      return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
     }
 
     return {
       ...EMPTY_ITEM_CLASSIFICATION,
-      itemType: parsed.itemType,
+      itemType,
       accountCode: matchedAccount.code,
       accountName: resolveAccountNameFromCatalog(
         matchedAccount.code,
@@ -452,5 +515,90 @@ export class SiigoAiAccountSuggestionService {
       ),
       confidence: parsed.confidence,
     };
+  }
+
+  /**
+   * Paso 1: decide Cuenta vs Producto SIN gastar catálogos en el prompt.
+   * Orden de resolución: (a) documento soporte → siempre Cuenta; (b) empresa
+   * sin catálogo de productos → siempre Cuenta (nunca tuvo sentido ofrecer
+   * "Producto"); (c) tipo fijo ya calculado por el sync de historial de este
+   * proveedor (campoVariabilidad.tipoItem, ≥70% de sus líneas del mismo
+   * tipo) → se usa DIRECTO, sin llamar a la IA; (d) si nada de lo anterior
+   * resuelve el tipo, ahí sí se llama a la IA con un prompt mínimo (sin
+   * catálogos) para que decida.
+   */
+  private async resolveItemType(params: {
+    documentId: string;
+    companyId: string;
+    integrationId: string;
+    supplierNit: string;
+    supplierDocumentType: string | undefined;
+    isSupportDocument: boolean;
+    hasProductsCatalog: boolean;
+    supplierName: string;
+    promptItems: PurchaseItemClassificationPromptItem[];
+  }): Promise<'Account' | 'Product'> {
+    const {
+      documentId,
+      companyId,
+      integrationId,
+      supplierNit,
+      isSupportDocument,
+      hasProductsCatalog,
+      supplierName,
+      promptItems,
+    } = params;
+
+    if (isSupportDocument || !hasProductsCatalog) {
+      return 'Account';
+    }
+
+    if (supplierNit) {
+      const configuration =
+        await this.supplierConfigurationsRepository.findByCompanyIntegrationAndNormalizedSupplierDocument(
+          companyId,
+          integrationId,
+          supplierNit,
+        );
+      const dbItemType =
+        resolveSuggestedItemConfigFromConfiguration(configuration)?.itemType ??
+        null;
+
+      if (dbItemType) {
+        console.log(
+          `[AI-CLASSIFY] [documentId=${documentId}] Paso 1: itemType="${dbItemType}" resuelto desde el historial del proveedor (BD) — no se llamó a la IA.`,
+        );
+        return dbItemType;
+      }
+    }
+
+    const prompt = buildItemTypeClassificationPrompt({
+      supplierName,
+      items: promptItems,
+    });
+
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] Paso 1 (tipo) ANTES de llamar a OpenRouter — sin historial confiable del proveedor.`,
+    );
+
+    const { content: rawText } =
+      await this.openRouterHttpClient.createChatCompletion(prompt, {
+        maxTokens: ITEM_TYPE_CLASSIFICATION_MAX_TOKENS,
+        context: {
+          companyId,
+          documentId,
+          purpose: 'purchase-item-type-classification',
+        },
+      });
+
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] Paso 1 (tipo) DESPUÉS de llamar a OpenRouter — respuesta cruda: ${rawText}`,
+    );
+
+    // Sin señal fuerte ninguna (ni historial, ni una respuesta parseable),
+    // "Account" es el fallback seguro: siempre es una opción válida (las
+    // cuentas PUC de gasto/costo son categorías amplias), a diferencia de
+    // "Product" que requeriría un match real en el catálogo.
+    return parseItemTypeClassificationResponse(rawText).itemType ?? 'Account';
   }
 }

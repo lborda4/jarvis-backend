@@ -129,6 +129,22 @@ export class JarvisTercerosService {
       }),
     );
 
+    // Este create() se usa tanto desde el botón "Crear tercero" de una fila
+    // puntual (ahí el modal después llama a resumeElectronicDocument, que ya
+    // propaga a los demás documentos del mismo proveedor) como desde
+    // "Crear" en el listado de Terceros, SIN ningún documento disparador —
+    // en ese segundo caso nada más se encargaba de avisarle a los documentos
+    // ya importados de este proveedor que estaban esperando a que existiera
+    // (bug real reportado: se crea el proveedor pero esos registros se
+    // quedan en "Requiere proveedor"). Se resuelven acá siempre, de una vez
+    // para todos — si el modal llama a resumeElectronicDocument después,
+    // no encuentra nada pendiente y no hace nada de más.
+    await this.jarvisDocumentPreparationService.resolveSiblingsForSupplier(
+      trimmedCompanyId,
+      documentNumber,
+      name,
+    );
+
     return {
       success: true,
       tercero: this.toDto(tercero),

@@ -8,6 +8,7 @@ function buildService(overrides: {
   save?: jest.Mock;
   create?: jest.Mock;
   prepareDocumentsInBackground?: jest.Mock;
+  resolveSiblingsForSupplier?: jest.Mock;
 }) {
   const integrationsRepository = {
     findByCompanyAndProvider: jest
@@ -33,6 +34,8 @@ function buildService(overrides: {
   const jarvisDocumentPreparationService = {
     prepareDocumentsInBackground:
       overrides.prepareDocumentsInBackground ?? jest.fn(),
+    resolveSiblingsForSupplier:
+      overrides.resolveSiblingsForSupplier ?? jest.fn().mockResolvedValue(undefined),
   };
 
   const service = new JarvisTercerosService(
@@ -160,6 +163,35 @@ describe('JarvisTercerosService.listPendingSuppliers', () => {
       name: 'Proveedor 2 SAS',
       email: 'p2@correo.com',
     });
+  });
+});
+
+describe('JarvisTercerosService.create', () => {
+  it('caso real pedido: si ya hay más documentos importados del mismo proveedor, resuelve sus siblings de una vez — no solo cuando la creación viene disparada desde una fila puntual', async () => {
+    const resolveSiblingsForSupplier = jest.fn().mockResolvedValue(undefined);
+    const { service } = buildService({
+      resolveSiblingsForSupplier,
+      save: jest.fn().mockImplementation((entity) => ({
+        ...entity,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      })),
+    });
+
+    await service.create(
+      {
+        document_type: JarvisDocumentType.NIT,
+        document_number: '900123456',
+        name: 'Proveedor Nuevo SAS',
+      },
+      'company-1',
+    );
+
+    expect(resolveSiblingsForSupplier).toHaveBeenCalledWith(
+      'company-1',
+      '900123456',
+      'Proveedor Nuevo SAS',
+    );
   });
 });
 

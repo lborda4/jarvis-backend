@@ -165,11 +165,13 @@ export class SiigoPurchaseAiClassificationService {
       `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de invocar classifyItemTypeAndAccount — ${new Date().toISOString()} — itemType=${classification.itemType ?? 'null'}, accountCode=${classification.accountCode ?? 'null'}, accountName=${classification.accountName ?? 'null'}, productCode=${classification.productCode ?? 'null'}, productName=${classification.productName ?? 'null'}, confidence=${classification.confidence ?? 'null'}`,
     );
 
-    if (!classification.accountCode && !classification.productCode) {
+    const foundNothing =
+      !classification.accountCode && !classification.productCode;
+
+    if (foundNothing) {
       console.log(
-        `[AI-CLASSIFY] [documentId=${documentId}] IA no encontró una cuenta contable ni un producto seguros (tipo=${classification.itemType ?? 'desconocido'}); se deja sin sugerencia automática.`,
+        `[AI-CLASSIFY] [documentId=${documentId}] IA no encontró una cuenta contable ni un producto seguros (tipo=${classification.itemType ?? 'desconocido'}); se guarda igual como sugerencia vacía con confidence=0 para que el documento quede en "Requiere revisión" en vez de "Pendiente".`,
       );
-      return;
     }
 
     // Se relee el documento en vez de reusar el `document` leído al principio
@@ -205,7 +207,17 @@ export class SiigoPurchaseAiClassificationService {
               }
             : null,
           retentions: [],
-          confidence: classification.confidence,
+          // La IA "siempre debe sugerir algo" (ver prompts en
+          // purchase-item-classification-prompt.helper.ts, "SIEMPRE tenés
+          // que elegir..."), pero si por algún motivo igual vuelve sin
+          // accountCode NI productCode (parseo fallido, código inventado que
+          // no matchea el catálogo, etc.), se fuerza confidence=0 en vez de
+          // guardar `classification.confidence` tal cual — eso garantiza que
+          // resolvePurchaseInvoiceRequiresReview (aiConfidence < 80) marque
+          // el documento como "Requiere revisión", sin depender de que la
+          // sugerencia esté genuinamente vacía Y de que no exista además un
+          // fallback de proveedor por historial que la tape.
+          confidence: foundNothing ? 0 : classification.confidence,
         },
       },
       companyId,

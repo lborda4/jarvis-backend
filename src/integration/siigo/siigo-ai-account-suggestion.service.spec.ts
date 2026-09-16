@@ -80,9 +80,12 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
   function buildService(document: any) {
     const openRouterHttpClient = {
       isConfigured: jest.fn().mockReturnValue(true),
+      // Paso 1 (tipo, sin catálogos) y paso 2 (código, un catálogo) son dos
+      // llamadas separadas ahora — esta respuesta sirve para cualquiera de
+      // las dos: trae itemType (paso 1) Y accountCode (paso 2), ninguna de
+      // las dos lee campos que no le interesan.
       createChatCompletion: jest.fn().mockResolvedValue({
-        content:
-          '{"itemType":"Account","accountCode":"5135","productCode":null,"confidence":80}',
+        content: '{"itemType":"Account","accountCode":"5135","confidence":80}',
       }),
     };
     const electronicDocumentService = {
@@ -106,6 +109,14 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
         .fn()
         .mockResolvedValue([{ code: '5135', name: 'Gastos diversos' }]),
     };
+    const supplierConfigurationsRepository = {
+      findByCompanyIntegrationAndNormalizedSupplierDocument: jest
+        .fn()
+        .mockResolvedValue(null),
+    };
+    const companiesRepository = {
+      findById: jest.fn().mockResolvedValue({ name: 'MAGNA FILIA SAS' }),
+    };
 
     const service = new SiigoAiAccountSuggestionService(
       openRouterHttpClient as any,
@@ -116,6 +127,8 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
       integrationsRepository as any,
       historialFacturasRepository as any,
       siigoAccountsRepository as any,
+      supplierConfigurationsRepository as any,
+      companiesRepository as any,
     );
 
     return { service, siigoProductsCatalogService };
