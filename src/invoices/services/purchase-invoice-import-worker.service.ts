@@ -417,11 +417,12 @@ export class PurchaseInvoiceImportWorkerService
     }
 
     const pgUpdateJobStartedAt = Date.now();
-    await this.purchaseInvoiceImportJobsRepository.patch(job.id, {
-      itemsTotal: (job.itemsTotal ?? 0) + itemsTotal,
-      documentsCreated: (job.documentsCreated ?? 0) + documentsCreated,
-      documentIds: [...(job.documentIds ?? []), ...createdDocumentIds],
-      records: [...(job.records ?? []), ...records],
+    await this.purchaseInvoiceImportJobsRepository.applyBatchResults(job.id, {
+      itemsTotal,
+      documentsCreated,
+      documentsReused,
+      documentIds: createdDocumentIds,
+      records,
     });
     pgUpdateMs += Date.now() - pgUpdateJobStartedAt;
 
@@ -459,8 +460,11 @@ export class PurchaseInvoiceImportWorkerService
       completedAt: new Date(),
     });
 
+    const finalJob = await this.purchaseInvoiceImportJobsRepository.findById(
+      job.id,
+    );
     this.logger.log(
-      `[job=${job.id}] Facturas de compra DIAN: importación completada (documentos=${job.documentsCreated ?? 0}, fallidas=${failedCount}).`,
+      `[job=${job.id}] Facturas de compra DIAN: importación completada (documentos=${finalJob?.documentsCreated ?? 0}, fallidas=${failedCount}).`,
     );
 
     await this.notifyCompleted(job.id, job.companyId);

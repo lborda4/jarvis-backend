@@ -25,13 +25,28 @@ export class ListPendingSiigoSuppliersResponseDto {
   items: PendingSiigoSupplierDto[];
 }
 
-export class CreateSiigoSuppliersBulkRequestDto {
+export class CreateSiigoSuppliersBulkItemDto {
   @ApiProperty({
-    type: [String],
     description:
-      'document_id de cada proveedor seleccionado (ver GET suppliers/pending).',
+      'document_id del proveedor seleccionado (ver GET suppliers/pending).',
   })
-  documentIds: string[];
+  documentId: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Nombre/razón social editado en el modal — si viene, sobrescribe el que trae el documento antes de crear el tercero en SIIGO (ver createSupplier).',
+  })
+  name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Correo editado en el modal — mismo criterio que name.',
+  })
+  email?: string;
+}
+
+export class CreateSiigoSuppliersBulkRequestDto {
+  @ApiProperty({ type: [CreateSiigoSuppliersBulkItemDto] })
+  suppliers: CreateSiigoSuppliersBulkItemDto[];
 }
 
 export class CreateSiigoSuppliersBulkResultItemDto {

@@ -21,6 +21,7 @@ import { SIIGO_DEFAULT_ITEM_TYPE } from './constants/supplier-configuration.cons
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
 import {
+  CreateSiigoSuppliersBulkItemDto,
   CreateSiigoSuppliersBulkResponseDto,
   CreateSiigoSuppliersBulkResultItemDto,
   ListPendingSiigoSuppliersResponseDto,
@@ -340,36 +341,63 @@ export class SiigoSupplierCreationService {
    * uno no tumbe el resto del lote.
    */
   async createSuppliersBulk(
-    documentIds: string[],
+    suppliers: CreateSiigoSuppliersBulkItemDto[],
     companyId: string,
   ): Promise<CreateSiigoSuppliersBulkResponseDto> {
-    const uniqueIds = Array.from(
-      new Set((documentIds ?? []).map((id) => id?.trim()).filter(Boolean)),
-    );
+    // Un documentId por proveedor (Map, no filter): si el mismo id viniera
+    // repetido, se queda con la última edición de nombre/correo en vez de
+    // crearlo dos veces.
+    const uniqueSuppliers = [
+      ...new Map(
+        (suppliers ?? [])
+          .map((supplier) => ({
+            ...supplier,
+            documentId: supplier.documentId?.trim(),
+          }))
+          .filter((supplier) => Boolean(supplier.documentId))
+          .map((supplier) => [supplier.documentId, supplier] as const),
+      ).values(),
+    ];
 
     const results = await mapWithConcurrency<
-      string,
+      CreateSiigoSuppliersBulkItemDto,
       CreateSiigoSuppliersBulkResultItemDto
-    >(uniqueIds, SUPPLIERS_BULK_CREATE_CONCURRENCY, async (documentId) => {
-      try {
-        await this.createSupplier({ documentId }, companyId, 'manual');
-        return { documentId, success: true, errorMessage: null };
-      } catch (error) {
-        this.logger.error(
-          `[documentId=${documentId}] Error al crear tercero en SIIGO (lote)`,
-          error instanceof Error ? error.stack : String(error),
-        );
+    >(
+      uniqueSuppliers,
+      SUPPLIERS_BULK_CREATE_CONCURRENCY,
+      async ({ documentId, name, email }) => {
+        try {
+          // name/email: lo que el usuario haya corregido en el modal de
+          // creación masiva antes de confirmar — createSupplier ya sabe
+          // priorizarlos sobre lo que traiga el documento importado (ver
+          // profileName/profileEmail más arriba en este archivo).
+          await this.createSupplier(
+            {
+              documentId,
+              ...(name?.trim() ? { name: name.trim() } : {}),
+              ...(email?.trim() ? { email: email.trim() } : {}),
+            },
+            companyId,
+            'manual',
+          );
+          return { documentId, success: true, errorMessage: null };
+        } catch (error) {
+          this.logger.error(
+            `[documentId=${documentId}] Error al crear tercero en SIIGO (lote)`,
+            error instanceof Error ? error.stack : String(error),
+          );
 
-        return {
-          documentId,
-          success: false,
-          errorMessage:
-            error instanceof Error
-              ? error.message
-              : 'Error inesperado al crear tercero en SIIGO',
-        };
-      }
-    });
+          return {
+            documentId,
+            success: false,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : 'Error inesperado al crear tercero en SIIGO',
+          };
+        }
+      },
+    );
 
     const created = results.filter((result) => result.success).length;
 

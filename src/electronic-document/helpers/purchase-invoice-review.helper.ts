@@ -58,7 +58,7 @@ function resolveEffectiveItems(input: PurchaseInvoiceReviewInput): EffectiveItem
 
   const effectiveItemType = input.suggestedItemConfig?.itemType ?? 'Account';
 
-  return input.payloadItems.map((item, index) => {
+  return input.payloadItems.map((_item, index) => {
     // Misma prioridad que buildPurchaseInvoiceItemDrafts en el frontend: una
     // regla exacta de ESTE ítem (proveedor + descripción) manda sobre el
     // tipo dominante del proveedor completo.
@@ -69,18 +69,29 @@ function resolveEffectiveItems(input: PurchaseInvoiceReviewInput): EffectiveItem
       : effectiveItemType;
 
     if (tipo === 'Product') {
+      // item.codigo (el código que trae la factura DIAN) NO cuenta acá: es
+      // SIEMPRE un identificador del VENDEDOR (su SKU o código de barras),
+      // nunca un código de producto real de SIIGO — el frontend solo lo usa
+      // como candidato cuando coincide LITERALMENTE con el catálogo
+      // (resolveValidatedProductCode); acá, sin catálogo cargado, no hay
+      // forma de validarlo, así que confiar en él a ciegas marcaba "Pendiente"
+      // ítems que en realidad estaban sin producto real asignado (bug real
+      // reportado: un ítem con "Buscar producto..." vacío en el editor
+      // seguía en Pendiente en vez de Requiere revisión). Solo cuentan
+      // suggestedItemConfig/suggestedProduct, que sí vienen validados
+      // (historial del proveedor confirmado, o IA ya matcheada al catálogo).
       const hasCode = Boolean(
         input.suggestedItemConfig?.productCode?.trim() ||
-          item.codigo?.trim() ||
           input.suggestedProduct?.code?.trim(),
       );
       return { tipo, hasCode };
     }
 
+    // Mismo criterio que arriba: exactItemAccount/suggestedItemConfig ya
+    // vienen validados contra el catálogo real; item.codigo no.
     const hasCode = Boolean(
       exactItemAccount?.code?.trim() ||
-        input.suggestedItemConfig?.accountCode?.trim() ||
-        item.codigo?.trim(),
+        input.suggestedItemConfig?.accountCode?.trim(),
     );
     return { tipo, hasCode };
   });

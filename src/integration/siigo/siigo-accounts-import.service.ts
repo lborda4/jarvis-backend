@@ -94,6 +94,18 @@ export class SiigoAccountsImportService {
       await this.saveAccountsInBatches(manager, accountsToSave);
     });
 
+    // Marca que el PUC completo ya se cargó desde el Excel real — el chequeo
+    // de "paso Cuentas contables completado" del setup se basa en ESTE
+    // campo, no en si la tabla de cuentas tiene cualquier fila (ver
+    // SiigoAuthService.getCredentialsStatus): el sync automático del balance
+    // de prueba también inserta filas, pero nunca el PUC completo, y antes
+    // eso alcanzaba para dar el paso por terminado sin que nadie hubiera
+    // subido el Excel.
+    if (rows.length > 0) {
+      integration.accountsExcelImportedAt = new Date();
+      await this.integrationsRepository.save(integration);
+    }
+
     this.siigoConfigurationCacheService.invalidateCompanyCache(companyId);
 
     this.logger.log(

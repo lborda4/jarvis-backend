@@ -133,7 +133,11 @@ describe('SiigoSupplierCreationService.createSuppliersBulk', () => {
       .mockResolvedValue({ success: true, created: true } as any);
 
     const result = await service.createSuppliersBulk(
-      ['doc-1', 'doc-2', 'doc-3'],
+      [
+        { documentId: 'doc-1' },
+        { documentId: 'doc-2' },
+        { documentId: 'doc-3' },
+      ],
       'company-1',
     );
 
@@ -154,6 +158,28 @@ describe('SiigoSupplierCreationService.createSuppliersBulk', () => {
     );
   });
 
+  it('manda el nombre/correo editados en el modal a createSupplier — el usuario corrigió lo que traía el documento antes de confirmar', async () => {
+    const { service } = buildService({});
+    const createSupplier = jest
+      .spyOn(service, 'createSupplier')
+      .mockResolvedValue({ success: true, created: true } as any);
+
+    await service.createSuppliersBulk(
+      [{ documentId: 'doc-1', name: 'Nombre corregido SAS', email: 'nuevo@correo.com' }],
+      'company-1',
+    );
+
+    expect(createSupplier).toHaveBeenCalledWith(
+      {
+        documentId: 'doc-1',
+        name: 'Nombre corregido SAS',
+        email: 'nuevo@correo.com',
+      },
+      'company-1',
+      'manual',
+    );
+  });
+
   it('el fallo de un documento no bloquea el resto del lote', async () => {
     const { service } = buildService({});
     jest
@@ -164,7 +190,7 @@ describe('SiigoSupplierCreationService.createSuppliersBulk', () => {
       .mockResolvedValueOnce({ success: true, created: true } as any);
 
     const result = await service.createSuppliersBulk(
-      ['doc-1', 'doc-2'],
+      [{ documentId: 'doc-1' }, { documentId: 'doc-2' }],
       'company-1',
     );
 
@@ -183,7 +209,12 @@ describe('SiigoSupplierCreationService.createSuppliersBulk', () => {
       .mockResolvedValue({ success: true, created: true } as any);
 
     const result = await service.createSuppliersBulk(
-      ['doc-1', 'doc-1', '  ', 'doc-2'],
+      [
+        { documentId: 'doc-1' },
+        { documentId: 'doc-1' },
+        { documentId: '  ' },
+        { documentId: 'doc-2' },
+      ],
       'company-1',
     );
 

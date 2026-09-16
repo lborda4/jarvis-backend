@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { parseAccountsExcel } from './accounts-excel.helper';
+import { fixWorksheetRange, parseAccountsExcel } from './accounts-excel.helper';
 
 /** Arma un Excel con el mismo formato del archivo real: bloque de título
  * (nombre del reporte, razón social, NIT) antes de la fila de encabezados. */
@@ -123,6 +123,105 @@ describe('parseAccountsExcel', () => {
 
     expect(result.rows).toHaveLength(1);
     expect(result.skippedRows).toBe(1);
+  });
+
+  it('reconoce encabezados con NBSP o salto de línea entre palabras — caso real reportado: el Excel real de SIIGO rechazado con "columnas requeridas no encontradas" aunque el encabezado se viera correcto', () => {
+    const matrix = [
+      ['Cuentas contables'],
+      ['MAGNA FILIA SAS'],
+      ['901464201'],
+      [
+        'Código',
+        'Nombre',
+        'Categoría',
+        'Clase',
+        'Relación con',
+        // NBSP entre palabras en vez de espacio normal.
+        'Maneja vencimientos',
+        'Diferencia fiscal',
+        'Activo',
+        // Salto de línea (celda con ajuste de texto) en vez de espacio.
+        'Nivel\nagrupación',
+      ],
+      validRow(),
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet(matrix),
+      'Cuentas',
+    );
+
+    const result = parseAccountsExcel(
+      XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer,
+    );
+
+    expect(result.rows).toEqual([
+      { accountCode: '11050501', accountName: 'Caja general' },
+    ]);
+  });
+
+  it('lee un archivo real de SIIGO que en realidad es texto plano separado por tabs con extensión .xlsx (no un binario OOXML) — caso real reportado: sin decodificar como UTF-8, "Código" y "Nivel agrupación" quedaban con tildes rotas y el archivo se rechazaba con "columnas requeridas no encontradas"', () => {
+    const text = [
+      'Cuentas contables',
+      'MAGNA FILIA SAS',
+      '901464201-3',
+      '',
+      '',
+      [
+        'Código',
+        'Nombre',
+        'Categoría',
+        'Clase',
+        'Relación con',
+        'Maneja vencimientos',
+        'Diferencia fiscal',
+        'Activo',
+        'Nivel agrupación',
+      ].join('\t'),
+      ['1', 'Activo'].join('\t'),
+      validRow().join('\t'),
+    ].join('\n');
+
+    const result = parseAccountsExcel(Buffer.from(text, 'utf8'));
+
+    expect(result.rows).toEqual([
+      { accountCode: '11050501', accountName: 'Caja general' },
+    ]);
+  });
+
+  describe('fixWorksheetRange', () => {
+    it('recalcula "!ref" a partir de las celdas reales cuando el archivo declara un rango truncado — caso real reportado: el export de SIIGO trae las celdas de Nombre/Activo/Nivel agrupación con sus valores correctos, pero el "!ref" del archivo decía "A1:A1091" como si esas columnas no existieran, y sheet_to_json las descartaba todas', () => {
+      const sheet = XLSX.utils.aoa_to_sheet([
+        ['Código', 'Nombre', 'Activo'],
+        ['11050501', 'Caja general', 'Sí'],
+      ]);
+
+      // Simula el bug real: el archivo dice que solo existe la columna A,
+      // aunque las celdas de las demás columnas sigan ahí con sus valores.
+      sheet['!ref'] = 'A1:A2';
+
+      fixWorksheetRange(sheet);
+
+      expect(sheet['!ref']).toBe('A1:C2');
+
+      const matrix = XLSX.utils.sheet_to_json<string[]>(sheet, {
+        header: 1,
+        defval: '',
+        raw: false,
+      });
+      expect(matrix[0]).toEqual(['Código', 'Nombre', 'Activo']);
+      expect(matrix[1]).toEqual(['11050501', 'Caja general', 'Sí']);
+    });
+
+    it('no hace nada con una hoja vacía (sin celdas)', () => {
+      const sheet: XLSX.WorkSheet = { '!ref': 'A1:A1' };
+
+      fixWorksheetRange(sheet);
+
+      expect(sheet['!ref']).toBe('A1:A1');
+    });
   });
 
   it('falla con un mensaje claro si el archivo no trae las columnas esperadas', () => {

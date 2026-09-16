@@ -217,6 +217,52 @@ describe('resolvePurchaseInvoiceRequiresReview — sin borrador (solo sugerencia
     expect(result).toBe(true);
   });
 
+  it('caso real reportado: ítem Producto con item.codigo (el código del VENDEDOR en la factura DIAN) pero sin sugerencia validada — requiere revisión, no se confía en item.codigo a ciegas', () => {
+    const result = resolvePurchaseInvoiceRequiresReview(
+      buildInput({
+        payloadItems: [
+          {
+            descripcion: 'Elastico crochet 3,5cm',
+            cantidad: 6,
+            valorUnitario: 13865.54,
+            total: 99000,
+            codigo: '51221',
+          },
+        ],
+        suggestedItemConfig: {
+          itemType: 'Product',
+          accountCode: null,
+          accountName: null,
+          productCode: null,
+          productName: null,
+          ivaTax: null,
+          retefuenteTax: null,
+          paymentMethod: { id: PAYMENT_METHOD_ID, name: 'Contado', type: 'CASH' },
+        },
+      }),
+    );
+
+    expect(result).toBe(true);
+  });
+
+  it('ítem Cuenta con item.codigo pero sin sugerencia validada — requiere revisión, mismo criterio que Producto', () => {
+    const result = resolvePurchaseInvoiceRequiresReview(
+      buildInput({
+        payloadItems: [
+          {
+            descripcion: 'Servicio',
+            cantidad: 1,
+            valorUnitario: 100,
+            total: 100,
+            codigo: '999999',
+          },
+        ],
+      }),
+    );
+
+    expect(result).toBe(true);
+  });
+
   it('no requiere revisión por confianza cuando es null (la clasificación nunca corrió)', () => {
     const result = resolvePurchaseInvoiceRequiresReview(
       buildInput({

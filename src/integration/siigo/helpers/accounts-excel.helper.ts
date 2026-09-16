@@ -23,7 +23,12 @@ const COLUMN_ALIASES = {
   accountName: ['nombre'],
   dueDates: ['maneja vencimientos', 'maneja vencimiento'],
   active: ['activo'],
-  groupingLevel: ['nivel agrupacion', 'nivel agrupación'],
+  groupingLevel: [
+    'nivel agrupacion',
+    'nivel agrupación',
+    'nivel de agrupacion',
+    'nivel de agrupación',
+  ],
 } as const;
 
 type AccountsColumnKey = keyof typeof COLUMN_ALIASES;
@@ -32,10 +37,18 @@ type AccountsColumnIndexes = Record<AccountsColumnKey, number>;
 
 function normalize(value: unknown): string {
   return String(value ?? '')
-    .trim()
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
+    .replace(/[̀-ͯ]/g, '')
+    // El Excel real de SIIGO (a diferencia de los datos de prueba) puede
+    // traer encabezados con un espacio NBSP entre palabras, o un salto de
+    // línea si la celda quedó con ajuste de texto ("Maneja\nvencimientos")
+    // — sin este colapso, esas variantes no calzaban con ningún alias de
+    // COLUMN_ALIASES y el import fallaba con "columnas requeridas no
+    // encontradas" aunque el encabezado fuera, a simple vista, el correcto
+    // (bug real reportado). \s ya cubre NBSP y saltos de línea en JS.
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** El archivo trae un bloque de título antes del encabezado ("Cuentas
@@ -99,6 +112,43 @@ function isTransactional(value: string): boolean {
   return normalize(value) === 'transaccional';
 }
 
+const CELL_ADDRESS_PATTERN = /^([A-Z]+)(\d+)$/;
+
+/** Recalcula `sheet['!ref']` a partir de las claves de celda que realmente
+ * existen en la hoja — ver el comentario en parseAccountsExcel sobre por
+ * qué el "!ref" que trae el archivo de SIIGO no alcanza a cubrir todas las
+ * columnas. No hace nada si no encuentra ninguna celda con formato de
+ * dirección (hoja vacía). Exportada para poder testearla directo sobre un
+ * WorkSheet en memoria — simular el archivo corrupto real requiere manipular
+ * "!ref" después de leerlo, y XLSX.write recalcula el rango real al
+ * reescribir el buffer, así que no hay forma de reproducir el bug pasando
+ * por parseAccountsExcel(buffer) de punta a punta. */
+export function fixWorksheetRange(sheet: XLSX.WorkSheet): void {
+  let maxRow = -1;
+  let maxCol = -1;
+
+  for (const key of Object.keys(sheet)) {
+    const match = CELL_ADDRESS_PATTERN.exec(key);
+
+    if (!match) {
+      continue;
+    }
+
+    const cell = XLSX.utils.decode_cell(key);
+    maxRow = Math.max(maxRow, cell.r);
+    maxCol = Math.max(maxCol, cell.c);
+  }
+
+  if (maxRow === -1 || maxCol === -1) {
+    return;
+  }
+
+  sheet['!ref'] = XLSX.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: maxRow, c: maxCol },
+  });
+}
+
 /**
  * Lee el Excel de cuentas contables y devuelve SOLO las que se deben guardar:
  * de clase 1, 2, 5, 6 o 7, sin manejo de vencimientos, activas y de nivel
@@ -110,7 +160,17 @@ export function parseAccountsExcel(buffer: Buffer): ParseAccountsExcelResult {
   let workbook: XLSX.WorkBook;
 
   try {
-    workbook = XLSX.read(buffer, { type: 'buffer' });
+    // codepage 65001 (UTF-8): el archivo real de SIIGO es texto plano
+    // separado por tabs con extensión .xlsx/.xls (no un binario OOXML/BIFF
+    // real) — SheetJS lo detecta como CSV/texto y, SIN este codepage
+    // explícito, lo decodifica como Latin-1 por defecto: "Código" queda
+    // "CÃ³digo", "Nivel agrupación" queda "Nivel agrupaciÃ³n", etc. Esas dos
+    // columnas (las únicas con tilde entre las requeridas) dejaban de
+    // calzar con ningún alias y el archivo se rechazaba con "columnas
+    // requeridas no encontradas" aunque el encabezado se viera perfecto al
+    // pegarlo como texto (bug real reportado — un archivo .xlsx real, sin
+    // texto plano de por medio, no se ve afectado por este codepage).
+    workbook = XLSX.read(buffer, { type: 'buffer', codepage: 65001 });
   } catch {
     throw new InvalidExcelFormatException(
       'No se pudo leer el archivo Excel proporcionado.',
@@ -123,10 +183,24 @@ export function parseAccountsExcel(buffer: Buffer): ParseAccountsExcelResult {
     throw new InvalidExcelFormatException('El archivo Excel no contiene hojas.');
   }
 
-  const matrix = XLSX.utils.sheet_to_json<Array<string | number>>(
-    workbook.Sheets[sheetName],
-    { header: 1, defval: '', raw: false },
-  );
+  const sheet = workbook.Sheets[sheetName];
+
+  // El export real de SIIGO trae las celdas de todas las columnas (B, C,
+  // D...) pero declara mal su propio "!ref" (ej. "A1:A1091", como si solo
+  // existiera la columna A) — sheet_to_json confía en ese rango declarado
+  // y descarta todo lo que quede afuera, así que ninguna columna aparte de
+  // "Código" llegaba a mapColumnIndexes (bug real reportado: el encabezado
+  // se veía perfecto al pegarlo como texto, pero el import igual fallaba
+  // con "columnas requeridas no encontradas"). Se recalcula acá el rango
+  // real a partir de las celdas que de verdad existen, en vez de confiar en
+  // el que trae el archivo.
+  fixWorksheetRange(sheet);
+
+  const matrix = XLSX.utils.sheet_to_json<Array<string | number>>(sheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+  });
 
   const headerRowIndex = findHeaderRowIndex(matrix);
   const columnIndexes =

@@ -367,7 +367,7 @@ export class SiigoController {
     @Body() request: CreateSiigoSuppliersBulkRequestDto,
   ): Promise<CreateSiigoSuppliersBulkResponseDto> {
     return this.siigoSupplierCreationService.createSuppliersBulk(
-      request.documentIds,
+      request.suppliers,
       getAuthenticatedCompanyId(user),
     );
   }
