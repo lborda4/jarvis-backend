@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
+import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { resolveSupplierDocumentFromPayload } from '../../electronic-document/helpers/electronic-document-supplier.helper';
 import { buildSupplierNameLookup } from '../helpers/supplier-accounts-catalog.helper';
@@ -130,6 +131,8 @@ export class SiigoDocumentPreparationService {
           alreadyInSiigo.facturaId,
           companyId,
           alreadyInSiigo.siigoNumero,
+          undefined,
+          true,
         );
 
         this.logger.log(
@@ -161,12 +164,22 @@ export class SiigoDocumentPreparationService {
         const supplierNit = resolveSupplierDocumentFromPayload(
           document.payload,
         ).normalizedDocumentNumber;
-        const autoCreated = await this.tryAutoCreateSupplier(
-          trimmedId,
-          companyId,
-          supplierNit,
-          batchContext,
-        );
+        // Documento soporte queda igual que Factura de compra a propósito
+        // (pedido explícito): nunca crea el tercero solo, se queda en
+        // "Requiere proveedor" hasta que el usuario lo cree a mano (botón
+        // uno por uno o el modal masivo) — cada tipo de documento decide
+        // esto por su cuenta, no comparten el mismo comportamiento
+        // implícito solo por pasar los dos por el mismo pipeline.
+        const autoCreated =
+          document.electronicDocumentType ===
+          ElectronicDocumentType.SUPPORT_DOCUMENT
+            ? false
+            : await this.tryAutoCreateSupplier(
+                trimmedId,
+                companyId,
+                supplierNit,
+                batchContext,
+              );
 
         if (!autoCreated) {
           await this.electronicDocumentService.updateStatus(

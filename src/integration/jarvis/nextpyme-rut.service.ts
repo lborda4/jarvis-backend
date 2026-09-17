@@ -318,17 +318,25 @@ export class NextPymeRutService {
       'direccioncomercial',
       'addressline',
     ]);
-    // Código DANE de ciudad/departamento — no siempre viene en la respuesta
-    // de RUT/RUES (depende de qué tan completo esté el registro), por eso
-    // se busca con varias llaves posibles igual que los demás campos, y se
-    // deja en null si no aparece (el llamador cae a su propio default).
+    // Código DANE (DIVIPOLA) de ciudad/departamento — no siempre viene en la
+    // respuesta de RUT/RUES (depende de qué tan completo esté el registro),
+    // por eso se busca con varias llaves posibles igual que los demás
+    // campos, y se deja en null si no aparece (el llamador cae a su propio
+    // default). OJO: NO incluir 'municipalityid'/'idmunicipality'/
+    // 'departmentid' acá — esas son el ID interno de NextPyme en SU PROPIA
+    // tabla de municipios/departamentos (el mismo que usa
+    // NextPymeMasterCatalogService.resolveMunicipalityId para crear
+    // documentos), no el código DIVIPOLA. Bug real reportado: una respuesta
+    // de RUT/RUES sin ningún campo DIVIPOLA nombrado (citycode/
+    // municipalitycode/codigomunicipio) caía a `municipality_id`/
+    // `department_id` (ids internos pequeños tipo "1"/"2") y esos se
+    // mandaban tal cual a SIIGO como si fueran DIVIPOLA, que los rechazaba
+    // con invalid_reference ("Co|2|1" no existe como ciudad).
     const cityCode = this.findValue(orderedRecords, [
       'citycode',
       'municipalitycode',
       'codemunicipality',
       'codigomunicipio',
-      'idmunicipality',
-      'municipalityid',
     ]);
     const cityName = this.findValue(orderedRecords, [
       'city',
@@ -340,7 +348,6 @@ export class NextPymeRutService {
       'statecode',
       'departmentcode',
       'codigodepartamento',
-      'departmentid',
     ]);
 
     return {

@@ -36,6 +36,10 @@ import {
   SuggestedPurchaseItemConfig,
 } from '../integration/helpers/supplier-preference.helper';
 import { indexSupplierItemAccountMappings } from '../integration/helpers/supplier-item-account-mapping.helper';
+import {
+  SaveElectronicDocumentDraftRequestDto,
+  SaveElectronicDocumentDraftResponseDto,
+} from './dto/save-electronic-document-draft.dto';
 import { SupplierItemAccountMapping } from '../integration/entities/supplier-item-account-mapping.entity';
 import { SupplierItemAccountMappingsRepository } from '../integration/repositories/supplier-item-account-mappings.repository';
 import {
@@ -60,6 +64,9 @@ import {
 import { SiigoTaxesCatalogService } from '../integration/siigo/siigo-taxes-catalog.service';
 import { SiigoPaymentTypesCatalogService } from '../integration/siigo/siigo-payment-types-catalog.service';
 import { SiigoProductsCatalogService } from '../integration/siigo/siigo-products-catalog.service';
+import { SiigoCostCentersCatalogService } from '../integration/siigo/siigo-cost-centers-catalog.service';
+import { SiigoCostCenterCatalogItemDto } from '../integration/siigo/dto/list-siigo-cost-centers.dto';
+import { resolveSiigoCostCenter } from '../integration/siigo/helpers/siigo-cost-center-match.helper';
 import { SiigoPaymentTypeCatalogItemDto } from '../integration/siigo/dto/list-siigo-payment-types.dto';
 import { resolveSiigoPaymentDocumentType } from '../integration/siigo/helpers/siigo-payment-document-type.helper';
 import { resolveCreditFallbackPaymentMethod } from '../integration/siigo/helpers/siigo-credit-payment-method.helper';
@@ -85,12 +92,29 @@ import { mapDianResultToElectronicDocumentPayload } from './mappers/dian-to-elec
 import { ElectronicDocumentPayload } from './interfaces/electronic-document-payload.interface';
 import { GroupedSupportDocument } from './interfaces/support-document-import.interface';
 import { mapGroupedSupportDocumentToPayload } from './mappers/support-document-excel-to-payload.mapper';
-import { mapElectronicDocumentToListItem } from './mappers/electronic-document-list-item.mapper';
+import {
+  computeElectronicDocumentRequiresReview,
+  mapElectronicDocumentToListItem,
+} from './mappers/electronic-document-list-item.mapper';
 import { parseOptionalElectronicDocumentTypeFilter } from './helpers/electronic-document-type.helper';
 import { normalizeElectronicDocumentPageLimit } from './constants/electronic-document-pagination.constants';
-import { parseImportStatusFilters } from './helpers/import-status-filter.helper';
+import {
+  IMPORT_ROW_STATUS_FILTER,
+  isPendienteEquivalentDocument,
+  parseImportStatusFilters,
+} from './helpers/import-status-filter.helper';
 import { resolveSendConfigurationFromPayload } from './helpers/electronic-document-send-configuration.helper';
 import { ElectronicDocumentsRepository } from './repositories/electronic-documents.repository';
+
+/** Tope de seguridad para el recorte por PENDIENTE/REQUIERE_REVISION (ver
+ * listDocuments): en vez de paginar en SQL, se traen TODOS los candidatos
+ * pendiente-equivalentes de la empresa para poder filtrar por
+ * `requiresReview` (que no vive en una columna) y solo entonces paginar en
+ * JS. Un valor alto es intencional — el volumen realista de facturas
+ * PENDIENTES de una empresa (no el histórico completo, que ya queda fuera
+ * por el estado) rara vez se acerca a esto; si lo supera, se registra un
+ * warning en vez de fallar en silencio. */
+const PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT = 5000;
 
 @Injectable()
 export class ElectronicDocumentService {
@@ -111,6 +135,7 @@ export class ElectronicDocumentService {
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoPaymentTypesCatalogService: SiigoPaymentTypesCatalogService,
     private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
+    private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
   ) {}
 
   async requireById(
@@ -292,6 +317,15 @@ export class ElectronicDocumentService {
     companyId?: string,
     siigoDocumentNumber?: string | number | null,
     payload?: ElectronicDocument['payload'],
+    /** true cuando este PURCHASE_CREATED es porque la factura YA existía en
+     * SIIGO (detectada por provider_invoice), no porque Jarvis la acaba de
+     * crear — ver el llamado desde prepareSupplierAndAccounts en
+     * siigo-document-preparation.service.ts. Sin esto el documento quedaba
+     * marcado "Lista" en vez de "Existente en SIIGO" cuando esta segunda
+     * detección (posterior al import) es la que lo encuentra, a diferencia
+     * del match hecho en el momento del import (createFromPurchaseInvoiceRows),
+     * que sí seteaba alreadyInSiigo. */
+    alreadyInSiigo?: boolean,
   ): Promise<ElectronicDocument> {
     const document = await this.requireById(documentId, companyId);
     document.status = ElectronicDocumentStatus.PURCHASE_CREATED;
@@ -305,6 +339,10 @@ export class ElectronicDocumentService {
 
     if (payload !== undefined) {
       document.payload = payload;
+    }
+
+    if (alreadyInSiigo) {
+      document.alreadyInSiigo = true;
     }
 
     const updated = await this.electronicDocumentsRepository.save(document);
@@ -338,6 +376,48 @@ export class ElectronicDocumentService {
    * Elimina un documento electrónico local que aún no está en estado "lista"
    * (PURCHASE_CREATED). Aplica a Documento soporte y Factura de compra.
    */
+  /**
+   * Guarda el borrador de contabilización (lo que el contador ajustó en el
+   * panel de detalle) en electronic_documents.draft. El historial de SIIGO
+   * NO se toca acá: ese se escribe solo cuando el envío salió bien y SIIGO
+   * confirmó, porque registra lo que pasó de verdad, no lo que se está
+   * preparando.
+   */
+  async saveDraft(
+    documentId: string,
+    companyId: string,
+    request: SaveElectronicDocumentDraftRequestDto,
+  ): Promise<SaveElectronicDocumentDraftResponseDto> {
+    const document = await this.requireById(documentId, companyId);
+
+    if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+      throw new BadRequestException(
+        'No se puede editar un documento que ya se envió a SIIGO.',
+      );
+    }
+
+    const savedAt = new Date().toISOString();
+
+    document.draft = {
+      items: request.items,
+      accountCode: request.accountCode ?? null,
+      paymentMethodId: request.paymentMethodId ?? null,
+      dueDate: request.dueDate ?? null,
+      observations: request.observations ?? null,
+      retentionTaxIds: request.retentionTaxIds,
+      documentDiscount: request.documentDiscount ?? null,
+      savedAt,
+    };
+
+    await this.electronicDocumentsRepository.save(document);
+
+    this.logger.log(
+      `[documentId=${document.id}] Borrador guardado (items=${request.items?.length ?? 0}, cuenta=${request.accountCode ?? '—'})`,
+    );
+
+    return { success: true, status: document.status, savedAt };
+  }
+
   async deleteLocalDocument(
     documentId: string,
     companyId: string,
@@ -1098,7 +1178,7 @@ export class ElectronicDocumentService {
       .filter(Boolean);
     const importStatuses = parseImportStatusFilters(query.importStatuses);
 
-    const { items, total } = await this.electronicDocumentsRepository.findAll({
+    const baseFilters = {
       electronicDocumentType,
       status: query.status,
       companyId,
@@ -1111,12 +1191,97 @@ export class ElectronicDocumentService {
       issueDateTo,
       siigoDocumentNumbers,
       importStatuses,
-      page,
-      limit,
-    });
+    };
 
-    const supplierPreferences =
-      await this.buildSupplierPreferencesLookup(items);
+    // PENDIENTE y REQUIERE_REVISION usan el MISMO bracket a nivel SQL (ver
+    // applyImportStatusFilters) — ninguna columna guarda si un documento
+    // "requiere revisión", así que cuando el usuario marca exactamente UNO
+    // de los dos (no ambos, no ninguno) hace falta un recorte fino en JS
+    // para no devolver el superconjunto. Antes esto se resolvía en el
+    // FRONTEND, filtrando solo dentro de la página ya cargada — de ahí el
+    // bug reportado de que el filtro y el conteo no alcanzaban el resto de
+    // páginas.
+    const needsPurchaseInvoiceReviewNarrowing =
+      importStatuses.includes(IMPORT_ROW_STATUS_FILTER.PENDIENTE) !==
+      importStatuses.includes(IMPORT_ROW_STATUS_FILTER.REQUIERE_REVISION);
+
+    let items: ElectronicDocument[];
+    let total: number;
+    let supplierPreferences: Awaited<
+      ReturnType<typeof this.buildSupplierPreferencesLookup>
+    >;
+    let isSiigoCompany: boolean;
+    // Solo se llena en el camino de narrowing, para no recalcular
+    // resolvePurchaseInvoiceRequiresReview una segunda vez dentro del mapper
+    // (ya se calculó una vez por candidato para poder filtrar).
+    let precomputedRequiresReview: Map<string, boolean> | undefined;
+
+    if (needsPurchaseInvoiceReviewNarrowing) {
+      const candidates = await this.electronicDocumentsRepository.findAll({
+        ...baseFilters,
+        page: 1,
+        limit: PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT,
+      });
+
+      if (candidates.total > PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT) {
+        this.logger.warn(
+          `[companyId=${companyId}] Filtro Pendiente/Requiere revisión: ${candidates.total} candidatos supera el límite de ${PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT} — se recortan los primeros, el resto no se evalúa.`,
+        );
+      }
+
+      supplierPreferences = await this.buildSupplierPreferencesLookup(
+        candidates.items,
+      );
+      isSiigoCompany =
+        (await this.resolveDocumentProvider(companyId)) ===
+        IntegrationProvider.SIIGO;
+
+      const wantsReview = importStatuses.includes(
+        IMPORT_ROW_STATUS_FILTER.REQUIERE_REVISION,
+      );
+      precomputedRequiresReview = new Map();
+
+      const filtered = candidates.items.filter((document) => {
+        // Otro bucket de estado (LISTA, ERROR...) presente en la misma
+        // selección — no participa de este recorte, pasa tal cual.
+        if (!isPendienteEquivalentDocument(document)) {
+          return true;
+        }
+
+        const documentRequiresReview = computeElectronicDocumentRequiresReview(
+          document,
+          isSiigoCompany,
+          supplierPreferences.accounts.get(document.id) ?? null,
+          supplierPreferences.products.get(document.id) ?? null,
+          supplierPreferences.itemConfigs.get(document.id) ?? null,
+          supplierPreferences.itemAccounts.get(document.id) ?? [],
+          document.payload?.aiSuggestion?.confidence ?? null,
+        );
+        precomputedRequiresReview!.set(document.id, documentRequiresReview);
+
+        return wantsReview ? documentRequiresReview : !documentRequiresReview;
+      });
+
+      total = filtered.length;
+      items = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
+    } else {
+      const result = await this.electronicDocumentsRepository.findAll({
+        ...baseFilters,
+        page,
+        limit,
+      });
+      items = result.items;
+      total = result.total;
+      supplierPreferences = await this.buildSupplierPreferencesLookup(items);
+      // Se resuelve UNA vez para toda la página, no por documento: es una
+      // propiedad de la integración de la empresa, no de cada documento. El
+      // filtro por TIPO de documento (Factura de compra vs. Documento
+      // soporte) lo hace el mapper por su cuenta con el campo real de cada
+      // documento, no con este flag — así que acá basta con el proveedor.
+      isSiigoCompany =
+        (await this.resolveDocumentProvider(companyId)) ===
+        IntegrationProvider.SIIGO;
+    }
 
     return {
       items: items.map((document) =>
@@ -1130,6 +1295,8 @@ export class ElectronicDocumentService {
           supplierPreferences.itemConfigs.get(document.id) ?? null,
           supplierPreferences.itemAccounts.get(document.id) ?? [],
           supplierPreferences.products.get(document.id) ?? null,
+          isSiigoCompany,
+          precomputedRequiresReview?.get(document.id),
         ),
       ),
       total,
@@ -1209,6 +1376,10 @@ export class ElectronicDocumentService {
       string,
       SiigoPaymentTypeCatalogItemDto[]
     >();
+    const costCentersCatalogByCompanyId = new Map<
+      string,
+      SiigoCostCenterCatalogItemDto[]
+    >();
     const companyIds = [
       ...new Set(documents.map((document) => document.companyId)),
     ];
@@ -1285,6 +1456,18 @@ export class ElectronicDocumentService {
         taxesCatalogByCompanyId.set(
           companyId,
           this.siigoTaxesCatalogService.listTaxesFromCacheOnly({}, companyId),
+        );
+
+        // Centro de costos importado del Excel de Documento Soporte (texto
+        // libre, ver ElectronicDocumentPayload.costCenterCode) — se resuelve
+        // acá contra el catálogo real para autocompletar rowCostCenters en
+        // el frontend (buildInitialRowCostCenters lee `suggestedCostCenter`)
+        // sin que el usuario tenga que elegirlo a mano.
+        costCentersCatalogByCompanyId.set(
+          companyId,
+          this.siigoCostCentersCatalogService.listCostCentersFromCacheOnly(
+            companyId,
+          ),
         );
 
         // Catálogo de medios de pago, precargado una sola vez por empresa +
@@ -1528,13 +1711,24 @@ export class ElectronicDocumentService {
           ? suggestedDocumentRetentions
           : invoiceDocumentRetentions,
       );
+      // Un centro de costos explícito en el Excel siempre gana sobre la
+      // sugerencia inferida del historial del proveedor — es un dato que
+      // el usuario escribió (o eligió de la lista desplegable) a propósito
+      // para ESTE documento puntual, no una inferencia genérica.
+      const costCenterFromExcel = document.payload?.costCenterCode
+        ? resolveSiigoCostCenter(
+            document.payload.costCenterCode,
+            costCentersCatalogByCompanyId.get(document.companyId) ?? [],
+          )
+        : null;
       costCenters.set(
         document.id,
-        resolveSuggestedCostCenterForDocument(
-          document,
-          configurationIndex,
-          integrationId,
-        ),
+        costCenterFromExcel ??
+          resolveSuggestedCostCenterForDocument(
+            document,
+            configurationIndex,
+            integrationId,
+          ),
       );
       const suggestedItemConfig =
         historialSnapshot?.itemConfig ??

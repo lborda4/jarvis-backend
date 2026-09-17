@@ -16,6 +16,12 @@ export interface AiSuggestionSnapshot {
   account?: { code: string; name: string } | null;
   product?: { code: string; name: string } | null;
   retentions: SupplierRetentionPreference[];
+  /** 0-100, qué tan segura estuvo la IA de account/product — ver
+   * SiigoPurchaseAiClassificationService.classifyOne. Decide si el
+   * documento se ve como "Pendiente" (≥80) o "Requiere revisión" (<80) en
+   * el listado. null en snapshots viejos (de antes de este campo) o cuando
+   * la clasificación automática nunca corrió para este documento. */
+  confidence?: number | null;
 }
 
 export interface ElectronicDocumentSupplier {
@@ -72,6 +78,14 @@ export interface ElectronicDocumentPayload {
   taxes: ElectronicDocumentTax[];
   totals: DianInvoiceTotals;
   observations?: string;
+  /** Texto de la columna "Centro de costos" del Excel de importación —
+   * normalmente "código - nombre" (lista desplegable de la plantilla),
+   * todavía sin validar contra el catálogo real de SIIGO. Se resuelve al
+   * id numérico recién al armar la sugerencia/enviar (ver
+   * resolveSiigoCostCenter) — si no matchea ningún centro de costos
+   * activo, se ignora en vez de bloquear el documento por un dato
+   * opcional. */
+  costCenterCode?: string;
   siigoSendConfiguration?: SupplierPreferenceSnapshot | null;
   /**
    * Sugerencia de IA calculada en segundo plano al importar (solo para

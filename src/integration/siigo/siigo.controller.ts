@@ -30,6 +30,11 @@ import { DeleteSiigoPurchaseResponseDto } from './dto/delete-siigo-purchase.dto'
 import { CreateSiigoSupplierRequestDto } from './dto/create-siigo-supplier-request.dto';
 import { CreateSiigoSupplierResponseDto } from './dto/create-siigo-supplier-response.dto';
 import {
+  CreateSiigoSuppliersBulkRequestDto,
+  CreateSiigoSuppliersBulkResponseDto,
+  ListPendingSiigoSuppliersResponseDto,
+} from './dto/create-siigo-suppliers-bulk.dto';
+import {
   ListAutoCreatedSuppliersQueryDto,
   ListAutoCreatedSuppliersResponseDto,
 } from './dto/list-auto-created-suppliers.dto';
@@ -64,11 +69,8 @@ import { SiigoPurchaseSendService } from './siigo-purchase-send.service';
 import { SiigoSupplierCreationService } from './siigo-supplier-creation.service';
 import { SiigoValidationService } from './siigo-validation.service';
 import { SiigoAuthService } from './siigo-auth.service';
-import { SiigoBalanceTrialImportService } from './siigo-balance-trial-import.service';
-import {
-  ImportBalanceTrialRequestDto,
-  ImportBalanceTrialResponseDto,
-} from './dto/import-balance-trial-response.dto';
+import { SiigoAccountsImportService } from './siigo-accounts-import.service';
+import { ImportSiigoAccountsResponseDto } from './dto/import-siigo-accounts-response.dto';
 import {
   ListSiigoAccountsQueryDto,
   SiigoAccountCatalogItemDto,
@@ -142,7 +144,7 @@ export class SiigoController {
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
     private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
-    private readonly siigoBalanceTrialImportService: SiigoBalanceTrialImportService,
+    private readonly siigoAccountsImportService: SiigoAccountsImportService,
     private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
     private readonly siigoAiAccountSuggestionService: SiigoAiAccountSuggestionService,
     private readonly siigoPurchaseHistorySyncService: SiigoPurchaseHistorySyncService,
@@ -340,6 +342,36 @@ export class SiigoController {
     );
   }
 
+  @Get('suppliers/pending')
+  @ApiOperation({
+    summary: 'Listar proveedores pendientes de crear en SIIGO',
+    description:
+      'Un candidato por cada proveedor distinto (NIT + tipo de documento) que aparece en documentos con estado "Requiere proveedor", enriquecido con la consulta a NextPyme — para el modal de creación masiva de terceros SIIGO.',
+  })
+  listPendingSuppliers(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ListPendingSiigoSuppliersResponseDto> {
+    return this.siigoSupplierCreationService.listPendingSuppliers(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Post('suppliers/bulk')
+  @ApiOperation({
+    summary: 'Crear terceros en SIIGO en lote',
+    description:
+      'Crea varios terceros en SIIGO a la vez (no uno por uno) a partir de los document_id devueltos por GET suppliers/pending.',
+  })
+  createSuppliersBulk(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: CreateSiigoSuppliersBulkRequestDto,
+  ): Promise<CreateSiigoSuppliersBulkResponseDto> {
+    return this.siigoSupplierCreationService.createSuppliersBulk(
+      request.suppliers,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
   @Get('suppliers/auto-created')
   @ApiOperation({
     summary: 'Terceros creados automáticamente en SIIGO',
@@ -488,22 +520,20 @@ export class SiigoController {
     );
   }
 
-  @Post('balance-trial/import')
+  @Post('accounts/import')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Importar Balance de Prueba general',
+    summary: 'Importar cuentas contables desde Excel',
     description:
-      'Sin archivo: solicita el reporte a SIIGO (últimos 3 años), descarga el Excel y sincroniza cuentas contables en siigo_accounts. Con archivo: procesa el Excel subido manualmente.',
+      'Lee el Excel del plan de cuentas y guarda en siigo_accounts las de clase 1, 2, 5, 6 y 7 que no manejan vencimientos, están activas y son de nivel transaccional.',
   })
-  importBalanceTrial(
+  importAccounts(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() request: ImportBalanceTrialRequestDto,
-  ): Promise<ImportBalanceTrialResponseDto> {
-    return this.siigoBalanceTrialImportService.importBalanceTrial(
+  ): Promise<ImportSiigoAccountsResponseDto> {
+    return this.siigoAccountsImportService.importFromExcel(
       file,
-      request,
       getAuthenticatedCompanyId(user),
     );
   }
@@ -616,16 +646,18 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Reanudar documentos en lote',
     description:
-      'Valida proveedor y cuenta para varios documentos reutilizando el token SIIGO y cacheando proveedores por NIT.',
+      'Encola la validación de proveedor y cuenta para varios documentos en segundo plano y responde de inmediato — el progreso real se consulta con GET /electronic-documents, no con la respuesta de este endpoint.',
   })
   resumeDocumentsBatch(
     @CurrentUser() user: AuthenticatedUser,
     @Body() request: ResumeElectronicDocumentsBatchRequestDto,
-  ): Promise<ResumeElectronicDocumentsBatchResponseDto> {
-    return this.siigoDocumentResumeService.resumeBatch(
+  ): ResumeElectronicDocumentsBatchResponseDto {
+    this.siigoDocumentResumeService.resumeBatchInBackground(
       request.documentIds ?? [],
       getAuthenticatedCompanyId(user),
       { prepareOnly: request.prepareOnly ?? true },
     );
+
+    return { accepted: true };
   }
 }

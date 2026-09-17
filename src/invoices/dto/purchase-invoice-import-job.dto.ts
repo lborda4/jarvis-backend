@@ -58,6 +58,13 @@ export class PurchaseInvoiceImportStatusResponseDto {
   @ApiPropertyOptional({ nullable: true })
   documentsCreated: number | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Filas que reusaron un documento ya existente (mismo CUFE de un import anterior) en vez de crear uno nuevo — explica por qué documentsCreated puede ser menor que successCount.',
+  })
+  documentsReused: number | null;
+
   @ApiPropertyOptional({ type: [String], nullable: true })
   documentIds: string[] | null;
 

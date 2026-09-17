@@ -11,6 +11,7 @@ import { SiigoAccount } from '../integration/entities/siigo-account.entity';
 import { SiigoPurchaseSyncJob } from '../integration/entities/siigo-purchase-sync-job.entity';
 import { SupplierConfiguration } from '../integration/entities/supplier-configuration.entity';
 import { SupplierItemAccountMapping } from '../integration/entities/supplier-item-account-mapping.entity';
+import { JarvisTax } from '../integration/jarvis/entities/jarvis-tax.entity';
 import { JarvisTercero } from '../integration/jarvis/entities/jarvis-tercero.entity';
 import { PurchaseInvoiceImportJob } from '../invoices/entities/purchase-invoice-import-job.entity';
 import { PurchaseInvoiceImportJobRow } from '../invoices/entities/purchase-invoice-import-job-row.entity';
@@ -38,6 +39,7 @@ export function buildTypeOrmConfig(
       SiigoPurchaseSyncJob,
       ElectronicDocument,
       JarvisTercero,
+      JarvisTax,
       PurchaseInvoiceImportJob,
       PurchaseInvoiceImportJobRow,
       AiGenerationLog,

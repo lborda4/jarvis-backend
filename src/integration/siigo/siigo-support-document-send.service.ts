@@ -34,6 +34,8 @@ import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
 import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
+import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
+import { resolveSiigoCostCenterId } from './helpers/siigo-cost-center-match.helper';
 
 @Injectable()
 export class SiigoSupportDocumentSendService {
@@ -50,6 +52,7 @@ export class SiigoSupportDocumentSendService {
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly historialFacturasRepository: HistorialFacturasRepository,
+    private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
   ) {}
 
   async sendSupportDocument(
@@ -125,7 +128,36 @@ export class SiigoSupportDocumentSendService {
 
     if (request.cost_center !== undefined) {
       siigoPayload.cost_center = request.cost_center;
+    } else {
+      // El frontend no mandó cost_center (usuario no lo eligió a mano, o el
+      // valor sugerido de buildInitialRowCostCenters no llegó a tiempo) —
+      // se intenta resolver acá mismo, en el envío real, contra el texto
+      // libre importado del Excel ("Centro de costos") antes de dejarlo
+      // vacío.
+      const costCenterCode = electronicDocument.payload.costCenterCode?.trim();
+
+      if (costCenterCode) {
+        const costCenters =
+          await this.siigoCostCentersCatalogService.listCostCenters(companyId);
+        const costCenterId = resolveSiigoCostCenterId(
+          costCenterCode,
+          costCenters,
+        );
+
+        if (costCenterId != null) {
+          siigoPayload.cost_center = costCenterId;
+        } else {
+          this.logger.warn(
+            `[documentId=${documentId}] Centro de costos "${costCenterCode}" del Excel no coincide con ningún centro de costos activo en SIIGO; se envía sin cost_center.`,
+          );
+        }
+      }
     }
+
+    console.log(
+      `[SEND-DEBUG] [documentId=${documentId}] request.cost_center=${request.cost_center ?? 'undefined'} | body a enviar:`,
+      JSON.stringify(siigoPayload),
+    );
 
     // Se guarda la preferencia del proveedor (cuenta, medio de pago,
     // retenciones, centro de costo) ANTES de intentar el envío a SIIGO, no

@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { CompaniesRepository } from '../company/repositories/companies.repository';
 import { NextPymeMasterCatalogService } from '../integration/jarvis/nextpyme/nextpyme-master-catalog.service';
+import { JarvisTax } from '../integration/jarvis/entities/jarvis-tax.entity';
+import { JarvisTaxesRepository } from '../integration/jarvis/repositories/jarvis-taxes.repository';
 import { Product } from './entities/product.entity';
 import { ProductPriceList } from './entities/product-price-list.entity';
 import { ProductsRepository } from './repositories/products.repository';
@@ -19,7 +21,6 @@ import {
 import { UnitMeasuresListResponseDto } from './dto/unit-measure.dto';
 
 const VALID_KINDS = new Set(['product', 'service']);
-const VALID_TAX_CLASSIFICATIONS = new Set(['taxed', 'exempt', 'excluded']);
 
 /** Prefijo del SKU sugerido según el tipo. */
 const SKU_PREFIX_BY_KIND: Record<string, string> = {
@@ -35,6 +36,7 @@ export class ProductsService {
     private readonly categoriesRepository: ProductCategoriesRepository,
     private readonly companiesRepository: CompaniesRepository,
     private readonly masterCatalogService: NextPymeMasterCatalogService,
+    private readonly jarvisTaxesRepository: JarvisTaxesRepository,
   ) {}
 
   /**
@@ -143,15 +145,7 @@ export class ProductsService {
       throw new BadRequestException('La unidad de medida DIAN es obligatoria.');
     }
 
-    if (
-      request.applyIva &&
-      request.taxClassification &&
-      !VALID_TAX_CLASSIFICATIONS.has(request.taxClassification.trim())
-    ) {
-      throw new BadRequestException(
-        'La clasificación tributaria debe ser "taxed", "exempt" o "excluded".',
-      );
-    }
+    const taxes = await this.resolveTaxes(request.taxIds, trimmedCompanyId);
 
     // La categoría, si viene, debe existir y pertenecer a la misma empresa.
     const categoryId = request.categoryId?.trim() || null;
@@ -177,8 +171,6 @@ export class ProductsService {
 
     const priceLists = this.buildPriceLists(request);
 
-    const applyIva = Boolean(request.applyIva);
-
     const product = this.productsRepository.create({
       companyId: trimmedCompanyId,
       categoryId,
@@ -187,36 +179,8 @@ export class ProductsService {
       kind,
       unit,
       description: request.description?.trim() || null,
-      applyIva,
-      taxClassification: applyIva
-        ? request.taxClassification?.trim() || null
-        : null,
-      ivaRate: applyIva ? this.toNumericString(request.ivaRate) : null,
+      taxes,
       priceIncludesIva: Boolean(request.priceIncludesIva),
-      retefuenteEnabled: Boolean(request.retefuenteEnabled),
-      retefuenteConcept: request.retefuenteEnabled
-        ? request.retefuenteConcept?.trim() || null
-        : null,
-      retefuenteRate: request.retefuenteEnabled
-        ? this.toNumericString(request.retefuenteRate)
-        : null,
-      retefuenteMinBase: request.retefuenteEnabled
-        ? this.toNumericString(request.retefuenteMinBase)
-        : null,
-      reteicaEnabled: Boolean(request.reteicaEnabled),
-      reteicaMunicipality: request.reteicaEnabled
-        ? request.reteicaMunicipality?.trim() || null
-        : null,
-      reteicaRate: request.reteicaEnabled
-        ? this.toNumericString(request.reteicaRate)
-        : null,
-      reteicaMinBase: request.reteicaEnabled
-        ? this.toNumericString(request.reteicaMinBase)
-        : null,
-      reteivaEnabled: Boolean(request.reteivaEnabled),
-      reteivaRate: request.reteivaEnabled
-        ? this.toNumericString(request.reteivaRate)
-        : null,
       priceLists,
     });
 
@@ -283,6 +247,33 @@ export class ProductsService {
     });
   }
 
+  /** Valida que cada id de "taxIds" exista y sea de ESTA empresa antes de
+   * asociarlo — un id que no aparezca en el resultado (ajeno, inexistente,
+   * o de otra empresa) corta la creación con un error explícito en vez de
+   * ignorarlo en silencio. */
+  private async resolveTaxes(
+    taxIds: string[] | undefined,
+    companyId: string,
+  ): Promise<JarvisTax[]> {
+    const ids = [...new Set((taxIds ?? []).map((id) => id?.trim()).filter(Boolean))];
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const taxes = await this.jarvisTaxesRepository.findByIdsAndCompany(
+      ids,
+      companyId,
+    );
+
+    if (taxes.length !== ids.length) {
+      throw new BadRequestException(
+        'Uno o más impuestos/retenciones seleccionados no existen para esta empresa.',
+      );
+    }
+
+    return taxes;
+  }
+
   private requireCompanyId(companyId: string): string {
     const trimmed = companyId?.trim();
     if (!trimmed) {
@@ -325,6 +316,14 @@ export class ProductsService {
         enabled: list.enabled,
       }));
 
+    const taxes = (product.taxes ?? []).map((tax) => ({
+      id: tax.id,
+      code: tax.code,
+      name: tax.name,
+      tax_type: tax.taxType,
+      rate: tax.rate === null ? null : this.toNumber(tax.rate),
+    }));
+
     return {
       id: product.id,
       sku: product.sku,
@@ -334,20 +333,8 @@ export class ProductsService {
       categoryId: product.categoryId,
       categoryName: product.category?.name ?? null,
       description: product.description,
-      applyIva: product.applyIva,
-      taxClassification: product.taxClassification,
-      ivaRate: this.toNumber(product.ivaRate),
+      taxes,
       priceIncludesIva: product.priceIncludesIva,
-      retefuenteEnabled: product.retefuenteEnabled,
-      retefuenteConcept: product.retefuenteConcept,
-      retefuenteRate: this.toNumber(product.retefuenteRate),
-      retefuenteMinBase: this.toNumber(product.retefuenteMinBase),
-      reteicaEnabled: product.reteicaEnabled,
-      reteicaMunicipality: product.reteicaMunicipality,
-      reteicaRate: this.toNumber(product.reteicaRate),
-      reteicaMinBase: this.toNumber(product.reteicaMinBase),
-      reteivaEnabled: product.reteivaEnabled,
-      reteivaRate: this.toNumber(product.reteivaRate),
       priceLists,
     };
   }

@@ -29,6 +29,7 @@ import {
 } from './helpers/jarvis-credentials.helper';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 import {
+  NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID,
   NextPymeApiClient,
   NextPymeResolution,
 } from './nextpyme/nextpyme-api.client';
@@ -230,6 +231,22 @@ export class JarvisSetupService {
     const fromNumber = Number(item.from ?? item.number);
     const toNumber = Number(item.to ?? fromNumber);
     const nextConsecutive = Number(item.next_consecutive ?? item.number);
+    // NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID (0) es un sentinel del parseo del
+    // sobre DIAN (GetNumberingRangeResponse, ver parseResolutions en
+    // NextPymeApiClient) para resoluciones donde NextPyme NUNCA reportó un
+    // type_document_id real — no un id válido en sí. Dejarlo pasar como si
+    // fuera el id real es lo que causaba que se guardara
+    // `type_document_id: 0` al confirmar la resolución (bug real reportado:
+    // NextPyme seguía rechazando la clave técnica porque 0 tampoco es
+    // "factura electrónica" para su catálogo) — acá se normaliza a null para
+    // que saveResolution caiga al id fijo por kind en ese caso, igual que
+    // cuando NextPyme no informó nada.
+    const rawTypeDocumentId = item.type_document?.id ?? item.type_document_id;
+    const typeDocumentId =
+      rawTypeDocumentId != null &&
+      rawTypeDocumentId !== NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID
+        ? rawTypeDocumentId
+        : null;
 
     return {
       id: `${item.prefix}-${item.resolution ?? item.id}`,
@@ -245,7 +262,7 @@ export class JarvisSetupService {
       dateFrom: item.date_from ?? null,
       dateTo: item.date_to ?? null,
       documentTypeLabel: item.type_document?.name?.trim() || null,
-      typeDocumentId: item.type_document?.id ?? item.type_document_id ?? null,
+      typeDocumentId,
     };
   }
 
@@ -353,10 +370,29 @@ export class JarvisSetupService {
       );
     }
 
+    // El id "1"/"11" (SUPPORT_DOCUMENT_TYPE_ID / ELECTRONIC_INVOICE_TYPE_ID)
+    // es un supuesto fijo, no un dato consultado — cuando el frontend ya
+    // trae el type_document_id REAL que NextPyme reportó para esta
+    // resolución puntual (ver GET resolutions/available y
+    // JarvisAvailableResolutionDto.typeDocumentId), se usa ese en vez de
+    // adivinar: si no coincide con lo que NextPyme tiene registrado para el
+    // prefijo, el PUT /config/resolution lo rechaza (bug real reportado:
+    // "No es posible guardar una clave técnica para este tipo de documento,
+    // solo es posible para facturas electrónicas" al guardar la resolución
+    // de factura de venta, porque el id fijo no era el que esa resolución
+    // tenía en el catálogo real de NextPyme).
+    // request.typeDocumentId puede llegar en 0 (NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID
+    // — "NextPyme no informó un id real", ver mapAvailableResolution) — un
+    // `??` normal lo hubiera dejado pasar como si fuera válido, causando el
+    // mismo rechazo de NextPyme que este fix busca evitar.
+    const hasRealTypeDocumentId =
+      request.typeDocumentId != null &&
+      request.typeDocumentId !== NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID;
     const typeDocumentId =
-      request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+      (hasRealTypeDocumentId ? request.typeDocumentId : undefined) ??
+      (request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId()
-        : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId();
+        : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId());
 
     await this.nextPymeApiClient.putConfigResolution({
       type_document_id: typeDocumentId,

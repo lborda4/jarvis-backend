@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -23,6 +24,10 @@ import {
   DeleteElectronicDocumentsBatchRequestDto,
   DeleteElectronicDocumentsBatchResponseDto,
 } from './dto/delete-electronic-documents-batch.dto';
+import {
+  SaveElectronicDocumentDraftRequestDto,
+  SaveElectronicDocumentDraftResponseDto,
+} from './dto/save-electronic-document-draft.dto';
 
 @ApiTags('electronic-documents')
 @Controller('electronic-documents')
@@ -88,6 +93,24 @@ export class ElectronicDocumentController {
     return this.electronicDocumentService.deleteLocalDocuments(
       request.documentIds ?? [],
       getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Put(':documentId/draft')
+  @ApiOperation({
+    summary: 'Guardar borrador de contabilización',
+    description:
+      'Persiste en electronic_documents.draft los ajustes del panel de detalle (ítems, cuenta, medio de pago, retenciones, plazo y observaciones) para que no se pierdan al recargar. El historial de SIIGO no se toca: ese se escribe solo cuando el envío se confirma.',
+  })
+  saveDraft(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('documentId') documentId: string,
+    @Body() request: SaveElectronicDocumentDraftRequestDto,
+  ): Promise<SaveElectronicDocumentDraftResponseDto> {
+    return this.electronicDocumentService.saveDraft(
+      documentId,
+      getAuthenticatedCompanyId(user),
+      request,
     );
   }
 

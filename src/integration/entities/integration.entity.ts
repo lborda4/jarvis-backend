@@ -75,6 +75,21 @@ export class Integration {
   })
   lastBalanceTrialAutoSyncAt: Date | null;
 
+  /** Cuándo se importó por última vez el plan de cuentas COMPLETO desde el
+   * Excel real de SIIGO (SiigoAccountsImportService.importFromExcel) — a
+   * diferencia de lastBalanceTrialAutoSyncAt (sync automático desde el
+   * balance de prueba, que solo trae cuentas con movimiento reciente, nunca
+   * el PUC completo). El paso "Cuentas contables" del setup solo se
+   * considera terminado cuando este campo tiene valor, no con que la tabla
+   * de cuentas tenga cualquier fila (bug real reportado: el sync automático
+   * ya dejaba pasar el paso sin haber subido el Excel nunca). */
+  @Column({
+    name: 'accounts_excel_imported_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  accountsExcelImportedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -41,6 +41,7 @@ function buildService(document: {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   return { service, electronicDocumentsRepository };
@@ -58,6 +59,7 @@ function buildDeleteBatchService(documents: Array<{ id: string; status: Electron
   const service = new ElectronicDocumentService(
     dataSource as never,
     electronicDocumentsRepository as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,
@@ -151,6 +153,7 @@ function buildAlreadyInSiigoService() {
     {} as never,
     {} as never,
     historialFacturasRepository as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,

@@ -9,6 +9,7 @@ import {
   resolveSuggestedItemConfigForDocument,
   resolveSuggestedPaymentMethodForDocument,
   resolveSuggestedProductForDocument,
+  resolveSuggestedRetentionsForDocument,
   SupplierDocumentIdentity,
 } from './supplier-preferences.helper';
 
@@ -353,6 +354,68 @@ describe('resolveSuggestedAccountForDocument — PURCHASE_CREATED', () => {
     expect(
       resolveSuggestedAccountForDocument(document, new Map(), new Map(), INTEGRATION_ID),
     ).toEqual({ code: '5199990001', name: 'Cuenta confirmada', uses: 1 });
+  });
+});
+
+describe('resolveSuggestedRetentionsForDocument', () => {
+  it('sigue sugiriendo las retenciones guardadas del proveedor aunque el documento tenga un aiSuggestion (bug real reportado: un proveedor con retenciones ya configuradas dejaba de sugerirlas apenas la clasificación automática con IA escribía aiSuggestion, porque ese campo NUNCA calcula retenciones — siempre las manda en [])', () => {
+    const configurationIndex = buildConfigurationIndex({
+      preference: {
+        account: { code: '5135950001', name: 'Cuenta confirmada' },
+        retentions: [
+          { id: 4, name: 'Retefuente servicios 4%', type: 'Retefuente', percentage: 4 },
+        ],
+      },
+    });
+    const document = buildDocument({
+      payload: {
+        supplier: {
+          documentNumber: SUPPLIER_NIT,
+          documentType: 'NIT',
+          name: 'Proveedor de prueba',
+        },
+        items: [],
+        aiSuggestion: {
+          account: { code: '5135950001', name: 'Cuenta confirmada' },
+          product: null,
+          retentions: [],
+          confidence: 75,
+        },
+      },
+    });
+
+    const retentions = resolveSuggestedRetentionsForDocument(
+      document,
+      configurationIndex,
+      INTEGRATION_ID,
+    );
+
+    expect(retentions).toEqual([
+      { id: 4, name: 'Retefuente servicios 4%', type: 'Retefuente', percentage: 4 },
+    ]);
+  });
+
+  it('sin preferencia guardada ni sync, devuelve vacío aunque haya aiSuggestion', () => {
+    const document = buildDocument({
+      payload: {
+        supplier: {
+          documentNumber: SUPPLIER_NIT,
+          documentType: 'NIT',
+          name: 'Proveedor de prueba',
+        },
+        items: [],
+        aiSuggestion: {
+          account: { code: '5135950001', name: 'Cuenta confirmada' },
+          product: null,
+          retentions: [],
+          confidence: 75,
+        },
+      },
+    });
+
+    expect(
+      resolveSuggestedRetentionsForDocument(document, new Map(), INTEGRATION_ID),
+    ).toEqual([]);
   });
 });
 

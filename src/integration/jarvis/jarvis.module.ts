@@ -6,6 +6,7 @@ import { CompanyModule } from '../../company/company.module';
 import { ElectronicDocumentModule } from '../../electronic-document/electronic-document.module';
 import { PlanModule } from '../../plan/plan.module';
 import { IntegrationModule } from '../integration.module';
+import { JarvisTax } from './entities/jarvis-tax.entity';
 import { JarvisTercero } from './entities/jarvis-tercero.entity';
 import { JarvisController } from './jarvis.controller';
 import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
@@ -13,10 +14,12 @@ import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 import { JarvisResolutionParserService } from './jarvis-resolution-parser.service';
 import { JarvisSetupService } from './jarvis-setup.service';
 import { JarvisSupportDocumentSendService } from './jarvis-support-document-send.service';
+import { JarvisTaxesService } from './jarvis-taxes.service';
 import { JarvisTercerosService } from './jarvis-terceros.service';
 import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 import { NextPymeRutService } from './nextpyme-rut.service';
+import { JarvisTaxesRepository } from './repositories/jarvis-taxes.repository';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
 
 @Module({
@@ -27,12 +30,13 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     IntegrationModule,
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),
-    TypeOrmModule.forFeature([JarvisTercero]),
+    TypeOrmModule.forFeature([JarvisTercero, JarvisTax]),
   ],
   controllers: [JarvisController],
   providers: [
     JarvisSetupService,
     JarvisTercerosService,
+    JarvisTaxesService,
     JarvisDocumentPreparationService,
     JarvisSupportDocumentSendService,
     JarvisInvoiceSendService,
@@ -41,11 +45,14 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     NextPymeMasterCatalogService,
     NextPymeRutService,
     JarvisTercerosRepository,
+    JarvisTaxesRepository,
   ],
   exports: [
     JarvisSetupService,
     JarvisTercerosService,
     JarvisTercerosRepository,
+    JarvisTaxesService,
+    JarvisTaxesRepository,
     JarvisDocumentPreparationService,
     JarvisSupportDocumentSendService,
     NextPymeApiClient,

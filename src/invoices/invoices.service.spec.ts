@@ -30,6 +30,7 @@ function buildService() {
     purchaseInvoiceImportJobsRepository as never,
     purchaseInvoiceImportJobRowsRepository as never,
     {} as never,
+    {} as never,
   );
 
   return {
@@ -71,6 +72,8 @@ describe('InvoicesService.importPurchaseInvoicesFromExcel', () => {
     );
     // No debe insertar filas (no hay nada que reclamar) ni depender del
     // worker en segundo plano para terminar el job.
-    expect(purchaseInvoiceImportJobRowsRepository.saveMany).not.toHaveBeenCalled();
+    expect(
+      purchaseInvoiceImportJobRowsRepository.saveMany,
+    ).not.toHaveBeenCalled();
   });
 });

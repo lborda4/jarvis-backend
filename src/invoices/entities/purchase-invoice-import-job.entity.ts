@@ -50,6 +50,14 @@ export class PurchaseInvoiceImportJob {
   @Column({ name: 'documents_created', type: 'integer', nullable: true })
   documentsCreated: number | null;
 
+  /** Filas que reusaron un ElectronicDocument ya existente (mismo CUFE de un
+   * import anterior) en vez de crear uno nuevo — se muestra por separado de
+   * documentsCreated para que el banner de éxito pueda explicar por qué el
+   * total de "creados" es menor al total de filas del Excel, en vez de
+   * dejarlo sin explicación (ver PurchaseInvoiceImportWorkerService). */
+  @Column({ name: 'documents_reused', type: 'integer', nullable: true })
+  documentsReused: number | null;
+
   @Column({ name: 'document_ids', type: 'jsonb', nullable: true })
   documentIds: string[] | null;
 

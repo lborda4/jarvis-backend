@@ -152,6 +152,23 @@ export class JarvisDocumentPreparationService {
   }
 
   /**
+   * Igual que resolvePendingSiblings, pero para cuando el tercero se creó
+   * SIN venir disparado por un documento puntual (ej. "Crear" desde el
+   * listado de Terceros, no desde el botón de una fila) — ahí no hay un
+   * `resumeDocumentId` que excluir, así que se actualizan TODOS los
+   * documentos pendientes de ese proveedor de una vez (caso real pedido: si
+   * ya se creó el proveedor y hay más registros con ese mismo proveedor,
+   * que cambie el estado de todos, no solo del que disparó la creación).
+   */
+  async resolveSiblingsForSupplier(
+    companyId: string,
+    documentNumberThird: string,
+    supplierName: string,
+  ): Promise<void> {
+    await this.resolvePendingSiblings('', companyId, documentNumberThird, supplierName);
+  }
+
+  /**
    * Al crear/encontrar el tercero para un documento, otros documentos ya
    * importados del mismo proveedor (mismo NIT) que quedaron esperando a que
    * el tercero existiera no se enteran solos — se actualizan aquí también,

@@ -10,6 +10,7 @@ import {
 import { Company } from '../../company/entities/company.entity';
 import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
+import type { ElectronicDocumentDraft } from '../interfaces/electronic-document-draft.interface';
 import type { ElectronicDocumentPayload } from '../interfaces/electronic-document-payload.interface';
 
 @Entity('electronic_documents')
@@ -63,6 +64,12 @@ export class ElectronicDocument {
 
   @Column({ type: 'jsonb' })
   payload: ElectronicDocumentPayload;
+
+  /** Ajustes del contador todavía sin enviar (ver ElectronicDocumentDraft).
+   * Null mientras no haya guardado nada: el documento se contabiliza con lo
+   * sugerido por historial/IA. */
+  @Column({ type: 'jsonb', nullable: true })
+  draft: ElectronicDocumentDraft | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

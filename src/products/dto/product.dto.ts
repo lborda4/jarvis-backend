@@ -33,55 +33,18 @@ export class CreateProductRequestDto {
   @ApiPropertyOptional({ example: 'Camiseta básica en algodón.', nullable: true })
   description?: string | null;
 
-  // ---- IVA ----
-  @ApiProperty({ example: true })
-  applyIva: boolean;
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Ids de jarvis_taxes (Impuestos y retenciones) que aplican a este producto.',
+  })
+  taxIds?: string[];
 
   @ApiPropertyOptional({
-    example: 'taxed',
-    enum: ['taxed', 'exempt', 'excluded'],
-    nullable: true,
+    example: false,
+    description: 'Si el precio de venta cargado ya incluye el IVA.',
   })
-  taxClassification?: string | null;
-
-  @ApiPropertyOptional({ example: 19, nullable: true })
-  ivaRate?: number | null;
-
-  @ApiProperty({ example: true })
-  priceIncludesIva: boolean;
-
-  // ---- Retefuente ----
-  @ApiProperty({ example: false })
-  retefuenteEnabled: boolean;
-
-  @ApiPropertyOptional({ example: 'Compras', nullable: true })
-  retefuenteConcept?: string | null;
-
-  @ApiPropertyOptional({ example: 2.5, nullable: true })
-  retefuenteRate?: number | null;
-
-  @ApiPropertyOptional({ example: 0, nullable: true })
-  retefuenteMinBase?: number | null;
-
-  // ---- ReteICA ----
-  @ApiProperty({ example: false })
-  reteicaEnabled: boolean;
-
-  @ApiPropertyOptional({ example: 'Bogotá D.C.', nullable: true })
-  reteicaMunicipality?: string | null;
-
-  @ApiPropertyOptional({ example: 9.66, nullable: true })
-  reteicaRate?: number | null;
-
-  @ApiPropertyOptional({ example: 0, nullable: true })
-  reteicaMinBase?: number | null;
-
-  // ---- ReteIVA ----
-  @ApiProperty({ example: false })
-  reteivaEnabled: boolean;
-
-  @ApiPropertyOptional({ example: 15, nullable: true })
-  reteivaRate?: number | null;
+  priceIncludesIva?: boolean;
 
   @ApiProperty({ type: [ProductPriceListInputDto] })
   priceLists: ProductPriceListInputDto[];
@@ -102,6 +65,23 @@ export class ProductPriceListDto {
 
   @ApiProperty({ example: true })
   enabled: boolean;
+}
+
+export class ProductTaxDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  code: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  tax_type: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  rate: number | null;
 }
 
 export class ProductDto {
@@ -129,47 +109,11 @@ export class ProductDto {
   @ApiProperty({ example: 'Camiseta básica en algodón.', nullable: true })
   description: string | null;
 
-  @ApiProperty({ example: true })
-  applyIva: boolean;
+  @ApiProperty({ type: [ProductTaxDto] })
+  taxes: ProductTaxDto[];
 
-  @ApiProperty({ example: 'taxed', nullable: true })
-  taxClassification: string | null;
-
-  @ApiProperty({ example: 19, nullable: true })
-  ivaRate: number | null;
-
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: false })
   priceIncludesIva: boolean;
-
-  @ApiProperty({ example: false })
-  retefuenteEnabled: boolean;
-
-  @ApiProperty({ example: 'Compras', nullable: true })
-  retefuenteConcept: string | null;
-
-  @ApiProperty({ example: 2.5, nullable: true })
-  retefuenteRate: number | null;
-
-  @ApiProperty({ example: 0, nullable: true })
-  retefuenteMinBase: number | null;
-
-  @ApiProperty({ example: false })
-  reteicaEnabled: boolean;
-
-  @ApiProperty({ example: 'Bogotá D.C.', nullable: true })
-  reteicaMunicipality: string | null;
-
-  @ApiProperty({ example: 9.66, nullable: true })
-  reteicaRate: number | null;
-
-  @ApiProperty({ example: 0, nullable: true })
-  reteicaMinBase: number | null;
-
-  @ApiProperty({ example: false })
-  reteivaEnabled: boolean;
-
-  @ApiProperty({ example: 15, nullable: true })
-  reteivaRate: number | null;
 
   @ApiProperty({ type: [ProductPriceListDto] })
   priceLists: ProductPriceListDto[];

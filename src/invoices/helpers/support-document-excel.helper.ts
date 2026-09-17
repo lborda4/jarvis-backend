@@ -51,6 +51,12 @@ const COLUMN_ALIASES = {
   currency: ['moneda'],
   lineTotal: ['total', 'valor total', 'vr total', 'total linea'],
   taxAmount: ['iva', 'valor iva', 'impuesto', 'valor impuesto'],
+  costCenter: [
+    'centro de costos',
+    'centro de costo',
+    'centro costos',
+    'centro costo',
+  ],
   observations: ['observaciones', 'comentarios', 'observacion', 'comentario'],
 } as const;
 
@@ -239,6 +245,10 @@ export function groupSupportDocumentRows(
         existingGroup.observations = row.observations.trim();
       }
 
+      if (!existingGroup.costCenter && row.costCenter?.trim()) {
+        existingGroup.costCenter = row.costCenter.trim();
+      }
+
       continue;
     }
 
@@ -254,6 +264,7 @@ export function groupSupportDocumentRows(
       cufe: row.cufe,
       receiverIdentification: row.receiverIdentification,
       currency: row.currency?.trim() || 'COP',
+      costCenter: row.costCenter?.trim() || undefined,
       observations: row.observations?.trim() || undefined,
       rows: [row],
     });
@@ -440,6 +451,7 @@ function mapSupportDocumentRow(
     unitValue,
     lineTotal,
     taxAmount: getNumberValue(row, columnIndexes.taxAmount, 0),
+    costCenter: getCellValue(row, columnIndexes.costCenter) || undefined,
     observations: getCellValue(row, columnIndexes.observations) || undefined,
   };
 }

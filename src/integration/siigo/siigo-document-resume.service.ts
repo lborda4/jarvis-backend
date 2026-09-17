@@ -5,7 +5,6 @@ import { ElectronicDocumentType } from '../../electronic-document/enums/electron
 import { mapElectronicDocumentToListItem } from '../../electronic-document/mappers/electronic-document-list-item.mapper';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { ResumeElectronicDocumentResponseDto } from '../../electronic-document/dto/resume-electronic-document.dto';
-import { ResumeElectronicDocumentsBatchResponseDto } from '../../electronic-document/dto/resume-electronic-documents-batch.dto';
 import {
   SiigoDocumentPreparationService,
   SIIGO_DOCUMENT_PREPARATION_CONCURRENCY,
@@ -25,11 +24,44 @@ export class SiigoDocumentResumeService {
     private readonly siigoAuthService: SiigoAuthService,
   ) {}
 
+  /**
+   * Dispara resumeBatch de fondo y responde de inmediato — a diferencia de
+   * resumeBatch (que el controller usaba directo antes, bloqueando la
+   * respuesta HTTP hasta terminar TODO el lote), acá el llamador no espera
+   * nada: el progreso real se lee vía polling de GET /electronic-documents,
+   * igual que ya hace el frontend (ver watchImportedDocuments). Caso real
+   * reportado: un import de 74 documentos hacía que resumeBatch tardara más
+   * que el timeout de 30s del cliente HTTP (5 en simultáneo contra la API
+   * real de SIIGO, con rate limit) — el request se abortaba del lado del
+   * navegador, pero el trabajo seguía corriendo en el server sin que nada
+   * lo reflejara, dejando documentos "colgados" hasta la próxima recarga.
+   */
+  resumeBatchInBackground(
+    documentIds: string[],
+    companyId: string,
+    options?: { prepareOnly?: boolean },
+  ): void {
+    this.logger.log(
+      `[companyId=${companyId}] resumeBatchInBackground iniciado para ${documentIds.length} documento(s).`,
+    );
+
+    void this.resumeBatch(documentIds, companyId, options).catch((error) => {
+      this.logger.error(
+        `[companyId=${companyId}] Error en resumeBatchInBackground`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    });
+  }
+
+  /** Devuelve el detalle por documento (a diferencia de
+   * ResumeElectronicDocumentsBatchResponseDto, que es solo el ack que
+   * recibe el HTTP caller) — resumeBatchInBackground y el spec de este
+   * servicio siguen necesitando el resultado real de cada resume(). */
   async resumeBatch(
     documentIds: string[],
     companyId: string,
     options?: { prepareOnly?: boolean },
-  ): Promise<ResumeElectronicDocumentsBatchResponseDto> {
+  ): Promise<{ items: ResumeElectronicDocumentResponseDto[] }> {
     const uniqueIds = [
       ...new Set(
         documentIds.map((documentId) => documentId?.trim()).filter(Boolean),
@@ -49,14 +81,70 @@ export class SiigoDocumentResumeService {
     // real reportado: un import de 50 filas disparaba 50 resume() a la vez
     // desde el frontend, saturando el rate limit de SIIGO y volviendo la
     // validación mucho más lenta de lo normal.
+    //
+    // El .catch() por documento es aparte: mapWithConcurrency no aísla
+    // fallas por ítem — si el mapper revienta para UNO, Promise.all rechaza
+    // el lote COMPLETO y los documentos que todavía no habían arrancado se
+    // quedan sin ni siquiera intentarse. Caso real reportado: varios
+    // documentos de un mismo lote se quedaban "Revisando proveedor" para
+    // siempre, sin ningún error visible, porque uno solo (ej. requireById
+    // reventando por un problema transitorio, o el documento borrado a
+    // mitad de camino) tumbaba el resto en silencio.
     const items = await mapWithConcurrency(
       uniqueIds,
       SIIGO_DOCUMENT_PREPARATION_CONCURRENCY,
       (documentId) =>
-        this.resume(documentId, companyId, batchContext, { prepareOnly }),
+        this.resume(documentId, companyId, batchContext, { prepareOnly }).catch(
+          async (error) => {
+            this.logger.error(
+              `[documentId=${documentId}] resume() explotó sin capturar dentro del lote — se aísla para no tumbar el resto`,
+              error instanceof Error ? error.stack : String(error),
+            );
+
+            return this.buildFailedResponseSafely(
+              documentId,
+              companyId,
+              error,
+            );
+          },
+        ),
     );
 
     return { items };
+  }
+
+  /** Último recurso cuando resume() revienta sin capturar internamente (ver
+   * comentario en resumeBatch) — intenta dejar el documento marcado FAILED
+   * (visible en la tabla, con acción "Reintentar") en vez de dejarlo
+   * congelado en su estado anterior. Nunca lanza: si esto también falla, el
+   * documento queda como estaba, pero el resto del lote sigue su curso. */
+  private async buildFailedResponseSafely(
+    documentId: string,
+    companyId: string,
+    originalError: unknown,
+  ): Promise<ResumeElectronicDocumentResponseDto> {
+    try {
+      await this.electronicDocumentService.updateStatus(
+        documentId,
+        ElectronicDocumentStatus.FAILED,
+        companyId,
+      );
+
+      return await this.buildResponse('FAILED', documentId, companyId,
+        originalError instanceof Error
+          ? originalError.message
+          : 'No se pudo reanudar el proceso del documento.',
+      );
+    } catch (fallbackError) {
+      this.logger.error(
+        `[documentId=${documentId}] No se pudo marcar el documento como FAILED tras el error no capturado`,
+        fallbackError instanceof Error
+          ? fallbackError.stack
+          : String(fallbackError),
+      );
+
+      throw originalError;
+    }
   }
 
   async resume(

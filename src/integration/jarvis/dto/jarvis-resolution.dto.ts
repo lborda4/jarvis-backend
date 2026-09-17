@@ -129,6 +129,13 @@ export class SaveJarvisResolutionRequestDto {
 
   @ApiProperty({ example: '2027-08-05' })
   dateTo: string;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description:
+      'type_document_id crudo que NextPyme reportó para esta resolución en GET resolutions/available (ver JarvisAvailableResolutionDto.typeDocumentId). Si se omite, se infiere del kind — pero NextPyme puede rechazar ese id por defecto si no coincide con el que tiene registrado para el prefijo elegido.',
+  })
+  typeDocumentId?: number;
 }
 
 export class SaveJarvisResolutionResponseDto {

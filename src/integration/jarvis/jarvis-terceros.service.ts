@@ -5,15 +5,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { normalizeSupportDocumentType } from '../../invoices/helpers/support-document-type.helper';
+import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
+import { ElectronicDocumentsRepository } from '../../electronic-document/repositories/electronic-documents.repository';
 import { normalizeJarvisDocumentNumber } from './helpers/jarvis-document-number.helper';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import {
+  CreateJarvisTercerosBulkResponseDto,
   CreateJarvisTerceroRequestDto,
   CreateJarvisTerceroResponseDto,
   JarvisCatalogListResponseDto,
   JarvisTerceroDto,
   JarvisTercerosListResponseDto,
+  ListJarvisTypeLiabilitiesResponseDto,
+  ListPendingJarvisSuppliersResponseDto,
   LookupJarvisTerceroNitResponseDto,
   UpdateJarvisTerceroRequestDto,
   UpdateJarvisTerceroResponseDto,
@@ -26,9 +31,12 @@ import { JarvisFiscalRegime } from './enums/jarvis-fiscal-regime.enum';
 import { JarvisTaxRegime } from './enums/jarvis-tax-regime.enum';
 import { JarvisVatRegime } from './enums/jarvis-vat-regime.enum';
 import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
+import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 import { NextPymeRutService } from './nextpyme-rut.service';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
+
+const PENDING_SUPPLIERS_LOOKUP_CONCURRENCY = 5;
 
 const VALID_DOCUMENT_TYPES = new Set<string>(Object.values(JarvisDocumentType));
 const VALID_ENTITY_TYPES = new Set<string>(Object.values(JarvisEntityType));
@@ -39,41 +47,35 @@ const VALID_FISCAL_REGIMES = new Set<string>(
 );
 const VALID_VAT_REGIMES = new Set<string>(Object.values(JarvisVatRegime));
 
+/** Valor por defecto de "Tipo de responsabilidad" — código de la tabla
+ * maestra de NextPyme type_liabilities, id 117 (pedido explícito). */
+const DEFAULT_TAX_RESPONSIBILITY = 'R-99-PN';
+
 @Injectable()
 export class JarvisTercerosService {
   constructor(
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly jarvisTercerosRepository: JarvisTercerosRepository,
     private readonly nextPymeRutService: NextPymeRutService,
-    private readonly masterCatalogService: NextPymeMasterCatalogService,
+    private readonly electronicDocumentsRepository: ElectronicDocumentsRepository,
+    private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
+    private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
   ) {}
 
-  /** Municipios (tabla maestra de NextPyme) para el selector de ciudad. */
-  async listMunicipalities(
-    companyId: string,
-  ): Promise<JarvisCatalogListResponseDto> {
-    const trimmedCompanyId = this.requireCompanyId(companyId);
-    const token = await this.resolveCompanyNextPymeToken(trimmedCompanyId);
-    const rows = await this.masterCatalogService.getMunicipalities(token);
-    const items = rows.map((row) => ({
-      code: row.code ? String(row.code) : null,
-      name: row.name,
-    }));
-    return { items, total: items.length };
-  }
+  /** Catálogo real de NextPyme (tabla maestra type_liabilities) para el
+   * desplegable "Tipo de responsabilidad" al crear un tercero. */
+  async listTypeLiabilities(): Promise<ListJarvisTypeLiabilitiesResponseDto> {
+    const rows = await this.nextPymeMasterCatalogService.getTypeLiabilities();
 
-  /** Países (tabla maestra de NextPyme) para el selector de país. */
-  async listCountries(
-    companyId: string,
-  ): Promise<JarvisCatalogListResponseDto> {
-    const trimmedCompanyId = this.requireCompanyId(companyId);
-    const token = await this.resolveCompanyNextPymeToken(trimmedCompanyId);
-    const rows = await this.masterCatalogService.getCountries(token);
-    const items = rows.map((row) => ({
-      code: row.code ? String(row.code) : null,
-      name: row.name,
-    }));
-    return { items, total: items.length };
+    return {
+      items: rows
+        .filter((row) => row.code)
+        .map((row) => ({
+          id: row.id,
+          code: String(row.code),
+          name: row.name,
+        })),
+    };
   }
 
   async list(
@@ -181,6 +183,22 @@ export class JarvisTercerosService {
         city: request.city?.trim() || null,
         cityCode: request.city_code?.trim() || null,
       }),
+    );
+
+    // Este create() se usa tanto desde el botón "Crear tercero" de una fila
+    // puntual (ahí el modal después llama a resumeElectronicDocument, que ya
+    // propaga a los demás documentos del mismo proveedor) como desde
+    // "Crear" en el listado de Terceros, SIN ningún documento disparador —
+    // en ese segundo caso nada más se encargaba de avisarle a los documentos
+    // ya importados de este proveedor que estaban esperando a que existiera
+    // (bug real reportado: se crea el proveedor pero esos registros se
+    // quedan en "Requiere proveedor"). Se resuelven acá siempre, de una vez
+    // para todos — si el modal llama a resumeElectronicDocument después,
+    // no encuentra nada pendiente y no hace nada de más.
+    await this.jarvisDocumentPreparationService.resolveSiblingsForSupplier(
+      trimmedCompanyId,
+      documentNumber,
+      name,
     );
 
     return {

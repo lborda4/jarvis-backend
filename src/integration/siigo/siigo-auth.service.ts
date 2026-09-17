@@ -189,12 +189,20 @@ export class SiigoAuthService {
 
     const credentials = normalizeSiigoCredentials(integration.credentials);
     const configured = areSiigoCredentialsConfigured(integration.credentials);
+    // "Completo" exige que el PUC se haya cargado desde el Excel real (ver
+    // Integration.accountsExcelImportedAt) — no alcanza con que la tabla de
+    // cuentas tenga alguna fila: el sync automático del balance de prueba
+    // (SiigoAccountsBalanceSyncService) también inserta cuentas, pero solo
+    // las que tuvieron movimiento en el mes actual/anterior, nunca el PUC
+    // completo (bug real reportado: el paso quedaba "listo" sin que nadie
+    // hubiera subido el Excel nunca).
     const accountsCount =
       await this.siigoAccountsRepository.countByCompanyAndIntegration(
         trimmedCompanyId,
         integration.id,
       );
-    const hasAccounts = accountsCount > 0;
+    const hasAccounts =
+      integration.accountsExcelImportedAt != null && accountsCount > 0;
     const documentTypesConfigured = areSiigoDocumentTypesConfigured(
       integration.credentials,
       subscription.includedDocumentTypes,

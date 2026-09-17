@@ -36,6 +36,30 @@ function resolveDocumentType(
   return DIAN_DOCUMENT_TYPE_BY_CODE[normalized] ?? 'NIT';
 }
 
+/**
+ * NextPyme devuelve el departamento y el municipio como códigos separados
+ * (`municipality.department.code` de 2 dígitos, `municipality.code` de 3) —
+ * el código DIVIPOLA completo que espera SIIGO en `address.city.city_code`
+ * es la concatenación de ambos, con cero a la izquierda (ej. departamento
+ * "5" + municipio "149" -> "05149", no "149" solo). Bug real reportado: se
+ * mandaba `municipality.code` tal cual (sin el departamento) y el
+ * departamento sin rellenar, y SIIGO rechazaba la ciudad con
+ * invalid_reference porque "Co|5|149" no es un código DIVIPOLA válido.
+ */
+function buildDivipolaCityCode(
+  departmentCode: string | undefined,
+  municipalityCode: string | undefined,
+): string {
+  const department = departmentCode?.trim();
+  const municipality = municipalityCode?.trim();
+
+  if (!department || !municipality) {
+    return municipality || '';
+  }
+
+  return `${department.padStart(2, '0')}${municipality.padStart(3, '0')}`;
+}
+
 // DIAN tabla 9.5 (forma de pago): 1 = Contado, 2 = Crédito.
 /**
  * NextPyme manda "0001-01-01" como payment_due_date en facturas sin fecha
@@ -91,7 +115,12 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
   // para la base gravable) — line_extension_amount y payable_amount solo se
   // usan como respaldo cuando tax_exclusive_amount viene en 0 (ej. facturas
   // sin IVA de algunos proveedores, donde ese campo no se diligencia).
-  const subtotal = taxExclusive > 0 ? taxExclusive : lineExtension > 0 ? lineExtension : payable;
+  const subtotal =
+    taxExclusive > 0
+      ? taxExclusive
+      : lineExtension > 0
+        ? lineExtension
+        : payable;
   // El IVA sale de la suma de tax_totals a nivel de factura (no por línea,
   // para no duplicar cuando hay varias líneas) — es el dato certificado por
   // la DIAN. Si el proveedor no lo envía, se cae al cálculo anterior
@@ -178,8 +207,15 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       address: seller.address?.trim() || '',
       phone: seller.phone?.trim() || '',
       email: seller.email?.trim() || '',
-      stateCode: seller.municipality?.department?.code?.trim() || '',
-      cityCode: seller.municipality?.code?.trim() || seller.code?.trim() || '',
+      stateCode:
+        seller.municipality?.department?.code?.trim().padStart(2, '0') || '',
+      cityCode:
+        buildDivipolaCityCode(
+          seller.municipality?.department?.code,
+          seller.municipality?.code,
+        ) ||
+        seller.code?.trim() ||
+        '',
       countryCode: 'Co',
     },
     invoice: {

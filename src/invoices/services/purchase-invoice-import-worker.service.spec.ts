@@ -78,6 +78,8 @@ function buildService(
 ) {
   const jobsRepository = {
     patch: jest.fn().mockResolvedValue(undefined),
+    applyBatchResults: jest.fn().mockResolvedValue(undefined),
+    findById: jest.fn().mockResolvedValue(null),
     ...overrides.jobsRepository,
   };
   const jobRowsRepository = {
@@ -295,10 +297,13 @@ describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, ví
     // ESPERAR a que termine la revisión de proveedor (watchImportedDocuments);
     // un documento reusado nunca va a cambiar de estado en este import, así
     // que incluirlo ahí solo lo dejaría esperando hasta el timeout.
-    const patchCall = jobsRepository.patch.mock.calls.find(
-      ([, patch]: [string, any]) => patch.documentIds !== undefined,
+    const applyBatchResultsCall =
+      jobsRepository.applyBatchResults.mock.calls.find(
+        ([, delta]: [string, any]) => delta.documentIds !== undefined,
+      );
+    expect(applyBatchResultsCall?.[1].documentIds).not.toContain(
+      'doc-existing-1',
     );
-    expect(patchCall?.[1].documentIds).not.toContain('doc-existing-1');
   });
 
   it('no aborta ni consulta el cupo del plan al importar, aunque el plan ya esté agotado', async () => {

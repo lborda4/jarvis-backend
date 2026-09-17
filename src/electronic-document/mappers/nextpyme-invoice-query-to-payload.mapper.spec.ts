@@ -127,6 +127,64 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     });
   });
 
+  describe('cityCode/stateCode del proveedor (caso real: H&M rechazada por SIIGO)', () => {
+    it('concatena departamento + municipio en el DIVIPOLA completo, rellenando ceros a la izquierda', () => {
+      const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+        buildResult({
+          seller: {
+            identification_number: '900924527',
+            name: 'H&M HENNES & MAURITZ COLOMBIA S.A.S',
+            type_identification: '31',
+            municipality: {
+              code: '149',
+              department: { code: '5' },
+            },
+          },
+        }),
+        'cufe-123',
+      );
+
+      // Antes se mandaba solo "149" (código de municipio suelto, sin el
+      // departamento) y "5" sin rellenar — SIIGO lo rechazaba con
+      // invalid_reference porque "Co|5|149" no es un DIVIPOLA válido.
+      expect(payload.supplier.stateCode).toBe('05');
+      expect(payload.supplier.cityCode).toBe('05149');
+    });
+
+    it('no rellena si el departamento no viene (deja el municipio tal cual, sin inventar ceros al frente)', () => {
+      const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+        buildResult({
+          seller: {
+            identification_number: '900924527',
+            name: 'Proveedor sin departamento',
+            type_identification: '31',
+            municipality: { code: '149' },
+          },
+        }),
+        'cufe-123',
+      );
+
+      expect(payload.supplier.stateCode).toBe('');
+      expect(payload.supplier.cityCode).toBe('149');
+    });
+
+    it('cae a seller.code cuando no hay municipality en absoluto', () => {
+      const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+        buildResult({
+          seller: {
+            identification_number: '900924527',
+            name: 'Proveedor con code plano',
+            type_identification: '31',
+            code: '11001',
+          },
+        }),
+        'cufe-123',
+      );
+
+      expect(payload.supplier.cityCode).toBe('11001');
+    });
+  });
+
   it('no incluye discount en totals cuando no hay descuento general', () => {
     const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       buildResult({
@@ -140,7 +198,11 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
       'cufe-123',
     );
 
-    expect(payload.totals).toEqual({ subtotal: 100000, total: 119000, iva: 19000 });
+    expect(payload.totals).toEqual({
+      subtotal: 100000,
+      total: 119000,
+      iva: 19000,
+    });
   });
 
   it('caso 1: usa tax_totals de factura para el IVA aunque el valor unitario ya lo incluya (no duplica)', () => {
@@ -152,7 +214,12 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
           payable_amount: '16000.00',
         },
         tax_totals: [
-          { tax_id: 1, tax_amount: '2554.62', taxable_amount: '13445.38', percent: '19.00' },
+          {
+            tax_id: 1,
+            tax_amount: '2554.62',
+            taxable_amount: '13445.38',
+            percent: '19.00',
+          },
         ],
         invoice_lines: [
           {
@@ -181,7 +248,12 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
           payable_amount: '8521.50',
         },
         tax_totals: [
-          { tax_id: 1, tax_amount: '8521.50', taxable_amount: '44850.00', percent: '19.00' },
+          {
+            tax_id: 1,
+            tax_amount: '8521.50',
+            taxable_amount: '44850.00',
+            percent: '19.00',
+          },
         ],
       }),
       'cufe-123',
@@ -221,8 +293,18 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       buildResult({
         with_holding_tax_totals: [
-          { tax_code: '06', tax_name: 'ReteRenta', tax_amount: '1023.00', percent: '2.50' },
-          { tax_code: '05', tax_name: 'ReteIVA', tax_amount: '6144.60', percent: '15.00' },
+          {
+            tax_code: '06',
+            tax_name: 'ReteRenta',
+            tax_amount: '1023.00',
+            percent: '2.50',
+          },
+          {
+            tax_code: '05',
+            tax_name: 'ReteIVA',
+            tax_amount: '6144.60',
+            percent: '15.00',
+          },
         ],
       }),
       'cufe-123',
