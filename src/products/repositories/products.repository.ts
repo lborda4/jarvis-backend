@@ -16,7 +16,7 @@ export class ProductsRepository {
     if (!trimmedSearch) {
       return this.repository.find({
         where: { companyId },
-        relations: { priceLists: true, category: true },
+        relations: { priceLists: true, category: true, taxes: true },
         order: { name: 'ASC' },
       });
     }
@@ -26,7 +26,7 @@ export class ProductsRepository {
         { companyId, name: ILike(`%${trimmedSearch}%`) },
         { companyId, sku: ILike(`%${trimmedSearch}%`) },
       ],
-      relations: { priceLists: true, category: true },
+      relations: { priceLists: true, category: true, taxes: true },
       order: { name: 'ASC' },
     });
   }
@@ -34,7 +34,7 @@ export class ProductsRepository {
   findByIdAndCompany(id: string, companyId: string): Promise<Product | null> {
     return this.repository.findOne({
       where: { id, companyId },
-      relations: { priceLists: true, category: true },
+      relations: { priceLists: true, category: true, taxes: true },
     });
   }
 

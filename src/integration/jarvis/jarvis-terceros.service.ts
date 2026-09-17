@@ -17,6 +17,7 @@ import {
   CreateJarvisTercerosBulkRequestDto,
   JarvisTerceroDto,
   JarvisTercerosListResponseDto,
+  ListJarvisTypeLiabilitiesResponseDto,
   ListPendingJarvisSuppliersResponseDto,
   LookupJarvisTerceroNitResponseDto,
   PendingJarvisSupplierDto,
@@ -27,6 +28,7 @@ import { JarvisEntityType } from './enums/jarvis-entity-type.enum';
 import { JarvisTaxRegime } from './enums/jarvis-tax-regime.enum';
 import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
 import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
+import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 import { NextPymeRutService } from './nextpyme-rut.service';
 import { JarvisTercerosRepository } from './repositories/jarvis-terceros.repository';
 
@@ -36,6 +38,10 @@ const VALID_DOCUMENT_TYPES = new Set<string>(Object.values(JarvisDocumentType));
 const VALID_ENTITY_TYPES = new Set<string>(Object.values(JarvisEntityType));
 const VALID_TAX_REGIMES = new Set<string>(Object.values(JarvisTaxRegime));
 
+/** Valor por defecto de "Tipo de responsabilidad" — código de la tabla
+ * maestra de NextPyme type_liabilities, id 117 (pedido explícito). */
+const DEFAULT_TAX_RESPONSIBILITY = 'R-99-PN';
+
 @Injectable()
 export class JarvisTercerosService {
   constructor(
@@ -44,7 +50,24 @@ export class JarvisTercerosService {
     private readonly nextPymeRutService: NextPymeRutService,
     private readonly electronicDocumentsRepository: ElectronicDocumentsRepository,
     private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
+    private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
   ) {}
+
+  /** Catálogo real de NextPyme (tabla maestra type_liabilities) para el
+   * desplegable "Tipo de responsabilidad" al crear un tercero. */
+  async listTypeLiabilities(): Promise<ListJarvisTypeLiabilitiesResponseDto> {
+    const rows = await this.nextPymeMasterCatalogService.getTypeLiabilities();
+
+    return {
+      items: rows
+        .filter((row) => row.code)
+        .map((row) => ({
+          id: row.id,
+          code: String(row.code),
+          name: row.name,
+        })),
+    };
+  }
 
   async list(
     companyId: string,
@@ -100,6 +123,9 @@ export class JarvisTercerosService {
       throw new BadRequestException('El régimen tributario no es válido.');
     }
 
+    const taxResponsibility =
+      request.tax_responsibility?.trim() || DEFAULT_TAX_RESPONSIBILITY;
+
     const existing =
       await this.jarvisTercerosRepository.findByCompanyAndDocument(
         trimmedCompanyId,
@@ -123,6 +149,7 @@ export class JarvisTercerosService {
         name,
         entityType: entityType ?? null,
         taxRegime: taxRegime ?? null,
+        taxResponsibility,
         email: request.email?.trim() || null,
         phone: request.phone?.trim() || null,
         address: request.address?.trim() || null,
@@ -279,6 +306,7 @@ export class JarvisTercerosService {
           name,
           entityType: null,
           taxRegime: null,
+          taxResponsibility: DEFAULT_TAX_RESPONSIBILITY,
           email: supplier.email?.trim() || null,
           phone: null,
           address: null,
@@ -394,6 +422,7 @@ export class JarvisTercerosService {
       name: tercero.name,
       entity_type: tercero.entityType,
       tax_regime: tercero.taxRegime,
+      tax_responsibility: tercero.taxResponsibility,
       email: tercero.email,
       phone: tercero.phone,
       address: tercero.address,

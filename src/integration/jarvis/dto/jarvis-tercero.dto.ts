@@ -25,6 +25,13 @@ export class CreateJarvisTerceroRequestDto {
   @ApiPropertyOptional({ enum: JarvisTaxRegime })
   tax_regime?: JarvisTaxRegime;
 
+  @ApiPropertyOptional({
+    example: 'R-99-PN',
+    description:
+      'Código de la tabla maestra de NextPyme type_liabilities. Por defecto R-99-PN (id 117).',
+  })
+  tax_responsibility?: string;
+
   @ApiPropertyOptional({ example: 'contacto@ejemplo.com' })
   email?: string;
 
@@ -56,6 +63,9 @@ export class JarvisTerceroDto {
 
   @ApiPropertyOptional({ enum: JarvisTaxRegime, nullable: true })
   tax_regime: JarvisTaxRegime | null;
+
+  @ApiProperty({ example: 'R-99-PN' })
+  tax_responsibility: string;
 
   @ApiPropertyOptional({ nullable: true })
   email: string | null;
@@ -194,4 +204,20 @@ export class LookupJarvisTerceroNitResponseDto {
 
   @ApiPropertyOptional({ nullable: true })
   stateCode: string | null;
+}
+
+export class JarvisTypeLiabilityDto {
+  @ApiProperty({ example: 117 })
+  id: number;
+
+  @ApiProperty({ example: 'R-99-PN' })
+  code: string;
+
+  @ApiProperty({ example: 'No aplica - Otros' })
+  name: string;
+}
+
+export class ListJarvisTypeLiabilitiesResponseDto {
+  @ApiProperty({ type: [JarvisTypeLiabilityDto] })
+  items: JarvisTypeLiabilityDto[];
 }

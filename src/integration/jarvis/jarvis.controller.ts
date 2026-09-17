@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Param,
+  Patch,
   Post,
   Query,
   UploadedFile,
@@ -45,11 +48,20 @@ import {
   SaveJarvisCredentialsRequestDto,
   SaveJarvisCredentialsResponseDto,
 } from './dto/save-jarvis-credentials.dto';
+import {
+  CreateJarvisTaxRequestDto,
+  CreateJarvisTaxResponseDto,
+  DeleteJarvisTaxResponseDto,
+  JarvisTaxesListResponseDto,
+  UpdateJarvisTaxRequestDto,
+  UpdateJarvisTaxResponseDto,
+} from './dto/jarvis-tax.dto';
 import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
 import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 import { JarvisResolutionParserService } from './jarvis-resolution-parser.service';
 import { JarvisSetupService } from './jarvis-setup.service';
 import { JarvisSupportDocumentSendService } from './jarvis-support-document-send.service';
+import { JarvisTaxesService } from './jarvis-taxes.service';
 import { JarvisTercerosService } from './jarvis-terceros.service';
 
 @ApiTags('integrations/jarvis')
@@ -62,6 +74,7 @@ export class JarvisController {
     private readonly jarvisInvoiceSendService: JarvisInvoiceSendService,
     private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
     private readonly jarvisResolutionParserService: JarvisResolutionParserService,
+    private readonly jarvisTaxesService: JarvisTaxesService,
   ) {}
 
   @Post('credentials')
@@ -306,5 +319,66 @@ export class JarvisController {
       body.documentId,
       getAuthenticatedCompanyId(user),
     );
+  }
+
+  @Get('taxes')
+  @ApiOperation({
+    summary: 'Listar impuestos y retenciones Jarvis',
+    description:
+      'Devuelve el catálogo de impuestos/retenciones de la empresa activa. `category` filtra IMPUESTO/RETENCION (las dos pestañas de la pantalla comparten la misma tabla).',
+  })
+  listTaxes(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('category') category?: string,
+    @Query('search') search?: string,
+    @Query('is_active') isActive?: string,
+  ): Promise<JarvisTaxesListResponseDto> {
+    return this.jarvisTaxesService.list(
+      getAuthenticatedCompanyId(user),
+      category,
+      search,
+      isActive === undefined ? undefined : isActive === 'true',
+    );
+  }
+
+  @Post('taxes')
+  @ApiOperation({
+    summary: 'Crear impuesto o retención Jarvis',
+  })
+  createTax(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: CreateJarvisTaxRequestDto,
+  ): Promise<CreateJarvisTaxResponseDto> {
+    return this.jarvisTaxesService.create(
+      request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Patch('taxes/:id')
+  @ApiOperation({
+    summary: 'Actualizar impuesto o retención Jarvis',
+  })
+  updateTax(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() request: UpdateJarvisTaxRequestDto,
+  ): Promise<UpdateJarvisTaxResponseDto> {
+    return this.jarvisTaxesService.update(
+      id,
+      request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Delete('taxes/:id')
+  @ApiOperation({
+    summary: 'Eliminar impuesto o retención Jarvis',
+  })
+  deleteTax(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<DeleteJarvisTaxResponseDto> {
+    return this.jarvisTaxesService.remove(id, getAuthenticatedCompanyId(user));
   }
 }
