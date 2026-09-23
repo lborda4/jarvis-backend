@@ -37,6 +37,11 @@ function buildService(overrides: {
     resolveSiblingsForSupplier:
       overrides.resolveSiblingsForSupplier ?? jest.fn().mockResolvedValue(undefined),
   };
+  const nextPymeMasterCatalogService = {
+    getTypeLiabilities: jest.fn().mockResolvedValue([]),
+    getMunicipalities: jest.fn().mockResolvedValue([]),
+    getTypeRegimes: jest.fn().mockResolvedValue([]),
+  };
 
   const service = new JarvisTercerosService(
     integrationsRepository as any,
@@ -44,6 +49,7 @@ function buildService(overrides: {
     nextPymeRutService as any,
     electronicDocumentsRepository as any,
     jarvisDocumentPreparationService as any,
+    nextPymeMasterCatalogService as any,
   );
 
   return {

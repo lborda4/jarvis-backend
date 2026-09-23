@@ -116,6 +116,11 @@ export class NextPymeMasterCatalogService {
   }
 
   async getTypeRegimes(): Promise<NextPymeMasterRow[]> {
+    const rows = await this.getTable('type_regime');
+    if (rows.length > 0) {
+      return rows;
+    }
+
     return this.getTable('type_regimes');
   }
 

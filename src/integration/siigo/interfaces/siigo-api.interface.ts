@@ -209,6 +209,9 @@ export interface SiigoTestBalanceReportRequest {
   includes_tax_difference: boolean;
 }
 
+export type SiigoTestBalanceByThirdPartyReportRequest =
+  SiigoTestBalanceReportRequest;
+
 export interface SiigoTestBalanceReportResponse {
   file_id: string;
   file_url: string;

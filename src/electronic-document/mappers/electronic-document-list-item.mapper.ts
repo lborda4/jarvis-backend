@@ -64,6 +64,9 @@ export function mapElectronicDocumentToListItem(
   precomputedRequiresReview?: boolean,
 ): ElectronicDocumentListItemDto {
   const aiConfidence = document.payload?.aiSuggestion?.confidence ?? null;
+  const aiSuggestedItemType =
+    document.payload?.aiSuggestion?.itemType ??
+    (suggestedProduct ? 'Product' : suggestedAccount ? 'Account' : null);
   const requiresReview =
     precomputedRequiresReview ??
     computeElectronicDocumentRequiresReview(
@@ -106,6 +109,7 @@ export function mapElectronicDocumentToListItem(
     draft: document.draft ?? null,
     suggestedAccount,
     suggestedProduct,
+    aiSuggestedItemType,
     suggestedPaymentMethod,
     suggestedRetentions,
     suggestedCostCenter,

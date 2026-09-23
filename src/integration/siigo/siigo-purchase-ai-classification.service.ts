@@ -159,6 +159,33 @@ export class SiigoPurchaseAiClassificationService {
       await this.siigoAiAccountSuggestionService.classifyItemTypeAndAccount(
         documentId,
         companyId,
+        async (itemType) => {
+          // Publica el paso 1 antes de ejecutar la recomendación del código.
+          // El listado se refresca mientras corre el proceso en background,
+          // por lo que puede mostrar Cuenta/Producto sin esperar el paso 2.
+          const documentAfterTypeClassification =
+            await this.electronicDocumentService.requireById(
+              documentId,
+              companyId,
+            );
+          const previousSuggestion =
+            documentAfterTypeClassification.payload.aiSuggestion;
+
+          await this.electronicDocumentService.updatePayload(
+            documentId,
+            {
+              ...documentAfterTypeClassification.payload,
+              aiSuggestion: {
+                itemType,
+                account: null,
+                product: null,
+                retentions: previousSuggestion?.retentions ?? [],
+                confidence: null,
+              },
+            },
+            companyId,
+          );
+        },
       );
 
     console.log(
@@ -189,6 +216,9 @@ export class SiigoPurchaseAiClassificationService {
       {
         ...freshDocument.payload,
         aiSuggestion: {
+          // Se persiste el resultado del paso 1 para que el frontend muestre
+          // de inmediato el selector correcto (Cuenta o Producto).
+          itemType: classification.itemType,
           // Esta clasificación automática solo pide tipo de ítem + código
           // (ver purchase-item-classification-prompt.helper.ts) — a
           // diferencia del botón manual "Sugerir con IA", no incluye

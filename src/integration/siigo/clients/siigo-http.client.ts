@@ -13,6 +13,7 @@ import {
   SIIGO_TAXES_PATH,
   SIIGO_COST_CENTERS_PATH,
   SIIGO_TEST_BALANCE_PATH,
+  SIIGO_TEST_BALANCE_BY_THIRD_PARTY_PATH,
   SIIGO_PRODUCTS_PATH,
 } from '../constants/siigo.constants';
 import { SiigoAuthRequestDto } from '../dto/siigo-auth-request.dto';
@@ -33,6 +34,7 @@ import {
   SiigoSupportDocumentDeleteResponse,
   SiigoSupportDocumentResponse,
   SiigoTax,
+  SiigoTestBalanceByThirdPartyReportRequest,
   SiigoTestBalanceReportRequest,
   SiigoTestBalanceReportResponse,
 } from '../interfaces/siigo-api.interface';
@@ -262,6 +264,19 @@ export class SiigoHttpClient {
     return this.request<SiigoTestBalanceReportResponse>({
       method: 'POST',
       url: `${SIIGO_API_BASE_URL}${SIIGO_TEST_BALANCE_PATH}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+      data: payload,
+    });
+  }
+
+  async createTestBalanceByThirdPartyReport(
+    accessToken: string,
+    payload: SiigoTestBalanceByThirdPartyReportRequest,
+    partnerId?: string,
+  ): Promise<SiigoTestBalanceReportResponse> {
+    return this.request<SiigoTestBalanceReportResponse>({
+      method: 'POST',
+      url: `${SIIGO_API_BASE_URL}${SIIGO_TEST_BALANCE_BY_THIRD_PARTY_PATH}`,
       headers: this.buildAuthHeaders(accessToken, partnerId),
       data: payload,
     });

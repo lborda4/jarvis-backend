@@ -37,6 +37,7 @@ import { SiigoPurchaseHistorySyncService } from './siigo-purchase-history-sync.s
 import { SiigoPurchaseHistoryAutoSyncService } from './siigo-purchase-history-auto-sync.service';
 import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classification.service';
 import { OpenRouterModule } from '../openrouter/openrouter.module';
+import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balance-history.service';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { OpenRouterModule } from '../openrouter/openrouter.module';
     SiigoAccountsImportService,
     SiigoAccountsBalanceSyncService,
     SiigoAiAccountSuggestionService,
+    SiigoThirdPartyBalanceHistoryService,
     SiigoPurchaseHistorySyncService,
     SiigoPurchaseHistoryAutoSyncService,
     SiigoPurchaseAiClassificationService,

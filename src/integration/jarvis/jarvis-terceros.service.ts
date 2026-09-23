@@ -17,7 +17,9 @@ import {
   CreateJarvisTercerosBulkRequestDto,
   JarvisTerceroDto,
   JarvisTercerosListResponseDto,
+  ListJarvisMunicipalitiesResponseDto,
   ListJarvisTypeLiabilitiesResponseDto,
+  ListJarvisTypeRegimesResponseDto,
   ListPendingJarvisSuppliersResponseDto,
   LookupJarvisTerceroNitResponseDto,
   PendingJarvisSupplierDto,
@@ -41,6 +43,22 @@ const VALID_TAX_REGIMES = new Set<string>(Object.values(JarvisTaxRegime));
 /** Valor por defecto de "Tipo de responsabilidad" — código de la tabla
  * maestra de NextPyme type_liabilities, id 117 (pedido explícito). */
 const DEFAULT_TAX_RESPONSIBILITY = 'R-99-PN';
+
+/** Bogotá, D.C. — mismo fallback que NextPymeMasterCatalogService. */
+const DEFAULT_MUNICIPALITY_ID = 149;
+
+/** No Responsable de IVA — id de la tabla maestra type_regime (pedido explícito). */
+const DEFAULT_TYPE_REGIME_ID = 2;
+
+function parseCatalogId(value?: number | string | null): number | null {
+  const parsed =
+    typeof value === 'string' ? Number.parseInt(value, 10) : value;
+  if (!Number.isInteger(parsed) || (parsed ?? 0) <= 0) {
+    return null;
+  }
+
+  return parsed ?? null;
+}
 
 @Injectable()
 export class JarvisTercerosService {
@@ -69,6 +87,41 @@ export class JarvisTercerosService {
     };
   }
 
+  /** Catálogo real de NextPyme (tabla maestra municipalities) para el
+   * desplegable "Municipio" al crear un tercero. */
+  async listMunicipalities(): Promise<ListJarvisMunicipalitiesResponseDto> {
+    const rows = await this.nextPymeMasterCatalogService.getMunicipalities();
+
+    return {
+      items: rows
+        .filter((row) => row.name)
+        .map((row) => ({
+          id: row.id,
+          code: row.code ? String(row.code) : null,
+          name: row.name,
+        }))
+        .sort((left, right) =>
+          left.name.localeCompare(right.name, 'es', { sensitivity: 'base' }),
+        ),
+    };
+  }
+
+  /** Catálogo real de NextPyme (tabla maestra type_regime) para el
+   * desplegable "Tipo de régimen" al crear un tercero. */
+  async listTypeRegimes(): Promise<ListJarvisTypeRegimesResponseDto> {
+    const rows = await this.nextPymeMasterCatalogService.getTypeRegimes();
+
+    return {
+      items: rows
+        .filter((row) => row.name)
+        .map((row) => ({
+          id: row.id,
+          code: row.code ? String(row.code) : null,
+          name: row.name,
+        })),
+    };
+  }
+
   async list(
     companyId: string,
     search?: string,
@@ -80,9 +133,17 @@ export class JarvisTercerosService {
       trimmedCompanyId,
       search,
     );
+    let regimeNames = new Map<number, string>();
+    try {
+      regimeNames = await this.getTypeRegimeNameMap();
+    } catch {
+      regimeNames = new Map();
+    }
 
     return {
-      items: items.map((item) => this.toDto(item)),
+      items: items.map((item) =>
+        this.toDto(item, regimeNames.get(item.typeRegimeId ?? 0) ?? null),
+      ),
       total: items.length,
     };
   }
@@ -125,6 +186,10 @@ export class JarvisTercerosService {
 
     const taxResponsibility =
       request.tax_responsibility?.trim() || DEFAULT_TAX_RESPONSIBILITY;
+    const municipalityId =
+      parseCatalogId(request.municipality_id) ?? DEFAULT_MUNICIPALITY_ID;
+    const typeRegimeId =
+      parseCatalogId(request.type_regime_id) ?? DEFAULT_TYPE_REGIME_ID;
 
     const existing =
       await this.jarvisTercerosRepository.findByCompanyAndDocument(
@@ -153,6 +218,8 @@ export class JarvisTercerosService {
         email: request.email?.trim() || null,
         phone: request.phone?.trim() || null,
         address: request.address?.trim() || null,
+        municipalityId,
+        typeRegimeId,
       }),
     );
 
@@ -310,6 +377,8 @@ export class JarvisTercerosService {
           email: supplier.email?.trim() || null,
           phone: null,
           address: null,
+          municipalityId: DEFAULT_MUNICIPALITY_ID,
+          typeRegimeId: DEFAULT_TYPE_REGIME_ID,
         }),
       );
 
@@ -413,7 +482,19 @@ export class JarvisTercerosService {
     return integration;
   }
 
-  private toDto(tercero: JarvisTercero): JarvisTerceroDto {
+  private async getTypeRegimeNameMap(): Promise<Map<number, string>> {
+    const rows = await this.nextPymeMasterCatalogService.getTypeRegimes();
+    return new Map(
+      rows
+        .filter((row) => row.name)
+        .map((row) => [row.id, row.name] as const),
+    );
+  }
+
+  private toDto(
+    tercero: JarvisTercero,
+    typeRegimeName?: string | null,
+  ): JarvisTerceroDto {
     return {
       id: tercero.id,
       document_type: tercero.documentType,
@@ -426,6 +507,9 @@ export class JarvisTercerosService {
       email: tercero.email,
       phone: tercero.phone,
       address: tercero.address,
+      municipality_id: tercero.municipalityId,
+      type_regime_id: tercero.typeRegimeId,
+      type_regime_name: typeRegimeName ?? null,
       created_at: tercero.createdAt.toISOString(),
       updated_at: tercero.updatedAt.toISOString(),
     };

@@ -404,11 +404,12 @@ export class JarvisSupportDocumentSendService {
               JarvisResolutionKind.SUPPORT_DOCUMENT,
             );
           const municipalityId =
-            await this.nextPymeMasterCatalogService.resolveMunicipalityId(
+            tercero.municipalityId ??
+            (await this.nextPymeMasterCatalogService.resolveMunicipalityId(
               credentials.municipality,
               credentials.city ?? company?.name,
               electronicDocument.payload.supplier.cityCode,
-            );
+            ));
           const liabilityId =
             await this.nextPymeMasterCatalogService.resolveLiabilityId(
               credentials.tax_responsibility ??
@@ -421,9 +422,10 @@ export class JarvisSupportDocumentSendService {
                 ? JarvisVatRegime.RESPONSIBLE
                 : credentials.vat_regime;
           const regimeId =
-            await this.nextPymeMasterCatalogService.resolveRegimeId(
+            tercero.typeRegimeId ??
+            (await this.nextPymeMasterCatalogService.resolveRegimeId(
               terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
-            );
+            ));
 
           this.logger.log(
             `[documentId=${documentId}] Numeración local ${JSON.stringify({

@@ -13,6 +13,8 @@ import type { ElectronicDocumentItem } from './electronic-document-item.interfac
  * encontró una opción segura en el catálogo correspondiente.
  */
 export interface AiSuggestionSnapshot {
+  /** Tipo elegido en el paso 1 de la clasificación automática. */
+  itemType?: 'Account' | 'Product' | null;
   account?: { code: string; name: string } | null;
   product?: { code: string; name: string } | null;
   retentions: SupplierRetentionPreference[];

@@ -50,6 +50,9 @@ export class ElectronicDocumentListItemDto {
    * fallback de historial por proveedor a nivel documento; ese fallback se
    * resuelve por ítem vía `suggestedItemConfig.productCode`. */
   suggestedProduct: SuggestedProduct | null;
+  /** Tipo elegido por la clasificación automática. En snapshots antiguos se
+   * infiere desde suggestedProduct/suggestedAccount. */
+  aiSuggestedItemType: 'Account' | 'Product' | null;
   suggestedPaymentMethod: SupplierPaymentMethodPreference | null;
   suggestedRetentions: SupplierRetentionPreference[];
   suggestedCostCenter: SupplierCostCenterPreference | null;

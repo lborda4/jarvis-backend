@@ -108,6 +108,38 @@ export class HistorialFacturasRepository {
     });
   }
 
+  /**
+   * Reemplaza por completo una fuente auxiliar. Se usa para el balance por
+   * tercero, cuyos registros no tienen un id de factura real y deben
+   * desaparecer tan pronto haya historial de facturas de compra.
+   */
+  async replaceRowsBySource(
+    companyId: string,
+    integrationId: string,
+    fuente: HistorialFacturaFuente,
+    rows: HistorialFactura[],
+  ): Promise<void> {
+    await this.repository.manager.transaction(async (manager) => {
+      await manager.delete(HistorialFactura, {
+        companyId,
+        integrationId,
+        fuente,
+      });
+
+      if (rows.length > 0) {
+        await manager.save(HistorialFactura, rows);
+      }
+    });
+  }
+
+  existsBySource(
+    companyId: string,
+    integrationId: string,
+    fuente: HistorialFacturaFuente,
+  ): Promise<boolean> {
+    return this.repository.existsBy({ companyId, integrationId, fuente });
+  }
+
   findRecentBySupplier(
     companyId: string,
     integrationId: string,

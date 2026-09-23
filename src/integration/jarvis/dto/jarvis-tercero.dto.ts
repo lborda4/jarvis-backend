@@ -40,6 +40,20 @@ export class CreateJarvisTerceroRequestDto {
 
   @ApiPropertyOptional({ example: 'Calle 100 #10-20' })
   address?: string;
+
+  @ApiPropertyOptional({
+    example: 149,
+    description:
+      'Id de la tabla maestra de NextPyme municipalities (ej. 149 Bogotá, D.C.).',
+  })
+  municipality_id?: number;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      'Id de la tabla maestra de NextPyme type_regime. Por defecto 2 (No Responsable de IVA).',
+  })
+  type_regime_id?: number;
 }
 
 export class JarvisTerceroDto {
@@ -75,6 +89,15 @@ export class JarvisTerceroDto {
 
   @ApiPropertyOptional({ nullable: true })
   address: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 149 })
+  municipality_id: number | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 2 })
+  type_regime_id: number | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'No Responsable de IVA' })
+  type_regime_name: string | null;
 
   @ApiProperty()
   created_at: string;
@@ -220,4 +243,36 @@ export class JarvisTypeLiabilityDto {
 export class ListJarvisTypeLiabilitiesResponseDto {
   @ApiProperty({ type: [JarvisTypeLiabilityDto] })
   items: JarvisTypeLiabilityDto[];
+}
+
+export class JarvisMunicipalityDto {
+  @ApiProperty({ example: 149 })
+  id: number;
+
+  @ApiPropertyOptional({ example: '11001', nullable: true })
+  code: string | null;
+
+  @ApiProperty({ example: 'Bogotá, D.C.' })
+  name: string;
+}
+
+export class ListJarvisMunicipalitiesResponseDto {
+  @ApiProperty({ type: [JarvisMunicipalityDto] })
+  items: JarvisMunicipalityDto[];
+}
+
+export class JarvisTypeRegimeDto {
+  @ApiProperty({ example: 2 })
+  id: number;
+
+  @ApiPropertyOptional({ example: '2', nullable: true })
+  code: string | null;
+
+  @ApiProperty({ example: 'No Responsable de IVA' })
+  name: string;
+}
+
+export class ListJarvisTypeRegimesResponseDto {
+  @ApiProperty({ type: [JarvisTypeRegimeDto] })
+  items: JarvisTypeRegimeDto[];
 }

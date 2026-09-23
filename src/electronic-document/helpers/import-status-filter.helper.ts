@@ -50,6 +50,35 @@ export function parseImportStatusFilters(
 /** Mismo criterio que el bracket PENDIENTE de abajo, para usarlo en JS sobre
  * documentos ya traídos (ver needsPurchaseInvoiceReviewNarrowing en el
  * service) — evita duplicar la condición con otro significado. */
+/**
+ * El DISTINCT de findFilterOptions mapea todo lo pendiente-equivalente a
+ * PENDIENTE porque `requiresReview` no es columna. Esta función reparte
+ * esas filas entre PENDIENTE y REQUIERE REVISIÓN según lo que realmente
+ * vería el usuario, para no ofrecer un estado vacío en el filtro.
+ */
+export function refinePendienteReviewFilterStatuses(
+  importStatuses: string[],
+  flags: { hasPendiente: boolean; hasRequiresReview: boolean },
+): string[] {
+  const statuses = importStatuses.filter(
+    (status) =>
+      status !== IMPORT_ROW_STATUS_FILTER.PENDIENTE &&
+      status !== IMPORT_ROW_STATUS_FILTER.REQUIERE_REVISION,
+  );
+
+  if (flags.hasPendiente) {
+    statuses.push(IMPORT_ROW_STATUS_FILTER.PENDIENTE);
+  }
+
+  if (flags.hasRequiresReview) {
+    statuses.push(IMPORT_ROW_STATUS_FILTER.REQUIERE_REVISION);
+  }
+
+  return statuses.sort((left, right) =>
+    left.localeCompare(right, 'es', { sensitivity: 'base' }),
+  );
+}
+
 export function isPendienteEquivalentDocument(document: {
   status: string;
   supplierExistsInSiigo: boolean | null;

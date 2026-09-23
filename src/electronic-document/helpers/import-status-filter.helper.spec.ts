@@ -3,6 +3,7 @@ import {
   IMPORT_ROW_STATUS_FILTER,
   isPendienteEquivalentDocument,
   parseImportStatusFilters,
+  refinePendienteReviewFilterStatuses,
 } from './import-status-filter.helper';
 
 describe('parseImportStatusFilters', () => {
@@ -34,6 +35,26 @@ describe('parseImportStatusFilters', () => {
  * esta función dice que no, o viceversa, el recorte fino en JS quedaría mal
  * (documentos "Pendiente" que no aparecen, o de otro estado que sí).
  */
+describe('refinePendienteReviewFilterStatuses', () => {
+  it('quita Pendiente si ninguna factura de la empresa está lista para enviar', () => {
+    expect(
+      refinePendienteReviewFilterStatuses(
+        ['ERROR', 'PENDIENTE', 'LISTA'],
+        { hasPendiente: false, hasRequiresReview: true },
+      ),
+    ).toEqual(['ERROR', 'LISTA', 'REQUIERE REVISIÓN']);
+  });
+
+  it('deja Pendiente cuando sí hay registros sin revisión pendiente', () => {
+    expect(
+      refinePendienteReviewFilterStatuses(
+        ['PENDIENTE', 'LISTA'],
+        { hasPendiente: true, hasRequiresReview: false },
+      ),
+    ).toEqual(['LISTA', 'PENDIENTE']);
+  });
+});
+
 describe('isPendienteEquivalentDocument', () => {
   it('true para un documento con proveedor confirmado y estado activo', () => {
     expect(

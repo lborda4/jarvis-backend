@@ -293,6 +293,9 @@ export class SiigoAiAccountSuggestionService {
   async classifyItemTypeAndAccount(
     documentId: string,
     companyId: string,
+    onItemTypeResolved?: (
+      itemType: 'Account' | 'Product',
+    ) => Promise<void> | void,
   ): Promise<ItemTypeAndAccountClassification> {
     if (!this.openRouterHttpClient.isConfigured()) {
       console.log(
@@ -383,6 +386,8 @@ export class SiigoAiAccountSuggestionService {
       supplierName,
       promptItems,
     });
+
+    await onItemTypeResolved?.(itemType);
 
     if (itemType === 'Product') {
       const productsForPrompt = selectProductsForClassificationPrompt(

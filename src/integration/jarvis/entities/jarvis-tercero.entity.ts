@@ -81,6 +81,23 @@ export class JarvisTercero {
   @Column({ type: 'varchar', length: 255, nullable: true })
   address: string | null;
 
+  /** Id de la tabla maestra de NextPyme `municipalities` (ej. 149 Bogotá). */
+  @Column({
+    name: 'municipality_id',
+    type: 'int',
+    nullable: true,
+  })
+  municipalityId: number | null;
+
+  /** Id de la tabla maestra de NextPyme `type_regime` (ej. 2 = No
+   * Responsable de IVA), pedido explícito como valor por defecto. */
+  @Column({
+    name: 'type_regime_id',
+    type: 'int',
+    nullable: true,
+  })
+  typeRegimeId: number | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

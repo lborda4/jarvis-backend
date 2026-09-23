@@ -38,6 +38,7 @@ import { SiigoPaymentTypeCatalogItemDto } from './dto/list-siigo-payment-types.d
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { HistorialFacturaTaxDetail } from '../interfaces/historial-factura-impuestos.interface';
 import { SupplierFieldVariability } from '../interfaces/supplier-field-variability.interface';
+import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balance-history.service';
 
 const SYNC_PAGE_SIZE = 100;
 /** Tope de seguridad: nunca deberíamos acercarnos a esto con page_size=100. */
@@ -116,6 +117,7 @@ export class SiigoPurchaseHistorySyncService {
     private readonly historialFacturasRepository: HistorialFacturasRepository,
     private readonly siigoPurchaseSyncJobsRepository: SiigoPurchaseSyncJobsRepository,
     private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
+    private readonly siigoThirdPartyBalanceHistoryService: SiigoThirdPartyBalanceHistoryService,
   ) {}
 
   /**
@@ -232,6 +234,28 @@ export class SiigoPurchaseHistorySyncService {
         );
       }
 
+      let balanceReferenceCount = 0;
+      const hasPurchaseHistory =
+        syncedCount > 0 ||
+        (await this.historialFacturasRepository.existsBySource(
+          companyId,
+          integrationId,
+          HistorialFacturaFuente.SIIGO_ORIGINAL,
+        ));
+
+      if (!hasPurchaseHistory) {
+        balanceReferenceCount =
+          await this.siigoThirdPartyBalanceHistoryService.replaceHistory(
+            companyId,
+            integrationId,
+          );
+      } else {
+        await this.siigoThirdPartyBalanceHistoryService.clearHistory(
+          companyId,
+          integrationId,
+        );
+      }
+
       await this.recomputeSupplierSummaries(companyId, integrationId);
       // syncedCount se repite acá (además de las actualizaciones intermedias)
       // porque esas pueden pisarse entre sí si dos páginas terminan casi a
@@ -244,7 +268,7 @@ export class SiigoPurchaseHistorySyncService {
       });
 
       this.logger.log(
-        `[companyId=${companyId}] Sync de historial de compras completado (${syncedCount} facturas en los últimos ${SYNC_HISTORY_YEARS} años, ${totalPages} página(s)).`,
+        `[companyId=${companyId}] Sync de historial de compras completado (${syncedCount} facturas en los últimos ${SYNC_HISTORY_YEARS} años, ${totalPages} página(s), ${balanceReferenceCount} referencia(s) del fallback por tercero).`,
       );
     } catch (error) {
       this.logger.error(

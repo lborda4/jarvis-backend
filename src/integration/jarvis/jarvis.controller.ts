@@ -33,6 +33,9 @@ import {
   CreateJarvisTerceroRequestDto,
   CreateJarvisTerceroResponseDto,
   JarvisTercerosListResponseDto,
+  ListJarvisMunicipalitiesResponseDto,
+  ListJarvisTypeLiabilitiesResponseDto,
+  ListJarvisTypeRegimesResponseDto,
   ListPendingJarvisSuppliersResponseDto,
   LookupJarvisTerceroNitRequestDto,
   LookupJarvisTerceroNitResponseDto,
@@ -176,6 +179,36 @@ export class JarvisController {
       getAuthenticatedCompanyId(user),
       search,
     );
+  }
+
+  @Get('terceros/type-liabilities')
+  @ApiOperation({
+    summary: 'Listar tipos de responsabilidad (NextPyme)',
+    description:
+      'Devuelve la tabla maestra type_liabilities de NextPyme para el desplegable al crear un tercero. El valor por defecto es R-99-PN (id 117).',
+  })
+  listTerceroTypeLiabilities(): Promise<ListJarvisTypeLiabilitiesResponseDto> {
+    return this.jarvisTercerosService.listTypeLiabilities();
+  }
+
+  @Get('terceros/municipalities')
+  @ApiOperation({
+    summary: 'Listar municipios (NextPyme)',
+    description:
+      'Devuelve la tabla maestra municipalities de NextPyme para el desplegable al crear un tercero.',
+  })
+  listTerceroMunicipalities(): Promise<ListJarvisMunicipalitiesResponseDto> {
+    return this.jarvisTercerosService.listMunicipalities();
+  }
+
+  @Get('terceros/type-regimes')
+  @ApiOperation({
+    summary: 'Listar tipos de régimen (NextPyme)',
+    description:
+      'Devuelve la tabla maestra type_regime de NextPyme para el desplegable al crear un tercero. El valor por defecto es id 2 (No Responsable de IVA).',
+  })
+  listTerceroTypeRegimes(): Promise<ListJarvisTypeRegimesResponseDto> {
+    return this.jarvisTercerosService.listTypeRegimes();
   }
 
   @Post('terceros/lookup-nit')

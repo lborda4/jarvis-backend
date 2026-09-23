@@ -76,6 +76,7 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     const [, payload] = electronicDocumentService.updatePayload.mock
       .calls[0] as [string, { aiSuggestion: unknown }, string];
     expect(payload.aiSuggestion).toEqual({
+      itemType: 'Account',
       account: null,
       product: null,
       retentions: [],
@@ -100,10 +101,39 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     const [, payload] = electronicDocumentService.updatePayload.mock
       .calls[0] as [string, { aiSuggestion: unknown }, string];
     expect(payload.aiSuggestion).toEqual({
+      itemType: 'Account',
       account: { code: '5135', name: 'Gastos diversos' },
       product: null,
       retentions: [],
       confidence: 65,
+    });
+  });
+
+  it('guarda Product y su código para que el frontend muestre el selector de producto', async () => {
+    const { service, electronicDocumentService } = buildService({
+      classification: {
+        itemType: 'Product',
+        accountCode: null,
+        accountName: null,
+        productCode: 'BOTATITAN235209042',
+        productName: 'Bota Titán',
+        confidence: 30,
+      },
+    });
+
+    await service.classifyDocuments(['doc-1'], 'company-1');
+
+    const [, payload] = electronicDocumentService.updatePayload.mock
+      .calls[0] as [string, { aiSuggestion: unknown }, string];
+    expect(payload.aiSuggestion).toEqual({
+      itemType: 'Product',
+      account: null,
+      product: {
+        code: 'BOTATITAN235209042',
+        name: 'Bota Titán',
+      },
+      retentions: [],
+      confidence: 30,
     });
   });
 });

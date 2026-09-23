@@ -50,9 +50,12 @@ export class JarvisTercerosRepository {
       | 'name'
       | 'entityType'
       | 'taxRegime'
+      | 'taxResponsibility'
       | 'email'
       | 'phone'
       | 'address'
+      | 'municipalityId'
+      | 'typeRegimeId'
     >,
   ): JarvisTercero {
     return this.repository.create(data);

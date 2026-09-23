@@ -102,6 +102,7 @@ import {
   IMPORT_ROW_STATUS_FILTER,
   isPendienteEquivalentDocument,
   parseImportStatusFilters,
+  refinePendienteReviewFilterStatuses,
 } from './helpers/import-status-filter.helper';
 import { resolveSendConfigurationFromPayload } from './helpers/electronic-document-send-configuration.helper';
 import { ElectronicDocumentsRepository } from './repositories/electronic-documents.repository';
@@ -615,37 +616,37 @@ export class ElectronicDocumentService {
             provider,
           );
 
-          const documents = groups.map((group) => {
-            const payload = mapGroupedSupportDocumentToPayload(group);
+    const documents = groups.map((group) => {
+      const payload = mapGroupedSupportDocumentToPayload(group);
             const supplierNit = normalizeSupplierNit(
               payload.supplier.documentNumber,
             );
-            const supplierName = resolveImportedSupplierName(
-              supplierNit,
-              group.supplierName,
-              supplierNamesByNit,
-            );
+      const supplierName = resolveImportedSupplierName(
+        supplierNit,
+        group.supplierName,
+        supplierNamesByNit,
+      );
             const terceroKnown =
               provider === IntegrationProvider.JARVIS &&
               Boolean(supplierNamesByNit.get(supplierNit)?.trim());
 
-            payload.supplier.name = supplierName;
-            payload.supplier.commercialName = supplierName;
+      payload.supplier.name = supplierName;
+      payload.supplier.commercialName = supplierName;
 
-            return this.electronicDocumentsRepository.create({
-              companyId: company.id,
-              cufe: payload.invoice.cufe || null,
-              documentNumberThird:
-                this.normalizeDocument(payload.supplier.documentNumber) || null,
-              documentTypeThird: payload.supplier.documentType,
-              electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      return this.electronicDocumentsRepository.create({
+        companyId: company.id,
+        cufe: payload.invoice.cufe || null,
+        documentNumberThird:
+          this.normalizeDocument(payload.supplier.documentNumber) || null,
+        documentTypeThird: payload.supplier.documentType,
+        electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
               status: terceroKnown
                 ? ElectronicDocumentStatus.ACCOUNT_MAPPED
                 : ElectronicDocumentStatus.PENDING,
               supplierExistsInSiigo: terceroKnown ? true : null,
-              payload,
-            });
-          });
+        payload,
+      });
+    });
 
           const savedDocuments = await this.dataSource.transaction(
             async (manager) => manager.save(ElectronicDocument, documents),
@@ -1267,9 +1268,9 @@ export class ElectronicDocumentService {
     } else {
       const result = await this.electronicDocumentsRepository.findAll({
         ...baseFilters,
-        page,
-        limit,
-      });
+      page,
+      limit,
+    });
       items = result.items;
       total = result.total;
       supplierPreferences = await this.buildSupplierPreferencesLookup(items);
@@ -1313,10 +1314,98 @@ export class ElectronicDocumentService {
       electronicDocumentType,
     );
 
-    return this.electronicDocumentsRepository.findFilterOptions(
+    const options = await this.electronicDocumentsRepository.findFilterOptions(
       companyId,
       parsedType,
     );
+
+    return this.refinePurchaseInvoiceFilterStatuses(
+      companyId,
+      parsedType,
+      options,
+    );
+  }
+
+  /**
+   * findFilterOptions mapea SQL a PENDIENTE todo lo pendiente-equivalente.
+   * En Factura de compra SIIGO esas filas se muestran como Pendiente o
+   * Requiere revisión. Si ninguna de la empresa está lista para enviar,
+   * Pendiente no debe aparecer en el desplegable.
+   */
+  private async refinePurchaseInvoiceFilterStatuses(
+    companyId: string,
+    electronicDocumentType: ElectronicDocumentType | undefined,
+    options: ElectronicDocumentFilterOptionsDto,
+  ): Promise<ElectronicDocumentFilterOptionsDto> {
+    if (
+      electronicDocumentType !== ElectronicDocumentType.PURCHASE_INVOICE ||
+      !options.importStatuses.includes(IMPORT_ROW_STATUS_FILTER.PENDIENTE)
+    ) {
+      return options;
+    }
+
+    const isSiigoCompany =
+      (await this.resolveDocumentProvider(companyId)) ===
+      IntegrationProvider.SIIGO;
+
+    if (!isSiigoCompany) {
+      return options;
+    }
+
+    const candidates = await this.electronicDocumentsRepository.findAll({
+      companyId,
+      electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE,
+      importStatuses: [IMPORT_ROW_STATUS_FILTER.PENDIENTE],
+      page: 1,
+      limit: PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT,
+    });
+
+    if (candidates.total > PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT) {
+      this.logger.warn(
+        `[companyId=${companyId}] Opciones de filtro Pendiente/Requiere revisión: ${candidates.total} candidatos supera el límite de ${PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT} — se evalúan los primeros.`,
+      );
+    }
+
+    const supplierPreferences = await this.buildSupplierPreferencesLookup(
+      candidates.items,
+    );
+
+    let hasPendiente = false;
+    let hasRequiresReview = false;
+
+    for (const document of candidates.items) {
+      if (!isPendienteEquivalentDocument(document)) {
+        continue;
+      }
+
+      const documentRequiresReview = computeElectronicDocumentRequiresReview(
+        document,
+        isSiigoCompany,
+        supplierPreferences.accounts.get(document.id) ?? null,
+        supplierPreferences.products.get(document.id) ?? null,
+        supplierPreferences.itemConfigs.get(document.id) ?? null,
+        supplierPreferences.itemAccounts.get(document.id) ?? [],
+        document.payload?.aiSuggestion?.confidence ?? null,
+      );
+
+      if (documentRequiresReview) {
+        hasRequiresReview = true;
+      } else {
+        hasPendiente = true;
+      }
+
+      if (hasPendiente && hasRequiresReview) {
+        break;
+      }
+    }
+
+    return {
+      ...options,
+      importStatuses: refinePendienteReviewFilterStatuses(
+        options.importStatuses,
+        { hasPendiente, hasRequiresReview },
+      ),
+    };
   }
 
   private async buildSupplierPreferencesLookup(
@@ -1392,23 +1481,23 @@ export class ElectronicDocumentService {
           continue;
         }
 
-        const integration = await getSiigoIntegration(
-          this.integrationsRepository,
+      const integration = await getSiigoIntegration(
+        this.integrationsRepository,
+        companyId,
+      );
+      integrationIdByCompanyId.set(companyId, integration.id);
+
+      const configurations =
+        await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
           companyId,
+          integration.id,
         );
-        integrationIdByCompanyId.set(companyId, integration.id);
 
-        const configurations =
-          await this.supplierConfigurationsRepository.findByCompanyAndIntegration(
-            companyId,
-            integration.id,
-          );
-
-        for (const [key, configuration] of indexSupplierConfigurations(
-          configurations,
-        )) {
-          configurationIndex.set(key, configuration);
-        }
+      for (const [key, configuration] of indexSupplierConfigurations(
+        configurations,
+      )) {
+        configurationIndex.set(key, configuration);
+      }
 
         const itemAccountMappings =
           await this.supplierItemAccountMappingsRepository.findByCompanyAndIntegration(
@@ -1601,7 +1690,7 @@ export class ElectronicDocumentService {
           configurationIndex,
           itemMappingIndex,
           integrationId,
-        );
+      );
       accounts.set(
         document.id,
         suggestedAccount && accountNameByCode
@@ -1617,10 +1706,10 @@ export class ElectronicDocumentService {
       );
 
       const suggestedItemAccounts = resolveSuggestedAccountsForDocumentItems(
-        document,
-        configurationIndex,
+          document,
+          configurationIndex,
         itemMappingIndex,
-        integrationId,
+          integrationId,
       );
       itemAccounts.set(
         document.id,
@@ -1724,11 +1813,11 @@ export class ElectronicDocumentService {
       costCenters.set(
         document.id,
         costCenterFromExcel ??
-          resolveSuggestedCostCenterForDocument(
-            document,
-            configurationIndex,
-            integrationId,
-          ),
+        resolveSuggestedCostCenterForDocument(
+          document,
+          configurationIndex,
+          integrationId,
+        ),
       );
       const suggestedItemConfig =
         historialSnapshot?.itemConfig ??

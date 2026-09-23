@@ -177,15 +177,12 @@ export class JarvisInvoiceSendService {
               JarvisResolutionKind.ELECTRONIC_INVOICE,
             );
 
-          // Igual que en Documento Soporte: sin dato de ciudad propio del
-          // cliente (JarvisTercero no lo guarda hoy), se resuelve con los
-          // mismos datos de la empresa emisora — mismo fallback ya aceptado
-          // ahí, ver JarvisSupportDocumentSendService.sendSupportDocument.
           const municipalityId =
-            await this.nextPymeMasterCatalogService.resolveMunicipalityId(
+            tercero.municipalityId ??
+            (await this.nextPymeMasterCatalogService.resolveMunicipalityId(
               credentials.municipality,
               credentials.city ?? company?.name,
-            );
+            ));
           const liabilityId =
             await this.nextPymeMasterCatalogService.resolveLiabilityId(
               credentials.tax_responsibility ??
@@ -198,9 +195,10 @@ export class JarvisInvoiceSendService {
                 ? JarvisVatRegime.RESPONSIBLE
                 : credentials.vat_regime;
           const regimeId =
-            await this.nextPymeMasterCatalogService.resolveRegimeId(
+            tercero.typeRegimeId ??
+            (await this.nextPymeMasterCatalogService.resolveRegimeId(
               terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
-            );
+            ));
           const currencyId =
             await this.nextPymeMasterCatalogService.resolveCurrencyId(currency);
 
