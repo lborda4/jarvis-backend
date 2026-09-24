@@ -45,7 +45,6 @@ export class PlanSubscriptionService {
     @InjectRepository(ElectronicDocument)
     private readonly electronicDocumentsRepository: Repository<ElectronicDocument>,
   ) {}
-
   async getSubscription(
     companyId: string,
     provider: IntegrationProvider,
