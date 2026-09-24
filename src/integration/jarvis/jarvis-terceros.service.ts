@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { normalizeSupportDocumentType } from '../../invoices/helpers/support-document-type.helper';
 import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
+import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { ElectronicDocumentsRepository } from '../../electronic-document/repositories/electronic-documents.repository';
 import { normalizeJarvisDocumentNumber } from './helpers/jarvis-document-number.helper';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
@@ -69,6 +70,7 @@ export class JarvisTercerosService {
     private readonly electronicDocumentsRepository: ElectronicDocumentsRepository,
     private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
     private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
+    private readonly companiesRepository: CompaniesRepository,
   ) {}
 
   /** Catálogo real de NextPyme (tabla maestra type_liabilities) para el
@@ -433,8 +435,13 @@ export class JarvisTercerosService {
   }
 
   /**
-   * Prefer company Jarvis `token_nextpyme` when configured.
-   * Otherwise NextPymeRutService falls back to NEXTPYME_API_TOKEN.
+   * Token de NextPyme de la empresa: primero el de las credenciales Jarvis
+   * (`token_nextpyme`) y, si la empresa no tiene integración Jarvis, el de
+   * `companies.next_pyme_token` — este lookup también lo usa el modal de
+   * crear tercero de las empresas SIIGO (ver CreateJarvisTerceroModal con
+   * provider SIIGO), que es el mismo token con el que la creación masiva
+   * consulta los proveedores pendientes. Si no hay ninguno,
+   * NextPymeRutService cae al NEXTPYME_API_TOKEN global.
    */
   private async resolveCompanyNextPymeToken(
     companyId: string,
@@ -445,13 +452,16 @@ export class JarvisTercerosService {
         IntegrationProvider.JARVIS,
       );
 
-    if (!integration?.credentials) {
-      return undefined;
+    if (integration?.credentials) {
+      const credentials = normalizeJarvisCredentials(integration.credentials);
+      const jarvisToken = credentials.token_nextpyme?.trim();
+      if (jarvisToken) {
+        return jarvisToken;
+      }
     }
 
-    const credentials = normalizeJarvisCredentials(integration.credentials);
-    const token = credentials.token_nextpyme?.trim();
-    return token || undefined;
+    const company = await this.companiesRepository.findById(companyId);
+    return company?.nextPymeToken?.trim() || undefined;
   }
 
   private requireCompanyId(companyId: string): string {

@@ -144,15 +144,25 @@ export interface AccountCodeClassificationPromptParams {
   historicalExamples?: PurchaseItemClassificationHistoricalExample[];
 }
 
-const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegís la cuenta PUC (gasto/costo) que le corresponde a UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems, ya se determinó que el conjunto se contabiliza como Cuenta, no como Producto).
+const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA sola cuenta PUC de gasto/costo para la factura completa.
 
-Tu respuesta es UN SOLO código para la factura completa, nunca uno por ítem — no existe un campo para eso. Si hay varios ítems, elegí la cuenta que mejor represente el conjunto (normalmente comparten el mismo concepto de gasto); no dejes de responder ni expliques la duda, solo elegí la mejor opción única.
+REGLAS DE PRIORIDAD:
 
-Reglas: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. Las cuentas PUC son categorías amplias de gasto/costo (ej. "Alimentos y bebidas", "Comercio al por mayor y al por menor", "Servicios"), no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto para la empresa que compra, aunque el nombre no coincida palabra por palabra (ej. "Servicio de mantenimiento preventivo de aire acondicionado" → una cuenta de "Mantenimiento y reparaciones", aunque "aire acondicionado" no aparezca en su nombre). SIEMPRE tenés que elegir una cuenta — dejar accountCode null solo es válido si genuinamente NINGUNA categoría del catálogo aplica, algo que casi nunca debería pasar. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada.
+1. Si existe un ejemplo previo del MISMO proveedor con un concepto igual o claramente equivalente, usá esa cuenta.
+2. Si no existe, clasificá según el concepto REALMENTE indicado en los ítems.
+3. No inventes ni completes significados que no estén respaldados por el texto. Una sigla, código o referencia desconocida no debe interpretarse como "leasing", "cuota", "equipo", "red", etc.
+4. El nombre del proveedor puede dar contexto, pero NO determina por sí solo la cuenta.
+5. Usá únicamente códigos que aparezcan literalmente en el catálogo.
+6. Elegí siempre la categoría de gasto/costo más adecuada disponible, aunque el nombre de la cuenta no coincida literalmente con el texto.
+7. Si la descripción es ambigua, elegí la opción con mayor respaldo objetivo y reducí la confianza. No inventes detalles para aumentar la confianza, pero siempre da una sugerencia.
 
-confidence: entero de 0 a 100, qué tan segura estás de la elección. 90-100 = hay un ejemplo previo de este proveedor con la misma descripción o casi idéntica. 60-89 = coincide bien por tipo de gasto pero sin ejemplo previo exacto. Por debajo de 50 = es una decisión forzada, sin señal fuerte. Sé honesta: es más útil reportar baja confianza en una elección dudosa que inflarla.
+IMPORTANTE:
+No expliques el razonamiento, no describas alternativas y no inventes información.
 
-Responde SOLO este JSON, sin texto extra: {"accountCode":string|null,"confidence":number}`;
+confidence debe ser un entero de 0 a 100.
+
+Respondé SOLO este JSON:
+{"accountCode":string|null,"confidence":number}`;
 
 export function buildAccountCodeClassificationPrompt(
   params: AccountCodeClassificationPromptParams,

@@ -33,7 +33,7 @@ export function computeElectronicDocumentRequiresReview(
     isSiigoCompany &&
     document.electronicDocumentType === ElectronicDocumentType.PURCHASE_INVOICE &&
     resolvePurchaseInvoiceRequiresReview({
-      draft: document.draft ?? null,
+      draft: document.draft ?? document.payload?.accounting ?? null,
       payloadItems: document.payload?.items ?? [],
       suggestedAccount,
       suggestedProduct,
@@ -106,7 +106,7 @@ export function mapElectronicDocumentToListItem(
     siigoDocumentNumber: document.siigoDocumentNumber,
     supplierExistsInSiigo: document.supplierExistsInSiigo,
     alreadyInSiigo: document.alreadyInSiigo,
-    draft: document.draft ?? null,
+    draft: document.draft ?? document.payload?.accounting ?? null,
     suggestedAccount,
     suggestedProduct,
     aiSuggestedItemType,

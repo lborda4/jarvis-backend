@@ -399,7 +399,7 @@ export class ElectronicDocumentService {
 
     const savedAt = new Date().toISOString();
 
-    document.draft = {
+    const draft = {
       items: request.items,
       accountCode: request.accountCode ?? null,
       paymentMethodId: request.paymentMethodId ?? null,
@@ -408,6 +408,17 @@ export class ElectronicDocumentService {
       retentionTaxIds: request.retentionTaxIds,
       documentDiscount: request.documentDiscount ?? null,
       savedAt,
+    };
+
+    document.draft = draft;
+    document.payload = {
+      ...document.payload,
+      observations: request.observations ?? document.payload.observations,
+      invoice: {
+        ...document.payload.invoice,
+        ...(request.dueDate ? { dueDate: request.dueDate } : {}),
+      },
+      accounting: draft,
     };
 
     await this.electronicDocumentsRepository.save(document);

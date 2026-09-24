@@ -9,11 +9,13 @@ function buildService(overrides: {
   create?: jest.Mock;
   prepareDocumentsInBackground?: jest.Mock;
   resolveSiblingsForSupplier?: jest.Mock;
+  findByCompanyAndProvider?: jest.Mock;
+  findCompanyById?: jest.Mock;
 }) {
   const integrationsRepository = {
-    findByCompanyAndProvider: jest
-      .fn()
-      .mockResolvedValue({ id: 'integration-1', credentials: null }),
+    findByCompanyAndProvider:
+      overrides.findByCompanyAndProvider ??
+      jest.fn().mockResolvedValue({ id: 'integration-1', credentials: null }),
   };
   const jarvisTercerosRepository = {
     findByCompanyAndDocument:
@@ -42,6 +44,11 @@ function buildService(overrides: {
     getMunicipalities: jest.fn().mockResolvedValue([]),
     getTypeRegimes: jest.fn().mockResolvedValue([]),
   };
+  const companiesRepository = {
+    findById:
+      overrides.findCompanyById ??
+      jest.fn().mockResolvedValue({ nextPymeToken: null }),
+  };
 
   const service = new JarvisTercerosService(
     integrationsRepository as any,
@@ -50,6 +57,7 @@ function buildService(overrides: {
     electronicDocumentsRepository as any,
     jarvisDocumentPreparationService as any,
     nextPymeMasterCatalogService as any,
+    companiesRepository as any,
   );
 
   return {
@@ -59,6 +67,7 @@ function buildService(overrides: {
     nextPymeRutService,
     electronicDocumentsRepository,
     jarvisDocumentPreparationService,
+    companiesRepository,
   };
 }
 
@@ -324,5 +333,71 @@ describe('JarvisTercerosService.createBulk', () => {
     expect(
       jarvisDocumentPreparationService.prepareDocumentsInBackground,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('JarvisTercerosService.lookupNit', () => {
+  it('usa el token de las credenciales Jarvis cuando la empresa las tiene', async () => {
+    const lookupDocument = jest
+      .fn()
+      .mockResolvedValue({ found: true, document_number: '900123456' });
+    const { service } = buildService({
+      lookupDocument,
+      findByCompanyAndProvider: jest.fn().mockResolvedValue({
+        id: 'integration-1',
+        credentials: { token_nextpyme: 'token-jarvis' },
+      }),
+      findCompanyById: jest
+        .fn()
+        .mockResolvedValue({ nextPymeToken: 'token-empresa' }),
+    });
+
+    await service.lookupNit('company-1', JarvisDocumentType.NIT, '900123456');
+
+    expect(lookupDocument).toHaveBeenCalledWith(
+      JarvisDocumentType.NIT,
+      '900123456',
+      'token-jarvis',
+    );
+  });
+
+  it('cae al token de la empresa cuando no hay integración Jarvis — modal de crear tercero de empresas SIIGO', async () => {
+    const lookupDocument = jest
+      .fn()
+      .mockResolvedValue({ found: true, document_number: '900123456' });
+    const { service } = buildService({
+      lookupDocument,
+      findByCompanyAndProvider: jest.fn().mockResolvedValue(null),
+      findCompanyById: jest
+        .fn()
+        .mockResolvedValue({ nextPymeToken: 'token-empresa' }),
+    });
+
+    await service.lookupNit('company-1', JarvisDocumentType.NIT, '900123456');
+
+    expect(lookupDocument).toHaveBeenCalledWith(
+      JarvisDocumentType.NIT,
+      '900123456',
+      'token-empresa',
+    );
+  });
+
+  it('no manda token si la empresa no tiene ninguno configurado — el cliente cae al token global', async () => {
+    const lookupDocument = jest
+      .fn()
+      .mockResolvedValue({ found: false, document_number: '900123456' });
+    const { service } = buildService({
+      lookupDocument,
+      findByCompanyAndProvider: jest.fn().mockResolvedValue(null),
+      findCompanyById: jest.fn().mockResolvedValue({ nextPymeToken: null }),
+    });
+
+    await service.lookupNit('company-1', JarvisDocumentType.NIT, '900123456');
+
+    expect(lookupDocument).toHaveBeenCalledWith(
+      JarvisDocumentType.NIT,
+      '900123456',
+      undefined,
+    );
   });
 });

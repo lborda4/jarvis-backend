@@ -1,6 +1,7 @@
 import type { DianInvoiceTotals } from '../../dian/interfaces/dian-invoice-result.interface';
 import type { SupplierPreferenceSnapshot } from '../../integration/interfaces/supplier-preference.interface';
 import type { SupplierRetentionPreference } from '../../integration/interfaces/supplier-mapping-value.interface';
+import type { ElectronicDocumentDraft } from './electronic-document-draft.interface';
 import type { ElectronicDocumentItem } from './electronic-document-item.interface';
 
 /**
@@ -101,4 +102,11 @@ export interface ElectronicDocumentPayload {
    * fallback (después de historial confirmado, IA y preferencia guardada)
    * cuando ninguno de esos resolvió nada: ver resolveSuggestedRetentionsForDocument. */
   withholdings?: ElectronicDocumentWithholding[];
+  /**
+   * Copia de lo último que el contador guardó (cuenta, medio de pago, ítems,
+   * plazo). Vive también en electronic_documents.draft; se replica acá
+   * para que el payload refleje los ajustes al inspeccionar la fila y como
+   * respaldo si el listado lee el payload y no la columna draft.
+   */
+  accounting?: ElectronicDocumentDraft | null;
 }

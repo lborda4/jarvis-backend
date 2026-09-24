@@ -93,6 +93,28 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     expect(messages[0].content).not.toContain('itemType');
   });
 
+  it('prioriza ejemplos equivalentes y prohíbe inferir significados no respaldados', () => {
+    const messages = buildAccountCodeClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      ourCompanyName: 'Nosotros',
+      items: [{ descripcion: 'REF ABC-123' }],
+      accounts: [{ code: '51959501', name: 'Diversos' }],
+    });
+
+    expect(messages[0].content).toContain(
+      'ejemplo previo del MISMO proveedor',
+    );
+    expect(messages[0].content).toContain(
+      'No inventes ni completes significados',
+    );
+    expect(messages[0].content).toContain(
+      'siempre da una sugerencia',
+    );
+    expect(messages[0].content).toContain(
+      '{"accountCode":string|null,"confidence":number}',
+    );
+  });
+
   it('incluye los ejemplos históricos cuando se proveen', () => {
     const messages = buildAccountCodeClassificationPrompt({
       supplierName: 'Proveedor S.A.S',
