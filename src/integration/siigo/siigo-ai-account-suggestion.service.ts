@@ -10,11 +10,10 @@ import { SiigoAccountsRepository } from '../repositories/siigo-accounts.reposito
 import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
 import { OpenRouterHttpClient } from '../openrouter/clients/openrouter-http.client';
 import {
-  buildAccountNameByCode,
   isAllowedAccountCode,
-  resolveAccountNameFromCatalog,
   resolveRequiredAccountFromCatalog,
 } from '../helpers/supplier-accounts-catalog.helper';
+import { applyItemClassificationToPayload } from '../../electronic-document/helpers/electronic-document-account-mapping.helper';
 import { resolveSuggestedItemConfigFromConfiguration } from '../helpers/supplier-preference.helper';
 import {
   buildPurchaseClassificationPrompt,
@@ -30,6 +29,11 @@ import {
   parseProductCodeClassificationResponse,
   type PurchaseItemClassificationPromptItem,
 } from './helpers/purchase-item-classification-prompt.helper';
+import { resolveAccountSuggestionConfidence } from './helpers/account-suggestion-confidence.helper';
+import {
+  HISTORICAL_EXAMPLE_INVOICE_LIMIT,
+  selectHistoricalExamplesForPrompt,
+} from './helpers/select-historical-examples.helper';
 import { SuggestPurchaseItemClassificationResponseDto } from './dto/suggest-purchase-item-classification.dto';
 import {
   getSiigoIntegration,
@@ -40,9 +44,6 @@ import { SiigoProductsCatalogService } from './siigo-products-catalog.service';
 import { SiigoProductCatalogItemDto } from './dto/list-siigo-products.dto';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 
-// Pocos ejemplos a propósito — no todo el historial: cada uno se manda en
-// cada llamada a la IA y suma tokens (y costo) por documento clasificado.
-const HISTORICAL_EXAMPLES_LIMIT = 10;
 // Respuesta angosta (itemType + accountCode nada más): alcanza con pocos
 // tokens de salida — probado en vivo con openai/gpt-4o-mini en ~15-20 tokens
 // reales de respuesta.
@@ -76,15 +77,23 @@ const EMPTY_SUGGESTION: SuggestPurchaseItemClassificationResponseDto = {
   retentionSuggestions: [],
 };
 
+export interface ClassifiedPurchaseItem {
+  accountCode: string | null;
+  accountName: string | null;
+  productCode: string | null;
+  productName: string | null;
+  confidence: number | null;
+}
+
 export interface ItemTypeAndAccountClassification {
   itemType: 'Account' | 'Product' | null;
   accountCode: string | null;
   accountName: string | null;
   productCode: string | null;
   productName: string | null;
-  /** 0-100 — ver ParsedPurchaseItemClassification.confidence. null cuando
-   * no hubo clasificación en absoluto (ej. sin catálogo de cuentas). */
+  /** 0-100 — mínimo de las líneas. null cuando no hubo clasificación. */
   confidence: number | null;
+  items: ClassifiedPurchaseItem[];
 }
 
 const EMPTY_ITEM_CLASSIFICATION: ItemTypeAndAccountClassification = {
@@ -94,7 +103,34 @@ const EMPTY_ITEM_CLASSIFICATION: ItemTypeAndAccountClassification = {
   productCode: null,
   productName: null,
   confidence: null,
+  items: [],
 };
+
+function pickUnanimous<T extends string>(
+  values: Array<T | null | undefined>,
+): T | null {
+  const present = values.filter((value): value is T => Boolean(value));
+
+  if (present.length === 0) {
+    return null;
+  }
+
+  return present.every((value) => value === present[0]) ? present[0] : null;
+}
+
+function pickMinimumConfidence(
+  values: Array<number | null | undefined>,
+): number | null {
+  const present = values.filter(
+    (value): value is number => value != null && Number.isFinite(value),
+  );
+
+  if (present.length === 0) {
+    return null;
+  }
+
+  return Math.min(...present);
+}
 
 function extractKeywords(descriptions: string[]): string[] {
   return [
@@ -155,6 +191,8 @@ export class SiigoAiAccountSuggestionService {
     private readonly companiesRepository: CompaniesRepository,
   ) {}
 
+  /** Endpoint manual: misma cuenta/producto que el import automático, más
+   * IVA y retenciones en una llamada aparte. */
   async suggestForDocument(
     documentId: string,
     companyId: string,
@@ -170,17 +208,27 @@ export class SiigoAiAccountSuggestionService {
       companyId,
     );
 
-    const [accounts, allTaxes, integration] = await Promise.all([
-      this.siigoAccountsCatalogService.listAccounts(companyId),
+    const classification = await this.classifyItemTypeAndAccount(
+      documentId,
+      companyId,
+    );
+    const firstAccount = classification.items.find((item) => item.accountCode);
+
+    const freshDocument = await this.electronicDocumentService.requireById(
+      documentId,
+      companyId,
+    );
+
+    await this.electronicDocumentService.updatePayload(
+      documentId,
+      applyItemClassificationToPayload(freshDocument.payload, classification),
+      companyId,
+    );
+
+    const [allTaxes, integration] = await Promise.all([
       this.siigoTaxesCatalogService.listTaxes({}, companyId),
       getSiigoIntegration(this.integrationsRepository, companyId),
     ]);
-
-    if (accounts.length === 0) {
-      throw new BadRequestException(
-        'No hay catálogo de cuentas contables sincronizado. Ejecute la sincronización de catálogos SIIGO primero.',
-      );
-    }
 
     const activeIvaTaxes = allTaxes.filter(
       (tax) => tax.active && tax.type?.trim().toLowerCase() === 'iva',
@@ -192,14 +240,21 @@ export class SiigoAiAccountSuggestionService {
     const supplierNit = normalizeSupplierDocument(
       document.payload.supplier.documentNumber ?? '',
     );
-    const historicalRows = supplierNit
-      ? await this.historialFacturasRepository.findRecentBySupplier(
+    const itemDescriptions = document.payload.items.map(
+      (item) => item.descripcion,
+    );
+    const historicalPool = supplierNit
+      ? await this.historialFacturasRepository.findRecentInvoicesBySupplier(
           companyId,
           integration.id,
           supplierNit,
-          HISTORICAL_EXAMPLES_LIMIT,
+          HISTORICAL_EXAMPLE_INVOICE_LIMIT,
         )
       : [];
+    const historicalRows = selectHistoricalExamplesForPrompt(
+      itemDescriptions,
+      historicalPool,
+    );
 
     const prompt = buildPurchaseClassificationPrompt({
       supplierName: document.payload.supplier.name || 'Desconocido',
@@ -208,9 +263,10 @@ export class SiigoAiAccountSuggestionService {
         cantidad: item.cantidad,
         valorUnitario: item.valorUnitario,
       })),
-      accounts,
+      accounts: [],
       taxes: activeIvaTaxes,
       retentionTaxes: activeRetentionTaxes,
+      includeAccount: false,
       historicalExamples: attachCatalogNamesToHistoricalExamples(
         historicalRows.map((row) => ({
           descripcionItem: row.descripcionItem,
@@ -219,7 +275,7 @@ export class SiigoAiAccountSuggestionService {
           confirmadaPorContador:
             row.fuente === HistorialFacturaFuente.CORREGIDO_CONTADOR,
         })),
-        accounts,
+        [],
       ),
     });
 
@@ -228,15 +284,11 @@ export class SiigoAiAccountSuggestionService {
         context: {
           companyId,
           documentId,
-          purpose: 'purchase-full-classification',
+          purpose: 'purchase-tax-classification',
         },
       });
     const parsed = parsePurchaseClassificationResponse(rawText);
 
-    const matchedAccount = parsed.accountCode
-      ? (accounts.find((account) => account.code === parsed.accountCode) ??
-        null)
-      : null;
     const matchedTax =
       parsed.taxId != null
         ? (activeIvaTaxes.find((tax) => tax.id === parsed.taxId) ?? null)
@@ -244,12 +296,6 @@ export class SiigoAiAccountSuggestionService {
     const matchedRetentions = parsed.retentionIds
       .map((id) => activeRetentionTaxes.find((tax) => tax.id === id))
       .filter((tax): tax is NonNullable<typeof tax> => Boolean(tax));
-
-    if (parsed.accountCode && !matchedAccount) {
-      this.logger.warn(
-        `[documentId=${documentId}] IA sugirió cuenta "${parsed.accountCode}" que no existe en el catálogo; se descarta.`,
-      );
-    }
 
     if (parsed.taxId != null && !matchedTax) {
       this.logger.warn(
@@ -265,8 +311,10 @@ export class SiigoAiAccountSuggestionService {
 
     return {
       ...EMPTY_SUGGESTION,
-      accountCode: matchedAccount?.code ?? null,
-      accountName: matchedAccount?.name ?? null,
+      accountCode:
+        classification.accountCode ?? firstAccount?.accountCode ?? null,
+      accountName:
+        classification.accountName ?? firstAccount?.accountName ?? null,
       taxId: matchedTax?.id ?? null,
       taxName: matchedTax?.name ?? null,
       taxPercentage: matchedTax?.percentage ?? null,
@@ -280,10 +328,9 @@ export class SiigoAiAccountSuggestionService {
   }
 
   /**
-   * Clasificación angosta para el disparo automático en background (ver
-   * SiigoPurchaseAiClassificationService): a diferencia de
-   * `suggestForDocument` (botón manual, respuesta amplia con IVA y
-   * retenciones), esta solo pide tipo de ítem (Cuenta/Producto) + código.
+   * Misma clasificación de tipo + código por ítem que usa el import
+   * automático. `suggestForDocument` la reutiliza para la cuenta/producto
+   * y pide IVA/retenciones en una llamada aparte.
    *
    * Se separa en DOS llamadas a la IA en vez de una sola con ambos catálogos
    * completos (diseño anterior) — caso real reportado: mandar TODAS las
@@ -361,12 +408,12 @@ export class SiigoAiAccountSuggestionService {
     const supplierNit = normalizeSupplierDocument(
       document.payload.supplier.documentNumber ?? '',
     );
-    const historicalRows = supplierNit
-      ? await this.historialFacturasRepository.findRecentBySupplier(
+    const historicalPool = supplierNit
+      ? await this.historialFacturasRepository.findRecentInvoicesBySupplier(
           companyId,
           integration.id,
           supplierNit,
-          HISTORICAL_EXAMPLES_LIMIT,
+          HISTORICAL_EXAMPLE_INVOICE_LIMIT,
         )
       : [];
 
@@ -400,12 +447,15 @@ export class SiigoAiAccountSuggestionService {
         productsCatalog,
       );
       const productHistoricalExamples = attachCatalogNamesToHistoricalExamples(
-        historicalRows
-          .filter((row) => row.tipo === HistorialFacturaTipo.PRODUCTO)
-          .map((row) => ({
-            descripcionItem: row.descripcionItem,
-            cuentaPuc: row.cuentaPuc,
-          })),
+        selectHistoricalExamplesForPrompt(
+          itemDescriptions,
+          historicalPool.filter(
+            (row) => row.tipo === HistorialFacturaTipo.PRODUCTO,
+          ),
+        ).map((row) => ({
+          descripcionItem: row.descripcionItem,
+          cuentaPuc: row.cuentaPuc,
+        })),
         productsCatalog,
       );
 
@@ -435,40 +485,58 @@ export class SiigoAiAccountSuggestionService {
         `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Producto) DESPUÉS de llamar a OpenRouter — respuesta cruda: ${rawText}`,
       );
 
-      const parsed = parseProductCodeClassificationResponse(rawText);
-
-      if (!parsed.productCode) {
-        return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
-      }
-
-      const matchedProduct = productsCatalog.find(
-        (product) => product.code === parsed.productCode,
+      const parsed = parseProductCodeClassificationResponse(
+        rawText,
+        promptItems.length,
       );
+      const resolvedItems = parsed.items.map((item) => {
+        const matchedProduct = item.productCode
+          ? productsCatalog.find((product) => product.code === item.productCode)
+          : undefined;
 
-      if (!matchedProduct) {
-        this.logger.warn(
-          `[documentId=${documentId}] IA sugirió producto "${parsed.productCode}" que no existe en el catálogo; se descarta.`,
-        );
+        if (item.productCode && !matchedProduct) {
+          this.logger.warn(
+            `[documentId=${documentId}] IA sugirió producto "${item.productCode}" que no existe en el catálogo; se descarta esa línea.`,
+          );
+        }
 
-        return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
-      }
+        return {
+          accountCode: null,
+          accountName: null,
+          productCode: matchedProduct?.code ?? null,
+          productName: matchedProduct?.name ?? null,
+          confidence: matchedProduct ? item.confidence : 0,
+        };
+      });
+      const unanimousProductCode = pickUnanimous(
+        resolvedItems.map((item) => item.productCode),
+      );
+      const unanimousProduct = unanimousProductCode
+        ? resolvedItems.find((item) => item.productCode === unanimousProductCode)
+        : undefined;
 
       return {
         ...EMPTY_ITEM_CLASSIFICATION,
         itemType,
-        productCode: matchedProduct.code,
-        productName: matchedProduct.name,
-        confidence: parsed.confidence,
+        productCode: unanimousProductCode,
+        productName: unanimousProduct?.productName ?? null,
+        confidence: pickMinimumConfidence(
+          resolvedItems.map((item) => item.confidence),
+        ),
+        items: resolvedItems,
       };
     }
 
     const accountHistoricalExamples = attachCatalogNamesToHistoricalExamples(
-      historicalRows
-        .filter((row) => row.tipo === HistorialFacturaTipo.CUENTA)
-        .map((row) => ({
-          descripcionItem: row.descripcionItem,
-          cuentaPuc: row.cuentaPuc,
-        })),
+      selectHistoricalExamplesForPrompt(
+        itemDescriptions,
+        historicalPool.filter(
+          (row) => row.tipo === HistorialFacturaTipo.CUENTA,
+        ),
+      ).map((row) => ({
+        descripcionItem: row.descripcionItem,
+        cuentaPuc: row.cuentaPuc,
+      })),
       allTransactionalAccounts,
     );
 
@@ -501,38 +569,68 @@ export class SiigoAiAccountSuggestionService {
       `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Cuenta) DESPUÉS de llamar a OpenRouter — respuesta cruda: ${rawText}`,
     );
 
-    const parsed = parseAccountCodeClassificationResponse(rawText);
-    const accountNameByCode = buildAccountNameByCode(transactionalAccounts);
-    const matchedAccount = resolveRequiredAccountFromCatalog(
-      transactionalAccounts,
-      [
-        parsed.accountCode,
-        ...accountHistoricalExamples.map((example) => example.cuentaPuc),
-      ],
+    const parsed = parseAccountCodeClassificationResponse(
+      rawText,
+      promptItems.length,
     );
-
-    if (!matchedAccount) {
-      return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
-    }
-
-    const usedAiCode = matchedAccount.code === parsed.accountCode;
-
-    if (!usedAiCode) {
-      this.logger.warn(
-        `[documentId=${documentId}] IA no devolvió una cuenta válida del catálogo (sugirió "${parsed.accountCode ?? 'null'}"); se usa ${matchedAccount.code} para no dejar el campo vacío.`,
+    const accountHistoryRows = historicalPool.filter(
+      (row) => row.tipo === HistorialFacturaTipo.CUENTA,
+    );
+    const historicalCodes = accountHistoricalExamples.map(
+      (example) => example.cuentaPuc,
+    );
+    const resolvedItems = parsed.items.map((item, index) => {
+      const matchedAccount = resolveRequiredAccountFromCatalog(
+        transactionalAccounts,
+        [item.accountCode, ...historicalCodes],
       );
-    }
+
+      if (!matchedAccount) {
+        return {
+          accountCode: null,
+          accountName: null,
+          productCode: null,
+          productName: null,
+          confidence: 0,
+        };
+      }
+
+      const usedAiCode = matchedAccount.code === item.accountCode;
+
+      if (!usedAiCode) {
+        this.logger.warn(
+          `[documentId=${documentId}] IA no devolvió una cuenta válida del catálogo (sugirió "${item.accountCode ?? 'null'}"); se usa ${matchedAccount.code}.`,
+        );
+      }
+
+      return {
+        accountCode: matchedAccount.code,
+        accountName: matchedAccount.name,
+        productCode: null,
+        productName: null,
+        confidence: resolveAccountSuggestionConfidence({
+          itemDescription: itemDescriptions[index] ?? '',
+          accountCode: matchedAccount.code,
+          historicalRows: accountHistoryRows,
+        }),
+      };
+    });
+    const unanimousAccountCode = pickUnanimous(
+      resolvedItems.map((item) => item.accountCode),
+    );
+    const unanimousAccount = unanimousAccountCode
+      ? resolvedItems.find((item) => item.accountCode === unanimousAccountCode)
+      : undefined;
 
     return {
       ...EMPTY_ITEM_CLASSIFICATION,
       itemType,
-      accountCode: matchedAccount.code,
-      accountName: resolveAccountNameFromCatalog(
-        matchedAccount.code,
-        matchedAccount.name,
-        accountNameByCode,
+      accountCode: unanimousAccountCode,
+      accountName: unanimousAccount?.accountName ?? null,
+      confidence: pickMinimumConfidence(
+        resolvedItems.map((item) => item.confidence),
       ),
-      confidence: usedAiCode ? parsed.confidence : 0,
+      items: resolvedItems,
     };
   }
 

@@ -50,9 +50,11 @@ export function resolveAccountNameFromCatalog(
   return accountNameByCode.get(code.trim()) ?? fallbackName;
 }
 
-/** Elige SIEMPRE una cuenta del catálogo: primero un código preferido que
- * exista literalmente (respuesta de IA o ejemplo histórico), si no la
- * primera del catálogo. null solo si el catálogo viene vacío. */
+/** Elige SIEMPRE una cuenta si el catálogo no está vacío: primero un
+ * código preferido que exista (IA o histórico comparable), si no la
+ * primera del catálogo. null solo si no hay cuentas. La confidence la
+ * asigna el llamador según la fuente (confirmada, factura, balance o
+ * catálogo). */
 export function resolveRequiredAccountFromCatalog(
   accounts: Array<Pick<SiigoAccount, 'code' | 'name'>>,
   preferredCodes: Array<string | null | undefined> = [],

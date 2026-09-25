@@ -89,7 +89,7 @@ describe('resolveRequiredAccountFromCatalog', () => {
     ).toEqual({ code: '51959501', name: 'Diversos' });
   });
 
-  it('cae a la primera cuenta del catálogo si la IA no trajo un código válido', () => {
+  it('cae a la primera cuenta del catálogo si ningún código preferido existe', () => {
     expect(
       resolveRequiredAccountFromCatalog(
         [
@@ -99,5 +99,9 @@ describe('resolveRequiredAccountFromCatalog', () => {
         [null, 'NO-EXISTE'],
       ),
     ).toEqual({ code: '51050601', name: 'Aseo' });
+  });
+
+  it('devuelve null solo si el catálogo está vacío', () => {
+    expect(resolveRequiredAccountFromCatalog([], ['51959501'])).toBeNull();
   });
 });

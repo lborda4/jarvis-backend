@@ -563,4 +563,46 @@ describe('resolveSuggestedAccountsForDocumentItems / resolveSuggestedAccountForD
       ),
     ).toEqual({ code: '51356001', name: 'Servicio internet', uses: 1 });
   });
+
+  it('rellena cada línea con la cuenta de IA cuando no hay regla exacta ni preferencia', () => {
+    const document = buildDocument({
+      payload: {
+        supplier: {
+          documentNumber: SUPPLIER_NIT,
+          documentType: 'NIT',
+          name: 'Proveedor de prueba',
+        },
+        items: [
+          { descripcion: 'Resma de papel' },
+          { descripcion: 'Jabón líquido' },
+          { descripcion: 'Mantenimiento aires' },
+        ] as never,
+        aiSuggestion: {
+          itemType: 'Account',
+          account: null,
+          product: null,
+          items: [
+            { account: { code: '51953001', name: 'Papelería' }, product: null, confidence: 80 },
+            { account: { code: '51050601', name: 'Aseo' }, product: null, confidence: 85 },
+            { account: { code: '51400501', name: 'Mantenimiento' }, product: null, confidence: 70 },
+          ],
+          retentions: [],
+          confidence: 70,
+        },
+      },
+    });
+
+    const perItem = resolveSuggestedAccountsForDocumentItems(
+      document,
+      new Map(),
+      new Map(),
+      INTEGRATION_ID,
+    );
+
+    expect(perItem.map((item) => item?.code)).toEqual([
+      '51953001',
+      '51050601',
+      '51400501',
+    ]);
+  });
 });

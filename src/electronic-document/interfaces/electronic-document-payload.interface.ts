@@ -13,17 +13,26 @@ import type { ElectronicDocumentItem } from './electronic-document-item.interfac
  * nunca ambos a la vez, y cualquiera de los dos puede faltar si la IA no
  * encontró una opción segura en el catálogo correspondiente.
  */
+export interface AiSuggestionItemSnapshot {
+  account?: { code: string; name: string } | null;
+  product?: { code: string; name: string } | null;
+  confidence?: number | null;
+}
+
 export interface AiSuggestionSnapshot {
   /** Tipo elegido en el paso 1 de la clasificación automática. */
   itemType?: 'Account' | 'Product' | null;
   account?: { code: string; name: string } | null;
   product?: { code: string; name: string } | null;
+  /** Una sugerencia por línea, en el mismo orden que payload.items. */
+  items?: AiSuggestionItemSnapshot[];
   retentions: SupplierRetentionPreference[];
   /** 0-100, qué tan segura estuvo la IA de account/product — ver
    * SiigoPurchaseAiClassificationService.classifyOne. Decide si el
    * documento se ve como "Pendiente" (≥80) o "Requiere revisión" (<80) en
-   * el listado. null en snapshots viejos (de antes de este campo) o cuando
-   * la clasificación automática nunca corrió para este documento. */
+   * el listado. Después de clasificar, 0 si no hubo cuenta/producto o si
+   * el modelo no mandó confidence. null solo cuando la clasificación
+   * nunca corrió, o quedó a medias en el paso 1. */
   confidence?: number | null;
 }
 

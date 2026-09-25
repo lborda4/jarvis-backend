@@ -90,7 +90,7 @@ export function resolveSuggestedAccountsForDocumentItems(
   const supplierDocumentType =
     document.payload.supplier.documentType?.trim() || 'NIT';
 
-  return (document.payload.items ?? []).map((item) => {
+  return (document.payload.items ?? []).map((item, index) => {
     const itemMapping = supplierDocument
       ? itemMappingIndex.get(
           buildSupplierItemAccountMappingKey(
@@ -103,7 +103,38 @@ export function resolveSuggestedAccountsForDocumentItems(
         )
       : undefined;
 
-    return resolveSuggestedAccountForItem(itemMapping, configuration);
+    const resolved = resolveSuggestedAccountForItem(itemMapping, configuration);
+
+    if (resolved?.source === 'exact') {
+      return resolved;
+    }
+
+    const mappedCode = item.accountMapping?.code?.trim();
+
+    if (mappedCode) {
+      return {
+        code: mappedCode,
+        name: item.accountMapping?.description?.trim() || mappedCode,
+        source: 'fallback',
+      };
+    }
+
+    if (resolved) {
+      return resolved;
+    }
+
+    const aiAccount = document.payload.aiSuggestion?.items?.[index]?.account;
+    const code = aiAccount?.code?.trim();
+
+    if (!code) {
+      return null;
+    }
+
+    return {
+      code,
+      name: aiAccount?.name?.trim() || code,
+      source: 'fallback',
+    };
   });
 }
 
@@ -137,19 +168,21 @@ export function resolveSuggestedAccountForDocument(
     // sin entrar acá arriba: no hay `return` — cae al resto de la función.
   }
 
-  if (document.payload.aiSuggestion?.account) {
-    return {
-      code: document.payload.aiSuggestion.account.code,
-      name: document.payload.aiSuggestion.account.name,
-      uses: 1,
-    };
-  }
-
   const items = document.payload.items;
 
   // Sin ítems (o documento sin línea alguna todavía): cae al fallback de
   // proveedor de siempre, para no perder la sugerencia en casos borde.
   if (!Array.isArray(items) || items.length === 0) {
+    const aiAccount = document.payload.aiSuggestion?.account;
+
+    if (aiAccount?.code?.trim()) {
+      return {
+        code: aiAccount.code,
+        name: aiAccount.name,
+        uses: 1,
+      };
+    }
+
     const configuration = resolveSupplierConfigurationForDocument(
       document,
       configurationIndex,
@@ -189,9 +222,35 @@ export function resolveSuggestedAccountForDocument(
  * como 'Product'. El fallback de proveedor por historial (campoVariabilidad)
  * se resuelve a nivel de ítem en el frontend vía `suggestedItemConfig.productCode`.
  */
+export function resolveSuggestedProductsForDocumentItems(
+  document: SupplierDocumentIdentity,
+): Array<SuggestedProduct | null> {
+  return (document.payload.items ?? []).map((_item, index) => {
+    const product = document.payload.aiSuggestion?.items?.[index]?.product;
+    const code = product?.code?.trim();
+
+    if (!code) {
+      return null;
+    }
+
+    return { code, name: product?.name?.trim() || code };
+  });
+}
+
 export function resolveSuggestedProductForDocument(
   document: SupplierDocumentIdentity,
 ): SuggestedProduct | null {
+  const perItem = resolveSuggestedProductsForDocumentItems(document);
+  const [first, ...rest] = perItem;
+
+  if (first && rest.every((product) => product?.code === first.code)) {
+    return first;
+  }
+
+  if (perItem.some((product) => product)) {
+    return null;
+  }
+
   const product = document.payload.aiSuggestion?.product;
   const code = product?.code?.trim();
 

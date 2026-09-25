@@ -14,6 +14,7 @@ import {
 } from './helpers/siigo-context.helper';
 import { OpenRouterHttpClient } from '../openrouter/clients/openrouter-http.client';
 import { SiigoAiAccountSuggestionService } from './siigo-ai-account-suggestion.service';
+import { applyItemClassificationToPayload } from '../../electronic-document/helpers/electronic-document-account-mapping.helper';
 
 /**
  * Autocompleta tipo de ítem + cuenta contable al importar facturas de
@@ -195,7 +196,11 @@ export class SiigoPurchaseAiClassificationService {
     );
 
     const foundNothing =
-      !classification.accountCode && !classification.productCode;
+      !classification.accountCode &&
+      !classification.productCode &&
+      !(classification.items ?? []).some(
+        (item) => item.accountCode || item.productCode,
+      );
 
     if (foundNothing) {
       console.log(
@@ -215,43 +220,7 @@ export class SiigoPurchaseAiClassificationService {
 
     await this.electronicDocumentService.updatePayload(
       documentId,
-      {
-        ...freshDocument.payload,
-        aiSuggestion: {
-          // Se persiste el resultado del paso 1 para que el frontend muestre
-          // de inmediato el selector correcto (Cuenta o Producto).
-          itemType: classification.itemType,
-          // Esta clasificación automática solo pide tipo de ítem + código
-          // (ver purchase-item-classification-prompt.helper.ts) — a
-          // diferencia del botón manual "Sugerir con IA", no incluye
-          // retenciones. Cuenta y producto son mutuamente excluyentes: el
-          // itemType decide cuál catálogo consultó la IA.
-          account: classification.accountCode
-            ? {
-                code: classification.accountCode,
-                name: classification.accountName ?? classification.accountCode,
-              }
-            : null,
-          product: classification.productCode
-            ? {
-                code: classification.productCode,
-                name: classification.productName ?? classification.productCode,
-              }
-            : null,
-          retentions: [],
-          // La IA "siempre debe sugerir algo" (ver prompts en
-          // purchase-item-classification-prompt.helper.ts, "SIEMPRE tenés
-          // que elegir..."), pero si por algún motivo igual vuelve sin
-          // accountCode NI productCode (parseo fallido, código inventado que
-          // no matchea el catálogo, etc.), se fuerza confidence=0 en vez de
-          // guardar `classification.confidence` tal cual — eso garantiza que
-          // resolvePurchaseInvoiceRequiresReview (aiConfidence < 80) marque
-          // el documento como "Requiere revisión", sin depender de que la
-          // sugerencia esté genuinamente vacía Y de que no exista además un
-          // fallback de proveedor por historial que la tape.
-          confidence: foundNothing ? 0 : classification.confidence,
-        },
-      },
+      applyItemClassificationToPayload(freshDocument.payload, classification),
       companyId,
     );
   }

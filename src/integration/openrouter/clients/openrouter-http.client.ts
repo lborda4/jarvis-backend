@@ -14,7 +14,7 @@ export interface OpenRouterMessage {
 /**
  * Contexto de trazabilidad de una llamada — ver AiGenerationLog. `purpose`
  * identifica qué llamador disparó la generación (ej.
- * 'purchase-item-classification' vs 'purchase-full-classification'), ambos
+ * 'purchase-item-classification' vs 'purchase-tax-classification'), ambos
  * distintos consumidores del mismo cliente. `aiRequestId` es opcional: si el
  * llamador ya generó uno (para loguear "iniciando..." antes de llamar acá),
  * se reutiliza; si no, este cliente genera uno.

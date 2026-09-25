@@ -195,31 +195,30 @@ export interface AccountCodeClassificationPromptParams {
   /** Solo cuentas transaccionales — las de agrupación no son un destino
    * válido para contabilizar un movimiento. */
   accounts: AccountCatalogItem[];
-  /** Últimas facturas de ESTE proveedor ya clasificadas como Cuenta — pocas
-   * a propósito, cada una suma tokens en cada llamada. */
+  /** Líneas comparables de las facturas recientes de ESTE proveedor. */
   historicalExamples?: PurchaseItemClassificationHistoricalExample[];
 }
 
-const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA sola cuenta PUC de gasto/costo para la factura completa.
+const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA cuenta PUC de gasto/costo para CADA ítem. Una factura puede traer conceptos distintos (papelería, aseo, mantenimiento) y cada línea va a su propia cuenta; no unifiques la factura en un solo código.
 
 REGLAS DE PRIORIDAD:
 
-1. Guiate SOBRE TODO por el histórico de facturas anteriores de este mismo proveedor. Si ya se envió una factura con un concepto igual o claramente equivalente, usá esa misma cuenta.
-2. Solo si no hay histórico comparable, clasificá según el concepto REALMENTE indicado en los ítems.
+1. Usá el histórico SOLO si el ejemplo es igual o claramente equivalente a ESA línea. Ignorá ejemplos que no sean comparables con esa línea.
+2. Si no hay histórico comparable para ese ítem, clasificá según el concepto REALMENTE indicado en esa línea.
 3. No inventes ni completes significados que no estén respaldados por el texto. Una sigla, código o referencia desconocida no debe interpretarse como "leasing", "cuota", "equipo", "red", etc.
 4. El nombre del proveedor puede dar contexto, pero NO determina por sí solo la cuenta.
 5. Usá únicamente códigos que aparezcan literalmente en el catálogo.
 6. Elegí siempre la categoría de gasto/costo más adecuada disponible, aunque el nombre de la cuenta no coincida literalmente con el texto.
 7. Si la descripción es ambigua, elegí la opción con mayor respaldo objetivo y reducí la confianza. No inventes detalles para aumentar la confianza.
-8. Siempre devolvés una cuenta del catálogo. accountCode NUNCA puede ser null si el catálogo tiene al menos una cuenta.
+8. Cada ítem SIEMPRE lleva una cuenta del catálogo. accountCode NUNCA puede ser null si el catálogo tiene al menos una cuenta.
 
 IMPORTANTE:
 No expliques el razonamiento, no describas alternativas y no inventes información.
 
 confidence debe ser un entero de 0 a 100.
 
-Respondé SOLO este JSON:
-{"accountCode":string,"confidence":number}`;
+Respondé SOLO este JSON, con EXACTAMENTE un elemento en items por cada ítem listado, en el mismo orden:
+{"items":[{"accountCode":string,"confidence":number}]}`;
 
 export function buildAccountCodeClassificationPrompt(
   params: AccountCodeClassificationPromptParams,
@@ -242,23 +241,44 @@ ${accountsCatalog}${historicalExamplesSection(params.historicalExamples)}`;
   ];
 }
 
-export interface ParsedAccountCodeClassification {
+export interface ParsedAccountCodeItem {
   accountCode: string | null;
   confidence: number | null;
 }
 
-const EMPTY_ACCOUNT_CODE_RESULT: ParsedAccountCodeClassification = {
-  accountCode: null,
-  confidence: null,
-};
+export interface ParsedAccountCodeClassification {
+  items: ParsedAccountCodeItem[];
+}
+
+function emptyAccountItems(count: number): ParsedAccountCodeItem[] {
+  return Array.from({ length: Math.max(count, 0) }, () => ({
+    accountCode: null,
+    confidence: null,
+  }));
+}
+
+function parseAccountCodeItem(value: unknown): ParsedAccountCodeItem {
+  if (!value || typeof value !== 'object') {
+    return { accountCode: null, confidence: null };
+  }
+
+  const record = value as Record<string, unknown>;
+  const accountCode =
+    typeof record.accountCode === 'string' && record.accountCode.trim()
+      ? record.accountCode.trim()
+      : null;
+
+  return { accountCode, confidence: toConfidenceOrNull(record.confidence) };
+}
 
 export function parseAccountCodeClassificationResponse(
   rawText: string,
+  expectedItemCount = 1,
 ): ParsedAccountCodeClassification {
   const jsonSlice = extractJsonObject(rawText);
 
   if (!jsonSlice) {
-    return EMPTY_ACCOUNT_CODE_RESULT;
+    return { items: emptyAccountItems(expectedItemCount) };
   }
 
   let parsed: unknown;
@@ -266,20 +286,25 @@ export function parseAccountCodeClassificationResponse(
   try {
     parsed = JSON.parse(jsonSlice);
   } catch {
-    return EMPTY_ACCOUNT_CODE_RESULT;
+    return { items: emptyAccountItems(expectedItemCount) };
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    return EMPTY_ACCOUNT_CODE_RESULT;
+    return { items: emptyAccountItems(expectedItemCount) };
   }
 
   const record = parsed as Record<string, unknown>;
-  const accountCode =
-    typeof record.accountCode === 'string' && record.accountCode.trim()
-      ? record.accountCode.trim()
-      : null;
+  const rawItems = Array.isArray(record.items)
+    ? record.items.map((item) => parseAccountCodeItem(item))
+    : [parseAccountCodeItem(record)];
 
-  return { accountCode, confidence: toConfidenceOrNull(record.confidence) };
+  const items = rawItems.slice(0, expectedItemCount);
+
+  while (items.length < expectedItemCount) {
+    items.push({ accountCode: null, confidence: null });
+  }
+
+  return { items };
 }
 
 // ---------------------------------------------------------------------------
@@ -292,19 +317,18 @@ export interface ProductCodeClassificationPromptParams {
   ourCompanyName: string;
   items: PurchaseItemClassificationPromptItem[];
   products: AccountCatalogItem[];
-  /** Últimas facturas de ESTE proveedor ya clasificadas como Producto. */
+  /** Líneas comparables de las facturas recientes de ESTE proveedor. */
   historicalExamples?: PurchaseItemClassificationHistoricalExample[];
 }
 
-const SYSTEM_PROMPT_PRODUCT_CODE = `Elegís el código de producto del catálogo de SIIGO que le corresponde a UNA factura de compra colombiana (puede traer uno o varios ítems, ya se determinó que el conjunto se contabiliza como Producto/inventario, no como Cuenta contable).
+const SYSTEM_PROMPT_PRODUCT_CODE = `Elegís el código de producto del catálogo de SIIGO para CADA ítem. Ya se determinó que se contabilizan como Producto/inventario. Una factura puede traer artículos distintos y cada línea va a su propio código; no unifiques la factura en un solo producto.
 
-Tu respuesta es UN SOLO código para la factura completa, nunca uno por ítem — no existe un campo para eso. Si hay varios ítems, elegí el producto que mejor represente el conjunto; no dejes de responder ni expliques la duda, solo elegí la mejor opción única.
+Reglas: usá el histórico SOLO si el ejemplo es igual o equivalente a ESA línea; si no es comparable, ignorálo y elegí por el catálogo. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. A diferencia de una cuenta contable, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada; productCode null solo es válido si genuinamente NINGÚN producto del catálogo se parece a ESA línea.
 
-Reglas: guiate SOBRE TODO por el histórico de facturas anteriores de este proveedor. Si ya se envió un concepto igual o equivalente, usá ese mismo código. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. A diferencia de una cuenta contable, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada; productCode null solo es válido si genuinamente NINGÚN producto del catálogo se parece al ítem.
+confidence: entero de 0 a 100. 90-100 = en el histórico hay la misma descripción o casi idéntica para esa línea. 60-89 = coincide bien pero sin factura anterior equivalente. Por debajo de 50 = decisión forzada.
 
-confidence: entero de 0 a 100, qué tan segura estás de la elección. 90-100 = en el histórico de facturas anteriores hay la misma descripción o casi idéntica. 60-89 = coincide bien pero sin factura anterior equivalente. Por debajo de 50 = es una decisión forzada, sin señal fuerte. Sé honesta: es más útil reportar baja confianza en una elección dudosa que inflarla.
-
-Responde SOLO este JSON, sin texto extra: {"productCode":string|null,"confidence":number}`;
+Responde SOLO este JSON, con EXACTAMENTE un elemento en items por cada ítem listado, en el mismo orden:
+{"items":[{"productCode":string|null,"confidence":number}]}`;
 
 export function buildProductCodeClassificationPrompt(
   params: ProductCodeClassificationPromptParams,
@@ -327,23 +351,44 @@ ${productsCatalog}${historicalExamplesSection(params.historicalExamples)}`;
   ];
 }
 
-export interface ParsedProductCodeClassification {
+export interface ParsedProductCodeItem {
   productCode: string | null;
   confidence: number | null;
 }
 
-const EMPTY_PRODUCT_CODE_RESULT: ParsedProductCodeClassification = {
-  productCode: null,
-  confidence: null,
-};
+export interface ParsedProductCodeClassification {
+  items: ParsedProductCodeItem[];
+}
+
+function emptyProductItems(count: number): ParsedProductCodeItem[] {
+  return Array.from({ length: Math.max(count, 0) }, () => ({
+    productCode: null,
+    confidence: null,
+  }));
+}
+
+function parseProductCodeItem(value: unknown): ParsedProductCodeItem {
+  if (!value || typeof value !== 'object') {
+    return { productCode: null, confidence: null };
+  }
+
+  const record = value as Record<string, unknown>;
+  const productCode =
+    typeof record.productCode === 'string' && record.productCode.trim()
+      ? record.productCode.trim()
+      : null;
+
+  return { productCode, confidence: toConfidenceOrNull(record.confidence) };
+}
 
 export function parseProductCodeClassificationResponse(
   rawText: string,
+  expectedItemCount = 1,
 ): ParsedProductCodeClassification {
   const jsonSlice = extractJsonObject(rawText);
 
   if (!jsonSlice) {
-    return EMPTY_PRODUCT_CODE_RESULT;
+    return { items: emptyProductItems(expectedItemCount) };
   }
 
   let parsed: unknown;
@@ -351,18 +396,23 @@ export function parseProductCodeClassificationResponse(
   try {
     parsed = JSON.parse(jsonSlice);
   } catch {
-    return EMPTY_PRODUCT_CODE_RESULT;
+    return { items: emptyProductItems(expectedItemCount) };
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    return EMPTY_PRODUCT_CODE_RESULT;
+    return { items: emptyProductItems(expectedItemCount) };
   }
 
   const record = parsed as Record<string, unknown>;
-  const productCode =
-    typeof record.productCode === 'string' && record.productCode.trim()
-      ? record.productCode.trim()
-      : null;
+  const rawItems = Array.isArray(record.items)
+    ? record.items.map((item) => parseProductCodeItem(item))
+    : [parseProductCodeItem(record)];
 
-  return { productCode, confidence: toConfidenceOrNull(record.confidence) };
+  const items = rawItems.slice(0, expectedItemCount);
+
+  while (items.length < expectedItemCount) {
+    items.push({ productCode: null, confidence: null });
+  }
+
+  return { items };
 }

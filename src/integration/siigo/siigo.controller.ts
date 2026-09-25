@@ -584,7 +584,7 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Sugerir cuenta contable e IVA con IA',
     description:
-      'Usa IA (OpenAI) para sugerir, a partir de la descripción de los ítems, una cuenta contable y un impuesto IVA del catálogo SIIGO de la empresa. Solo sugiere valores que existan literalmente en el catálogo; nunca inventa códigos.',
+      'Misma clasificación por ítem que el import automático (tipo + código de cuenta o producto) y, además, IVA y retenciones del catálogo SIIGO. Solo sugiere valores que existan literalmente en el catálogo.',
   })
   suggestAccountWithAi(
     @CurrentUser() user: AuthenticatedUser,

@@ -1,5 +1,8 @@
 import { SuggestedItemTax } from '../../integration/siigo/helpers/siigo-item-tax-suggestion.helper';
-import { SuggestedItemAccount } from '../../integration/helpers/supplier-preference.helper';
+import {
+  SuggestedItemAccount,
+  SuggestedProduct,
+} from '../../integration/helpers/supplier-preference.helper';
 
 export class ElectronicDocumentListItemItemDto {
   description: string;
@@ -29,4 +32,6 @@ export class ElectronicDocumentListItemItemDto {
    * sugerencia, requiere asignación manual.
    */
   suggestedAccount: SuggestedItemAccount | null;
+  /** Producto sugerido por IA para ESTA línea (facturas heterogéneas). */
+  suggestedProduct?: SuggestedProduct | null;
 }

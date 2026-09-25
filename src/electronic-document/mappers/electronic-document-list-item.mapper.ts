@@ -39,7 +39,16 @@ export function computeElectronicDocumentRequiresReview(
       suggestedProduct,
       suggestedItemConfig,
       itemAccountSuggestions,
+      itemProductSuggestions: (document.payload?.aiSuggestion?.items ?? []).map(
+        (item) => {
+          const code = item.product?.code?.trim();
+          return code
+            ? { code, name: item.product?.name?.trim() || code }
+            : null;
+        },
+      ),
       aiConfidence,
+      aiClassificationAttempted: document.payload?.aiSuggestion != null,
     })
   );
 }
@@ -158,5 +167,20 @@ function mapDocumentItems(
     ...(item.discount ? { discount: item.discount } : {}),
     suggestedTax: itemTaxSuggestions[index] ?? null,
     suggestedAccount: itemAccountSuggestions[index] ?? null,
+    suggestedProduct: resolveAiSuggestedProductForItem(document, index),
   }));
+}
+
+function resolveAiSuggestedProductForItem(
+  document: ElectronicDocument,
+  index: number,
+): ElectronicDocumentListItemDto['items'][number]['suggestedProduct'] {
+  const product = document.payload?.aiSuggestion?.items?.[index]?.product;
+  const code = product?.code?.trim();
+
+  if (!code) {
+    return null;
+  }
+
+  return { code, name: product?.name?.trim() || code };
 }

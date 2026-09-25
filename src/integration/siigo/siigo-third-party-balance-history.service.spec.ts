@@ -35,7 +35,7 @@ describe('SiigoThirdPartyBalanceHistoryService', () => {
     jest.useRealTimers();
   });
 
-  it('consulta los dos años anteriores y reemplaza el historial auxiliar', async () => {
+  it('consulta los dos años anteriores y reemplaza solo la fuente de balance por tercero', async () => {
     const siigoAuthService = {
       getValidAuthContext: jest.fn().mockResolvedValue({
         accessToken: 'token',

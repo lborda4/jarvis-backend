@@ -30,6 +30,9 @@ export interface PurchaseClassificationPromptParams {
   retentionTaxes?: SiigoTaxCatalogItemDto[];
   /** Últimas clasificaciones reales de ESTE proveedor, como ejemplos few-shot (pocas — no todo el historial). */
   historicalExamples?: PurchaseClassificationHistoricalExample[];
+  /** false = el botón manual ya resolvió cuenta/producto con
+   * classifyItemTypeAndAccount; este prompt solo pide IVA y retenciones. */
+  includeAccount?: boolean;
 }
 
 export interface ParsedPurchaseClassification {
@@ -43,13 +46,19 @@ export interface ParsedPurchaseClassification {
 // pedirle rationale/confidence — solo la sugerencia.
 const SYSTEM_PROMPT = `Clasificas facturas de compra colombianas para SIIGO. Dado ítems, catálogo de cuentas PUC, catálogo de IVA, catálogo de retenciones y (si hay) el histórico de facturas anteriores de este proveedor, elegís cuenta, un IVA y 0+ retenciones.
 
-Reglas generales: usa SOLO ids/códigos que estén LITERALMENTE en los catálogos dados, nunca inventes uno. Guiate SOBRE TODO por el histórico de facturas anteriores: si ya se envió un concepto igual o equivalente, repetí esa cuenta (más las marcadas "confirmado"). Solo si no hay histórico comparable clasificá por el concepto de los ítems.
+Reglas generales: usa SOLO ids/códigos que estén LITERALMENTE en los catálogos dados, nunca inventes uno. Usá el histórico SOLO si el concepto es igual o equivalente (más las marcadas "confirmado"); ignorá ejemplos que no sean comparables. Si no hay histórico comparable, clasificá por el concepto de los ítems.
 
 Cuenta: las cuentas PUC son categorías amplias de gasto/costo, no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. Dejá accountCode null solo si de verdad ninguna categoría del catálogo aplica.
 
 IVA y retenciones tienen efecto fiscal directo (montos que se declaran) y son más específicos: si no hay una opción segura, null (o [] en retentionIds) — acá sí mejor vacío que mal puesto.
 
 Responde SOLO este JSON, sin texto extra: {"accountCode":string|null,"taxId":number|null,"retentionIds":number[]}`;
+
+const SYSTEM_PROMPT_TAXES_ONLY = `Clasificas el IVA y las retenciones de una factura de compra colombiana para SIIGO. La cuenta o el producto YA están resueltos por otra clasificación; NO elijas cuenta.
+
+Reglas: usa SOLO ids que estén LITERALMENTE en los catálogos dados. Usá el histórico SOLO si el concepto coincide con los ítems actuales (más las marcadas "confirmado"); si no es comparable, ignorálo. IVA y retenciones tienen efecto fiscal directo: si no hay una opción segura, taxId null y retentionIds [].
+
+Responde SOLO este JSON, sin texto extra: {"taxId":number|null,"retentionIds":number[]}`;
 
 function formatImpuestosSummary(impuestos: HistorialFacturaImpuestos): string {
   const parts: string[] = [];
@@ -103,7 +112,9 @@ export function buildPurchaseClassificationPrompt(
           .join('\n')}`
       : '';
 
-  const userContent = `Proveedor: ${params.supplierName}
+  const includeAccount = params.includeAccount !== false;
+  const userContent = includeAccount
+    ? `Proveedor: ${params.supplierName}
 Ítems:
 ${itemsDescription}
 
@@ -114,10 +125,22 @@ IVA:
 ${taxesCatalog || 'ninguno'}
 
 Retenciones:
+${retentionsCatalog || 'ninguna'}${historicalExamplesSection}`
+    : `Proveedor: ${params.supplierName}
+Ítems:
+${itemsDescription}
+
+IVA:
+${taxesCatalog || 'ninguno'}
+
+Retenciones:
 ${retentionsCatalog || 'ninguna'}${historicalExamplesSection}`;
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    {
+      role: 'system',
+      content: includeAccount ? SYSTEM_PROMPT : SYSTEM_PROMPT_TAXES_ONLY,
+    },
     { role: 'user', content: userContent },
   ];
 }

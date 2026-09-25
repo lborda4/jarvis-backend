@@ -83,6 +83,36 @@ describe('buildPurchaseClassificationPrompt', () => {
     expect(messages[1].content).toContain('511010 Servicios de aseo');
   });
 
+  it('con includeAccount=false solo pide IVA y retenciones, sin catálogo de cuentas', () => {
+    const messages = buildPurchaseClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      items: [{ descripcion: 'Papelería', cantidad: 1, valorUnitario: 1 }],
+      accounts: [{ code: '519530', name: 'Papelería' }],
+      taxes: [
+        {
+          id: 11792,
+          name: 'IVA 19%',
+          type: 'IVA',
+          percentage: 19,
+          active: true,
+        },
+      ],
+      includeAccount: false,
+    });
+
+    expect(messages[0].content).toContain('NO elijas cuenta');
+    expect(messages[0].content).toContain(
+      'Usá el histórico SOLO si el concepto coincide',
+    );
+    expect(messages[0].content).toContain(
+      '{"taxId":number|null,"retentionIds":number[]}',
+    );
+    expect(messages[1].content).toContain('Papelería');
+    expect(messages[1].content).toContain('11792');
+    expect(messages[1].content).not.toContain('Cuentas PUC');
+    expect(messages[1].content).not.toContain('519530');
+  });
+
   it('no incluye la sección de ejemplos históricos cuando no se proveen', () => {
     const messages = buildPurchaseClassificationPrompt({
       supplierName: 'Proveedor S.A.S',

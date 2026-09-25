@@ -103,8 +103,12 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     });
 
     expect(messages[0].content).toContain(
-      'histórico de facturas anteriores',
+      'Usá el histórico SOLO si el ejemplo es igual',
     );
+    expect(messages[0].content).toContain(
+      'Ignorá ejemplos que no sean comparables',
+    );
+    expect(messages[0].content).toContain('CADA ítem');
     expect(messages[0].content).toContain(
       'No inventes ni completes significados',
     );
@@ -112,7 +116,7 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
       'accountCode NUNCA puede ser null',
     );
     expect(messages[0].content).toContain(
-      '{"accountCode":string,"confidence":number}',
+      '{"items":[{"accountCode":string,"confidence":number}]}',
     );
   });
 
@@ -155,24 +159,44 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
 });
 
 describe('parseAccountCodeClassificationResponse', () => {
-  it('parsea un JSON válido con código y confidence', () => {
+  it('parsea un JSON por ítem', () => {
+    expect(
+      parseAccountCodeClassificationResponse(
+        '{"items":[{"accountCode":"51050601","confidence":90},{"accountCode":"51959501","confidence":70}]}',
+        2,
+      ),
+    ).toEqual({
+      items: [
+        { accountCode: '51050601', confidence: 90 },
+        { accountCode: '51959501', confidence: 70 },
+      ],
+    });
+  });
+
+  it('si llega el formato viejo de una sola cuenta, solo llena el primer ítem', () => {
     expect(
       parseAccountCodeClassificationResponse(
         '{"accountCode": "51356001", "confidence": 92}',
+        2,
       ),
-    ).toEqual({ accountCode: '51356001', confidence: 92 });
+    ).toEqual({
+      items: [
+        { accountCode: '51356001', confidence: 92 },
+        { accountCode: null, confidence: null },
+      ],
+    });
   });
 
   it('clampea confidence fuera de [0, 100]', () => {
     expect(
       parseAccountCodeClassificationResponse(
         '{"accountCode": "X", "confidence": 140}',
-      ).confidence,
+      ).items[0].confidence,
     ).toBe(100);
     expect(
       parseAccountCodeClassificationResponse(
         '{"accountCode": "X", "confidence": -20}',
-      ).confidence,
+      ).items[0].confidence,
     ).toBe(0);
   });
 
@@ -180,17 +204,17 @@ describe('parseAccountCodeClassificationResponse', () => {
     expect(
       parseAccountCodeClassificationResponse(
         '{"accountCode": "X", "confidence": "alta"}',
-      ).confidence,
+      ).items[0].confidence,
     ).toBeNull();
     expect(
-      parseAccountCodeClassificationResponse('{"confidence": 80}').accountCode,
+      parseAccountCodeClassificationResponse('{"confidence": 80}').items[0]
+        .accountCode,
     ).toBeNull();
   });
 
-  it('devuelve todo null si la respuesta no es JSON válido', () => {
-    expect(parseAccountCodeClassificationResponse('no puedo ayudar')).toEqual({
-      accountCode: null,
-      confidence: null,
+  it('devuelve ítems vacíos si la respuesta no es JSON válido', () => {
+    expect(parseAccountCodeClassificationResponse('no puedo ayudar', 1)).toEqual({
+      items: [{ accountCode: null, confidence: null }],
     });
   });
 });
@@ -231,18 +255,23 @@ describe('buildProductCodeClassificationPrompt (paso 2b — solo productos)', ()
 });
 
 describe('parseProductCodeClassificationResponse', () => {
-  it('parsea un JSON válido con código y confidence', () => {
+  it('parsea un JSON por ítem', () => {
     expect(
       parseProductCodeClassificationResponse(
-        '{"productCode": "PROD-001", "confidence": 75}',
+        '{"items":[{"productCode":"PROD-001","confidence":75},{"productCode":"PROD-002","confidence":40}]}',
+        2,
       ),
-    ).toEqual({ productCode: 'PROD-001', confidence: 75 });
+    ).toEqual({
+      items: [
+        { productCode: 'PROD-001', confidence: 75 },
+        { productCode: 'PROD-002', confidence: 40 },
+      ],
+    });
   });
 
-  it('devuelve todo null si la respuesta no es JSON válido', () => {
-    expect(parseProductCodeClassificationResponse('no puedo ayudar')).toEqual({
-      productCode: null,
-      confidence: null,
+  it('devuelve ítems vacíos si la respuesta no es JSON válido', () => {
+    expect(parseProductCodeClassificationResponse('no puedo ayudar', 1)).toEqual({
+      items: [{ productCode: null, confidence: null }],
     });
   });
 });

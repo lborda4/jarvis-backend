@@ -8,6 +8,13 @@ function buildService(overrides: {
     productCode: string | null;
     productName: string | null;
     confidence: number | null;
+    items?: Array<{
+      accountCode: string | null;
+      accountName: string | null;
+      productCode: string | null;
+      productName: string | null;
+      confidence: number | null;
+    }>;
   };
   configuration?: unknown;
   itemMapping?: { accountCode: string; accountName: string } | null;
@@ -87,9 +94,38 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
       itemType: 'Account',
       account: null,
       product: null,
+      items: [],
       retentions: [],
       confidence: 0,
     });
+  });
+
+  it('si hay cuenta pero el modelo no mandó confidence, igual guarda 0 para que dispare Requiere revisión', async () => {
+    const { service, electronicDocumentService } = buildService({
+      classification: {
+        itemType: 'Account',
+        accountCode: '5135',
+        accountName: 'Gastos diversos',
+        productCode: null,
+        productName: null,
+        confidence: null,
+        items: [
+          {
+            accountCode: '5135',
+            accountName: 'Gastos diversos',
+            productCode: null,
+            productName: null,
+            confidence: null,
+          },
+        ],
+      },
+    });
+
+    await service.classifyDocuments(['doc-1'], 'company-1');
+
+    const [, payload] = electronicDocumentService.updatePayload.mock
+      .calls[0] as [string, { aiSuggestion: { confidence: unknown } }, string];
+    expect(payload.aiSuggestion.confidence).toBe(0);
   });
 
   it('cuando la IA sí encuentra una cuenta, guarda su confidence real (no se fuerza a 0)', async () => {
@@ -112,6 +148,7 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
       itemType: 'Account',
       account: { code: '5135', name: 'Gastos diversos' },
       product: null,
+      items: [],
       retentions: [],
       confidence: 65,
     });
@@ -140,6 +177,7 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
         code: 'BOTATITAN235209042',
         name: 'Bota Titán',
       },
+      items: [],
       retentions: [],
       confidence: 30,
     });
@@ -181,6 +219,38 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     expect(
       siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
     ).toHaveBeenCalled();
+  });
+
+  it('escribe la cuenta de cada línea en payload.items[].accountMapping', async () => {
+    const { service, electronicDocumentService } = buildService({
+      classification: {
+        itemType: 'Account',
+        accountCode: null,
+        accountName: null,
+        productCode: null,
+        productName: null,
+        confidence: 70,
+        items: [
+          {
+            accountCode: '51953001',
+            accountName: 'Papelería',
+            productCode: null,
+            productName: null,
+            confidence: 80,
+          },
+        ],
+      },
+    });
+
+    await service.classifyDocuments(['doc-1'], 'company-1');
+
+    const [, payload] = electronicDocumentService.updatePayload.mock
+      .calls[0] as [string, { items: Array<{ accountMapping?: { code: string } }> }, string];
+
+    expect(payload.items[0].accountMapping).toEqual({
+      code: '51953001',
+      description: 'Papelería',
+    });
   });
 
   it('llama a la IA cuando el tipo es Cuenta fijo pero no hay código de cuenta (cuentaPuc variable)', async () => {

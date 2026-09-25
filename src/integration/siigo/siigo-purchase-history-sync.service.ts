@@ -243,17 +243,15 @@ export class SiigoPurchaseHistorySyncService {
           HistorialFacturaFuente.SIIGO_ORIGINAL,
         ));
 
+      // El balance por tercero es una fuente permanente
+      // (`SIIGO_BALANCE_TERCERO`). Si ya hay facturas de compra no se
+      // vuelve a consultar el reporte; las filas que ya existan se dejan.
       if (!hasPurchaseHistory) {
         balanceReferenceCount =
           await this.siigoThirdPartyBalanceHistoryService.replaceHistory(
             companyId,
             integrationId,
           );
-      } else {
-        await this.siigoThirdPartyBalanceHistoryService.clearHistory(
-          companyId,
-          integrationId,
-        );
       }
 
       await this.recomputeSupplierSummaries(companyId, integrationId);
@@ -268,7 +266,7 @@ export class SiigoPurchaseHistorySyncService {
       });
 
       this.logger.log(
-        `[companyId=${companyId}] Sync de historial de compras completado (${syncedCount} facturas en los últimos ${SYNC_HISTORY_YEARS} años, ${totalPages} página(s), ${balanceReferenceCount} referencia(s) del fallback por tercero).`,
+        `[companyId=${companyId}] Sync de historial de compras completado (${syncedCount} facturas en los últimos ${SYNC_HISTORY_YEARS} años, ${totalPages} página(s), ${balanceReferenceCount} referencia(s) de balance por tercero).`,
       );
     } catch (error) {
       this.logger.error(

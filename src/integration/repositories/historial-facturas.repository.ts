@@ -109,9 +109,9 @@ export class HistorialFacturasRepository {
   }
 
   /**
-   * Reemplaza por completo una fuente auxiliar. Se usa para el balance por
-   * tercero, cuyos registros no tienen un id de factura real y deben
-   * desaparecer tan pronto haya historial de facturas de compra.
+   * Reemplaza por completo las filas de una fuente (delete + insert).
+   * Se usa para refrescar `SIIGO_BALANCE_TERCERO` sin tocar las demás
+   * fuentes: esa fuente convive con las facturas de compra.
    */
   async replaceRowsBySource(
     companyId: string,
@@ -140,25 +140,48 @@ export class HistorialFacturasRepository {
     return this.repository.existsBy({ companyId, integrationId, fuente });
   }
 
-  findRecentBySupplier(
+  /**
+   * Todas las líneas de las `invoiceLimit` facturas más recientes de este
+   * proveedor. Reciente = MAX(fecha_factura) de esa factura. No prioriza
+   * correcciones del contador: eso se resuelve al elegir ejemplos
+   * comparables para la IA (selectHistoricalExamplesForPrompt).
+   */
+  async findRecentInvoicesBySupplier(
     companyId: string,
     integrationId: string,
     proveedorNit: string,
-    limit: number,
+    invoiceLimit: number,
   ): Promise<HistorialFactura[]> {
-    return this.repository
+    if (invoiceLimit <= 0) {
+      return [];
+    }
+
+    const recentInvoices = await this.repository
       .createQueryBuilder('historial')
+      .select('historial.factura_id', 'facturaId')
       .where('historial.company_id = :companyId', { companyId })
       .andWhere('historial.integration_id = :integrationId', { integrationId })
       .andWhere('historial.proveedor_nit = :proveedorNit', { proveedorNit })
-      .orderBy(
-        `CASE WHEN historial.fuente = :fuenteCorregida THEN 0 ELSE 1 END`,
-        'ASC',
-      )
-      .addOrderBy('historial.fecha_factura', 'DESC')
-      .setParameter('fuenteCorregida', HistorialFacturaFuente.CORREGIDO_CONTADOR)
-      .limit(limit)
-      .getMany();
+      .groupBy('historial.factura_id')
+      .orderBy('MAX(historial.fecha_factura)', 'DESC')
+      .limit(invoiceLimit)
+      .getRawMany<{ facturaId: string }>();
+
+    const facturaIds = recentInvoices.map((row) => row.facturaId);
+
+    if (facturaIds.length === 0) {
+      return [];
+    }
+
+    return this.repository.find({
+      where: {
+        companyId,
+        integrationId,
+        proveedorNit,
+        facturaId: In(facturaIds),
+      },
+      order: { fechaFactura: 'DESC' },
+    });
   }
 
   /** Agrupa por (proveedor_nit, cuenta_puc) para el recálculo de variabilidad. */

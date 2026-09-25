@@ -101,19 +101,10 @@ export class SiigoThirdPartyBalanceHistoryService {
     );
 
     this.logger.log(
-      `[companyId=${companyId}] Fallback de balance por tercero completado: ${historyRows.length} referencia(s) de tercero/cuenta en ${successfulReports} reporte(s).`,
+      `[companyId=${companyId}] Historial de balance por tercero actualizado: ${historyRows.length} referencia(s) de tercero/cuenta en ${successfulReports} reporte(s).`,
     );
 
     return historyRows.length;
-  }
-
-  clearHistory(companyId: string, integrationId: string): Promise<void> {
-    return this.historialFacturasRepository.replaceRowsBySource(
-      companyId,
-      integrationId,
-      HistorialFacturaFuente.SIIGO_BALANCE_TERCERO,
-      [],
-    );
   }
 
   private previousYears(now = new Date()): number[] {

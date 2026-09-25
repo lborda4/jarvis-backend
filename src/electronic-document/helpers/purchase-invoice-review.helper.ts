@@ -40,7 +40,14 @@ export interface PurchaseInvoiceReviewInput {
   suggestedProduct: SuggestedProduct | null;
   suggestedItemConfig: SuggestedPurchaseItemConfig | null;
   itemAccountSuggestions: Array<SuggestedItemAccount | null>;
+  itemProductSuggestions?: Array<SuggestedProduct | null>;
   aiConfidence: number | null;
+  /** true si ya existe `payload.aiSuggestion`: la clasificación corrió
+   * (o quedó a medias). En ese caso `confidence` null se trata como
+   * fallo (<80): un fallback de historial no puede dejar el documento
+   * en Pendiente. Sin este flag, null sigue significando "la IA nunca
+   * corrió" y no dispara la regla. */
+  aiClassificationAttempted?: boolean;
 }
 
 interface EffectiveItem {
@@ -82,7 +89,8 @@ function resolveEffectiveItems(input: PurchaseInvoiceReviewInput): EffectiveItem
       // (historial del proveedor confirmado, o IA ya matcheada al catálogo).
       const hasCode = Boolean(
         input.suggestedItemConfig?.productCode?.trim() ||
-          input.suggestedProduct?.code?.trim(),
+          input.suggestedProduct?.code?.trim() ||
+          input.itemProductSuggestions?.[index]?.code?.trim(),
       );
       return { tipo, hasCode };
     }
@@ -121,6 +129,20 @@ function resolveEffectivePaymentMethodId(
   return input.suggestedItemConfig?.paymentMethod?.id ?? null;
 }
 
+function isLowAiConfidence(input: PurchaseInvoiceReviewInput): boolean {
+  if (input.aiClassificationAttempted) {
+    return (
+      input.aiConfidence == null ||
+      input.aiConfidence < AI_CONFIDENCE_REVIEW_THRESHOLD
+    );
+  }
+
+  return (
+    input.aiConfidence != null &&
+    input.aiConfidence < AI_CONFIDENCE_REVIEW_THRESHOLD
+  );
+}
+
 export function resolvePurchaseInvoiceRequiresReview(
   input: PurchaseInvoiceReviewInput,
 ): boolean {
@@ -148,10 +170,7 @@ export function resolvePurchaseInvoiceRequiresReview(
     return true;
   }
 
-  if (
-    input.aiConfidence != null &&
-    input.aiConfidence < AI_CONFIDENCE_REVIEW_THRESHOLD
-  ) {
+  if (isLowAiConfidence(input)) {
     return true;
   }
 

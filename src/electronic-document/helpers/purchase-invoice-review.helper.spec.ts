@@ -286,4 +286,29 @@ describe('resolvePurchaseInvoiceRequiresReview — sin borrador (solo sugerencia
 
     expect(result).toBe(false);
   });
+
+  it('si la IA ya corrió y confidence es null, requiere revisión aunque el historial haya llenado cuenta y pago', () => {
+    const result = resolvePurchaseInvoiceRequiresReview(
+      buildInput({
+        payloadItems: [
+          { descripcion: 'Item', cantidad: 1, valorUnitario: 100, total: 100 },
+        ],
+        suggestedAccount: { code: '5115', name: 'Gastos', uses: 3 },
+        suggestedItemConfig: {
+          itemType: 'Account',
+          accountCode: '5115',
+          accountName: 'Gastos',
+          productCode: null,
+          productName: null,
+          ivaTax: null,
+          retefuenteTax: null,
+          paymentMethod: { id: PAYMENT_METHOD_ID, name: 'Contado', type: 'CASH' },
+        },
+        aiConfidence: null,
+        aiClassificationAttempted: true,
+      }),
+    );
+
+    expect(result).toBe(true);
+  });
 });

@@ -38,9 +38,9 @@ export class AiGenerationLog {
   documentId: string | null;
 
   /** Qué llamador disparó esta generación (ej.
-   * 'purchase-item-classification' = clasificación automática en
-   * background, 'purchase-full-classification' = botón manual "Sugerir con
-   * IA") — ambos pasan por el mismo OpenRouterHttpClient. */
+   * 'purchase-item-classification' = tipo + código por ítem,
+   * 'purchase-tax-classification' = IVA y retenciones del endpoint
+   * manual) — ambos pasan por el mismo OpenRouterHttpClient. */
   @Column({ type: 'varchar' })
   purpose: string;
 
