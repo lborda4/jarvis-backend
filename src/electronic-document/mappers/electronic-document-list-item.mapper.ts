@@ -144,6 +144,17 @@ function mapDocumentItems(
     unitValue: item.valorUnitario > 0 ? item.valorUnitario : item.total,
     total: item.total,
     ...(item.codigo?.trim() ? { code: item.codigo.trim() } : {}),
+    ...(item.accountMapping?.code?.trim()
+      ? {
+          accountMapping: {
+            code: item.accountMapping.code.trim(),
+            ...(item.accountMapping.description
+              ? { description: item.accountMapping.description }
+              : {}),
+          },
+        }
+      : {}),
+    ...(item.itemType ? { itemType: item.itemType } : {}),
     ...(item.discount ? { discount: item.discount } : {}),
     suggestedTax: itemTaxSuggestions[index] ?? null,
     suggestedAccount: itemAccountSuggestions[index] ?? null,

@@ -354,6 +354,23 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     expect(payload.invoice.dueDate).toBeUndefined();
   });
 
+  it('calcula el vencimiento con duration_measure cuando NextPyme no manda payment_due_date', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        date: '2026-09-18',
+        payment_form: {
+          payment_form_id: '2',
+          payment_method_id: '1',
+          duration_measure: '30',
+        },
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.invoice.dueDate).toBe('2026-10-18');
+    expect(payload.invoice.durationMeasure).toBe(30);
+  });
+
   it('conserva un payment_due_date real', () => {
     const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       buildResult({

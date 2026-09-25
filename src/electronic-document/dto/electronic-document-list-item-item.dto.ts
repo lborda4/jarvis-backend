@@ -8,6 +8,10 @@ export class ElectronicDocumentListItemItemDto {
   total: number;
   /** Código del producto/ítem tal como viene en la factura original (DIAN/NextPyme). */
   code?: string;
+  /** Cuenta que el contador asignó y guardó en payload.items.accountMapping. */
+  accountMapping?: { code: string; description?: string } | null;
+  /** Tipo SIIGO guardado en el borrador (Account / Product / FixedAsset). */
+  itemType?: 'Product' | 'FixedAsset' | 'Account' | null;
   /** Descuento propio de la línea, si la factura original trae uno. */
   discount?: number;
   /**

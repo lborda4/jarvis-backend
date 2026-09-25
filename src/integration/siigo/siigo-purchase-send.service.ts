@@ -19,7 +19,12 @@ import {
   extractSiigoCalculatedTotalFromApiError,
   isSiigoInvalidTotalPaymentsApiError,
 } from './helpers/siigo-error.helper';
-import { applySiigoCorrectedPaymentsTotal } from './helpers/siigo-purchase-total.helper';
+import {
+  applySiigoCorrectedPaymentsTotal,
+  areItemPricesTaxInclusive,
+  convertTaxInclusiveUnitPrice,
+} from './helpers/siigo-purchase-total.helper';
+import { resolveFallbackIvaTaxId, resolveInvoiceIvaRate } from './helpers/siigo-item-tax-suggestion.helper';
 import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
 import { SiigoPurchaseRequestDto } from './dto/siigo-purchase-request.dto';
 import { SiigoPurchaseResponse } from './interfaces/siigo-api.interface';
@@ -104,14 +109,28 @@ export class SiigoPurchaseSendService {
       taxesCatalog,
     );
 
-    const hasIva = (electronicDocument.payload?.totals?.iva ?? 0) > 0;
+    const payload = electronicDocument.payload;
+    const hasIva = (payload?.totals?.iva ?? 0) > 0;
+    const invoiceIvaRate = resolveInvoiceIvaRate(
+      payload?.items.map((item) => item.ivaPercentage),
+      payload?.totals?.subtotal,
+      payload?.totals?.iva,
+    );
+    const fallbackIvaTaxId = resolveFallbackIvaTaxId({
+      itemIvaPercentages: payload?.items.map((item) => item.ivaPercentage),
+      subtotal: payload?.totals?.subtotal,
+      ivaAmount: payload?.totals?.iva,
+      taxesCatalog,
+    });
+    convertInclusiveRequestPricesIfNeeded(request, payload, invoiceIvaRate);
     const siigoPayload = mapCreatePurchaseSendRequestToSiigo(
       request,
       purchaseConfig.documentId,
       taxesCatalog,
-      purchaseConfig.defaultTaxId,
+      fallbackIvaTaxId ?? undefined,
       hasIva,
     );
+    applyPayloadItemDescriptions(siigoPayload.items, payload?.items);
 
     const requestedPaymentValue = request.payments.reduce(
       (sum, payment) => sum + payment.value,
@@ -398,6 +417,65 @@ export class SiigoPurchaseSendService {
       };
 
       return this.createPurchaseInSiigo(companyId, correctedPayload, true);
+    }
+  }
+}
+
+const GENERIC_ITEM_DESCRIPTION = 'Ítem importado';
+
+function convertInclusiveRequestPricesIfNeeded(
+  request: CreateSiigoPurchaseSendRequestDto,
+  payload:
+    | {
+        totals?: { subtotal?: number; total?: number };
+      }
+    | undefined,
+  taxRate: number | null,
+): void {
+  if (!taxRate || taxRate <= 0) {
+    return;
+  }
+
+  const itemsGross = request.items.reduce((sum, item) => {
+    const quantity = item.quantity > 0 ? item.quantity : 1;
+    const discount = item.discount && item.discount > 0 ? item.discount : 0;
+    return sum + quantity * item.price - discount;
+  }, 0);
+
+  if (
+    !areItemPricesTaxInclusive({
+      itemsGross,
+      subtotal: payload?.totals?.subtotal ?? 0,
+      total: payload?.totals?.total ?? 0,
+    })
+  ) {
+    return;
+  }
+
+  for (const item of request.items) {
+    item.price = convertTaxInclusiveUnitPrice(item.price, taxRate);
+  }
+}
+
+function applyPayloadItemDescriptions(
+  siigoItems: SiigoPurchaseRequestDto['items'],
+  payloadItems:
+    | Array<{ descripcion?: string | null }>
+    | undefined,
+): void {
+  if (!payloadItems?.length) {
+    return;
+  }
+
+  for (let index = 0; index < siigoItems.length; index++) {
+    const currentDescription = siigoItems[index]?.description?.trim();
+    const payloadDescription = payloadItems[index]?.descripcion?.trim();
+
+    if (
+      payloadDescription &&
+      (!currentDescription || currentDescription === GENERIC_ITEM_DESCRIPTION)
+    ) {
+      siigoItems[index].description = payloadDescription;
     }
   }
 }

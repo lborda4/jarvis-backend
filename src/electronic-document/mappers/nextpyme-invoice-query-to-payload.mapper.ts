@@ -78,6 +78,35 @@ function isPlausibleInvoiceDate(value: string): boolean {
   return Number.isFinite(year) && year >= 1900;
 }
 
+function addDaysToIsoDate(date: string, days: number): string | null {
+  if (!isPlausibleInvoiceDate(date) || !Number.isFinite(days) || days <= 0) {
+    return null;
+  }
+
+  const [year, month, day] = date.split('-').map(Number);
+  const utc = Date.UTC(year, month - 1, day + Math.trunc(days));
+
+  if (!Number.isFinite(utc)) {
+    return null;
+  }
+
+  return new Date(utc).toISOString().slice(0, 10);
+}
+
+function resolveInvoiceDueDate(
+  paymentDueDate: string | undefined,
+  issueDate: string,
+  durationMeasure: number,
+): string | undefined {
+  const trimmedDueDate = paymentDueDate?.trim();
+
+  if (trimmedDueDate && isPlausibleInvoiceDate(trimmedDueDate)) {
+    return trimmedDueDate;
+  }
+
+  return addDaysToIsoDate(issueDate, durationMeasure) ?? undefined;
+}
+
 function resolveIsCreditPayment(
   paymentFormId: string | number | undefined,
 ): boolean | undefined {
@@ -155,6 +184,11 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
     result.payment_form?.payment_form_id,
   );
   const durationMeasure = toNumber(result.payment_form?.duration_measure);
+  const dueDate = resolveInvoiceDueDate(
+    result.payment_form?.payment_due_date,
+    result.date?.trim() || '',
+    durationMeasure,
+  );
 
   const items = result.invoice_lines.length
     ? result.invoice_lines.map((line) => {
@@ -223,10 +257,7 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       prefix: result.prefix?.trim() || undefined,
       number: invoiceNumber,
       issueDate: result.date?.trim() || '',
-      ...(result.payment_form?.payment_due_date?.trim() &&
-      isPlausibleInvoiceDate(result.payment_form.payment_due_date.trim())
-        ? { dueDate: result.payment_form.payment_due_date.trim() }
-        : {}),
+      ...(dueDate ? { dueDate } : {}),
       ...(isCreditPayment !== undefined ? { isCreditPayment } : {}),
       ...(durationMeasure > 0 ? { durationMeasure } : {}),
       currency: 'COP',

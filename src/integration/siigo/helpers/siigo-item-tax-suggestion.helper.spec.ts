@@ -1,5 +1,8 @@
 import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
-import { resolveSuggestedTaxForItem } from './siigo-item-tax-suggestion.helper';
+import {
+  resolveFallbackIvaTaxId,
+  resolveSuggestedTaxForItem,
+} from './siigo-item-tax-suggestion.helper';
 
 function buildCatalog(): SiigoTaxCatalogItemDto[] {
   return [
@@ -58,5 +61,49 @@ describe('resolveSuggestedTaxForItem', () => {
     ];
 
     expect(resolveSuggestedTaxForItem(19, catalog)).toBeNull();
+  });
+});
+
+describe('resolveFallbackIvaTaxId', () => {
+  it('elige el IVA de la tarifa de la factura, no el primer IVA del catálogo', () => {
+    const catalog: SiigoTaxCatalogItemDto[] = [
+      { id: 50, name: 'IVA 5%', type: 'IVA', percentage: 5, active: true },
+      { id: 19, name: 'IVA 19%', type: 'IVA', percentage: 19, active: true },
+    ];
+
+    expect(
+      resolveFallbackIvaTaxId({
+        subtotal: 85714,
+        ivaAmount: 16286,
+        taxesCatalog: catalog,
+      }),
+    ).toBe(19);
+  });
+
+  it('si hay varios IVA al 19%, usa uno de esa tarifa y no el de 5%', () => {
+    const catalog: SiigoTaxCatalogItemDto[] = [
+      { id: 50, name: 'IVA 5%', type: 'IVA', percentage: 5, active: true },
+      { id: 191, name: 'IVA 19% Servicios', type: 'IVA', percentage: 19, active: true },
+      { id: 192, name: 'IVA 19% Compras', type: 'IVA', percentage: 19, active: true },
+    ];
+
+    expect(
+      resolveFallbackIvaTaxId({
+        itemIvaPercentages: [19, 19],
+        taxesCatalog: catalog,
+      }),
+    ).toBe(191);
+  });
+
+  it('no inventa un IVA si la factura no trae impuesto', () => {
+    expect(
+      resolveFallbackIvaTaxId({
+        subtotal: 100000,
+        ivaAmount: 0,
+        taxesCatalog: [
+          { id: 50, name: 'IVA 5%', type: 'IVA', percentage: 5, active: true },
+        ],
+      }),
+    ).toBeNull();
   });
 });

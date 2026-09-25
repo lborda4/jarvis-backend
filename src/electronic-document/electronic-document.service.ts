@@ -69,7 +69,10 @@ import { SiigoCostCenterCatalogItemDto } from '../integration/siigo/dto/list-sii
 import { resolveSiigoCostCenter } from '../integration/siigo/helpers/siigo-cost-center-match.helper';
 import { SiigoPaymentTypeCatalogItemDto } from '../integration/siigo/dto/list-siigo-payment-types.dto';
 import { resolveSiigoPaymentDocumentType } from '../integration/siigo/helpers/siigo-payment-document-type.helper';
-import { resolveCreditFallbackPaymentMethod } from '../integration/siigo/helpers/siigo-credit-payment-method.helper';
+import {
+  resolveCreditFallbackPaymentMethod,
+  resolvePurchaseCreditFallbackPaymentMethod,
+} from '../integration/siigo/helpers/siigo-credit-payment-method.helper';
 import {
   resolveSuggestedRetentionsFromInvoice,
   isDocumentLevelSupportDocumentRetentionType,
@@ -106,6 +109,8 @@ import {
 } from './helpers/import-status-filter.helper';
 import { resolveSendConfigurationFromPayload } from './helpers/electronic-document-send-configuration.helper';
 import { ElectronicDocumentsRepository } from './repositories/electronic-documents.repository';
+import type { ElectronicDocumentDraftItem } from './interfaces/electronic-document-draft.interface';
+import type { ElectronicDocumentItem } from './interfaces/electronic-document-item.interface';
 
 /** Tope de seguridad para el recorte por PENDIENTE/REQUIERE_REVISION (ver
  * listDocuments): en vez de paginar en SQL, se traen TODOS los candidatos
@@ -116,6 +121,49 @@ import { ElectronicDocumentsRepository } from './repositories/electronic-documen
  * por el estado) rara vez se acerca a esto; si lo supera, se registra un
  * warning en vez de fallar en silencio. */
 const PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT = 5000;
+
+/** Replica en payload.items la cuenta/producto que el contador guardó, para
+ * que el listado pueda reconstruir las líneas aunque `draft` no llegue. El
+ * SKU del vendedor (codigo original) se conserva: la asignación vive en
+ * accountMapping / itemType. */
+function applyDraftCodesToPayloadItems(
+  payloadItems: ElectronicDocumentItem[],
+  draftItems: ElectronicDocumentDraftItem[],
+): ElectronicDocumentItem[] {
+  if (draftItems.length === 0) {
+    return payloadItems;
+  }
+
+  const length = Math.max(payloadItems.length, draftItems.length);
+
+  return Array.from({ length }, (_, index) => {
+    const existing = payloadItems[index];
+    const saved = draftItems[index];
+
+    if (!saved) {
+      return existing;
+    }
+
+    const code = saved.producto?.trim() || '';
+
+    return {
+      descripcion: saved.description?.trim() || existing?.descripcion || '',
+      cantidad: saved.quantity > 0 ? saved.quantity : (existing?.cantidad ?? 1),
+      valorUnitario:
+        saved.unitValue > 0 ? saved.unitValue : (existing?.valorUnitario ?? 0),
+      total: existing?.total ?? saved.quantity * saved.unitValue,
+      codigo: existing?.codigo,
+      ivaPercentage: existing?.ivaPercentage,
+      discount: saved.discount > 0 ? saved.discount : existing?.discount,
+      itemType: saved.tipo,
+      accountMapping:
+        saved.tipo === 'Account' && code
+          ? { code, description: existing?.accountMapping?.description }
+          : undefined,
+      ...(saved.tipo === 'Product' && code ? { codigo: code } : {}),
+    };
+  });
+}
 
 @Injectable()
 export class ElectronicDocumentService {
@@ -413,6 +461,10 @@ export class ElectronicDocumentService {
     document.draft = draft;
     document.payload = {
       ...document.payload,
+      items: applyDraftCodesToPayloadItems(
+        document.payload.items ?? [],
+        request.items ?? [],
+      ),
       observations: request.observations ?? document.payload.observations,
       invoice: {
         ...document.payload.invoice,
@@ -1772,13 +1824,24 @@ export class ElectronicDocumentService {
             )
           : null;
 
+        const accountCodeForPayment =
+          suggestedAccount?.code ??
+          document.payload?.aiSuggestion?.account?.code ??
+          null;
+
         paymentMethods.set(
           document.id,
           accountBasedPaymentMethod ??
-            resolveCreditFallbackPaymentMethod(
-              document.payload?.invoice?.isCreditPayment,
-              paymentTypesCatalog,
-            ),
+            (document.electronicDocumentType ===
+            ElectronicDocumentType.PURCHASE_INVOICE
+              ? resolvePurchaseCreditFallbackPaymentMethod(
+                  accountCodeForPayment,
+                  paymentTypesCatalog,
+                )
+              : resolveCreditFallbackPaymentMethod(
+                  document.payload?.invoice?.isCreditPayment,
+                  paymentTypesCatalog,
+                )),
         );
       }
       // Retenciones que el vendedor ya certificó en la factura DIAN original

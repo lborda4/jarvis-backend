@@ -40,11 +40,11 @@ import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 
 // Pocos ejemplos a propósito — no todo el historial: cada uno se manda en
 // cada llamada a la IA y suma tokens (y costo) por documento clasificado.
-const HISTORICAL_EXAMPLES_LIMIT = 5;
+const HISTORICAL_EXAMPLES_LIMIT = 10;
 // Respuesta angosta (itemType + accountCode nada más): alcanza con pocos
 // tokens de salida — probado en vivo con openai/gpt-4o-mini en ~15-20 tokens
 // reales de respuesta.
-const ITEM_CLASSIFICATION_MAX_TOKENS = 5000;
+const ITEM_CLASSIFICATION_MAX_TOKENS = 10000;
 // Paso 1 (decidir SOLO Cuenta vs Producto, sin catálogos) responde un JSON
 // mínimo — un tope bajo alcanza de sobra y evita gastar de más si el modelo
 // se explaya con texto extra.

@@ -1,9 +1,11 @@
 import {
   applySiigoCorrectedPaymentsTotal,
+  areItemPricesTaxInclusive,
   calculateSiigoDocumentPaymentValue,
   calculateSiigoDocumentRetentionTotal,
   calculateSiigoPurchasePaymentValue,
   calculateSiigoSupportDocumentPaymentValue,
+  convertTaxInclusiveUnitPrice,
   roundMoney,
   roundSiigoAmount,
 } from './siigo-purchase-total.helper';
@@ -201,5 +203,32 @@ describe('applySiigoCorrectedPaymentsTotal', () => {
 
   it('devuelve el array vacío sin lanzar si no hay pagos', () => {
     expect(applySiigoCorrectedPaymentsTotal([], 100)).toEqual([]);
+  });
+});
+
+describe('precios con IVA incluido', () => {
+  it('detecta el caso real: líneas suman el total pagable, no el subtotal neto', () => {
+    expect(
+      areItemPricesTaxInclusive({
+        itemsGross: 102000,
+        subtotal: 85714,
+        total: 102000,
+      }),
+    ).toBe(true);
+  });
+
+  it('no convierte cuando las líneas ya están en base gravable', () => {
+    expect(
+      areItemPricesTaxInclusive({
+        itemsGross: 85714,
+        subtotal: 85714,
+        total: 102000,
+      }),
+    ).toBe(false);
+  });
+
+  it('saca el IVA del precio unitario para que SIIGO no lo vuelva a sumar', () => {
+    expect(convertTaxInclusiveUnitPrice(100000, 19)).toBe(84033.61);
+    expect(convertTaxInclusiveUnitPrice(100, 19)).toBe(84.03);
   });
 });

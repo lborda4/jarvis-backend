@@ -39,6 +39,37 @@ export function roundMoney(value: number): number {
 }
 
 /**
+ * Algunos proveedores mandan valor unitario YA con IVA, mientras el
+ * subtotal DIAN viene neto. Si la suma de líneas se parece al total y no
+ * al subtotal, SIIGO interpretaría ese precio como base gravable y
+ * volvería a sumar IVA.
+ */
+export function areItemPricesTaxInclusive(params: {
+  itemsGross: number;
+  subtotal: number;
+  total: number;
+}): boolean {
+  const { itemsGross, subtotal, total } = params;
+
+  if (!(itemsGross > 0) || !(subtotal > 0) || !(total > subtotal)) {
+    return false;
+  }
+
+  return Math.abs(itemsGross - total) < Math.abs(itemsGross - subtotal);
+}
+
+export function convertTaxInclusiveUnitPrice(
+  price: number,
+  taxRate: number,
+): number {
+  if (!(price > 0) || !(taxRate > 0)) {
+    return price;
+  }
+
+  return roundMoney(price / (1 + taxRate / 100));
+}
+
+/**
  * Redondea montos para Siigo en pesos colombianos (enteros).
  * Solo aplica al valor calculado enviado a Siigo; no modifica totales del XML.
  */
