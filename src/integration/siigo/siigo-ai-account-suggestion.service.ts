@@ -21,6 +21,7 @@ import {
   parsePurchaseClassificationResponse,
 } from './helpers/purchase-classification-prompt.helper';
 import {
+  attachCatalogNamesToHistoricalExamples,
   buildAccountCodeClassificationPrompt,
   buildItemTypeClassificationPrompt,
   buildProductCodeClassificationPrompt,
@@ -210,13 +211,16 @@ export class SiigoAiAccountSuggestionService {
       accounts,
       taxes: activeIvaTaxes,
       retentionTaxes: activeRetentionTaxes,
-      historicalExamples: historicalRows.map((row) => ({
-        descripcionItem: row.descripcionItem,
-        cuentaPuc: row.cuentaPuc,
-        impuestos: row.impuestos,
-        confirmadaPorContador:
-          row.fuente === HistorialFacturaFuente.CORREGIDO_CONTADOR,
-      })),
+      historicalExamples: attachCatalogNamesToHistoricalExamples(
+        historicalRows.map((row) => ({
+          descripcionItem: row.descripcionItem,
+          cuentaPuc: row.cuentaPuc,
+          impuestos: row.impuestos,
+          confirmadaPorContador:
+            row.fuente === HistorialFacturaFuente.CORREGIDO_CONTADOR,
+        })),
+        accounts,
+      ),
     });
 
     const { content: rawText } =
@@ -395,12 +399,15 @@ export class SiigoAiAccountSuggestionService {
         itemDescriptions,
         productsCatalog,
       );
-      const productHistoricalExamples = historicalRows
-        .filter((row) => row.tipo === HistorialFacturaTipo.PRODUCTO)
-        .map((row) => ({
-          descripcionItem: row.descripcionItem,
-          cuentaPuc: row.cuentaPuc,
-        }));
+      const productHistoricalExamples = attachCatalogNamesToHistoricalExamples(
+        historicalRows
+          .filter((row) => row.tipo === HistorialFacturaTipo.PRODUCTO)
+          .map((row) => ({
+            descripcionItem: row.descripcionItem,
+            cuentaPuc: row.cuentaPuc,
+          })),
+        productsCatalog,
+      );
 
       const prompt = buildProductCodeClassificationPrompt({
         supplierName,
@@ -455,12 +462,15 @@ export class SiigoAiAccountSuggestionService {
       };
     }
 
-    const accountHistoricalExamples = historicalRows
-      .filter((row) => row.tipo === HistorialFacturaTipo.CUENTA)
-      .map((row) => ({
-        descripcionItem: row.descripcionItem,
-        cuentaPuc: row.cuentaPuc,
-      }));
+    const accountHistoricalExamples = attachCatalogNamesToHistoricalExamples(
+      historicalRows
+        .filter((row) => row.tipo === HistorialFacturaTipo.CUENTA)
+        .map((row) => ({
+          descripcionItem: row.descripcionItem,
+          cuentaPuc: row.cuentaPuc,
+        })),
+      allTransactionalAccounts,
+    );
 
     const prompt = buildAccountCodeClassificationPrompt({
       supplierName,

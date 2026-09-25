@@ -42,7 +42,7 @@ const LOG_PREVIEW_LIMIT = 2000;
  * AiGenerationLog, que existe justamente para detectar esto por llamada en
  * vez de adivinarlo.)
  */
-const DEFAULT_MAX_TOKENS = 100;
+const DEFAULT_MAX_TOKENS = 256;
 
 interface OpenRouterUsage {
   prompt_tokens?: number;
@@ -131,18 +131,22 @@ export class OpenRouterHttpClient {
       requestedModel: config.model,
     });
 
+    const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     const requestBody = {
       model: config.model,
       messages,
-      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+      // ChatGPT (o-series / gpt-5) rechaza `max_tokens` y solo respeta
+      // `max_completion_tokens`. Mandar solo el primero dejaba ~12 tokens
+      // de salida: un JSON vacío o con accountCode/productCode en null.
+      max_completion_tokens: maxTokens,
       // Fuerza una respuesta JSON válida en vez de confiar solo en la
       // instrucción del prompt — la mayoría de los modelos servidos por
       // OpenRouter (incluido openai/*) soportan este campo.
       response_format: { type: 'json_object' },
-      // OpenRouter puede enrutar un `openai/*` por otro backend si el
-      // primario falla. `only: OpenAI` deja la llamada en ChatGPT.
+      // El slug oficial es `openai` (minúsculas). `OpenAI` no matchea y
+      // OpenRouter puede enrutar mal o cortar la respuesta.
       provider: {
-        only: ['OpenAI'],
+        only: ['openai'],
         allow_fallbacks: false,
       },
     };
@@ -317,12 +321,39 @@ export class OpenRouterHttpClient {
     }
 
     const message = (choices[0] as Record<string, unknown>)?.message;
-    const content =
-      message && typeof message === 'object'
-        ? (message as Record<string, unknown>).content
-        : undefined;
 
-    return typeof content === 'string' ? content : '';
+    if (!message || typeof message !== 'object') {
+      return '';
+    }
+
+    const record = message as Record<string, unknown>;
+
+    if (typeof record.content === 'string') {
+      return record.content;
+    }
+
+    if (Array.isArray(record.content)) {
+      return record.content
+        .map((part) => {
+          if (typeof part === 'string') {
+            return part;
+          }
+
+          if (part && typeof part === 'object') {
+            const text = (part as Record<string, unknown>).text;
+            return typeof text === 'string' ? text : '';
+          }
+
+          return '';
+        })
+        .join('');
+    }
+
+    if (record.parsed && typeof record.parsed === 'object') {
+      return JSON.stringify(record.parsed);
+    }
+
+    return '';
   }
 
   private preview(value: unknown): string {

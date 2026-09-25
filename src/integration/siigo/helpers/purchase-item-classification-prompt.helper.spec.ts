@@ -1,4 +1,5 @@
 import {
+  attachCatalogNamesToHistoricalExamples,
   buildAccountCodeClassificationPrompt,
   buildItemTypeClassificationPrompt,
   buildProductCodeClassificationPrompt,
@@ -102,7 +103,7 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     });
 
     expect(messages[0].content).toContain(
-      'ejemplo previo del MISMO proveedor',
+      'histórico de facturas anteriores',
     );
     expect(messages[0].content).toContain(
       'No inventes ni completes significados',
@@ -125,12 +126,18 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
         {
           descripcionItem: 'Servicio Línea Telefónica Enero',
           cuentaPuc: '51356002',
+          cuentaNombre: 'Servicio Línea Telefónica',
         },
       ],
     });
 
+    expect(messages[1].content).toContain(
+      'Histórico de facturas anteriores de este proveedor',
+    );
     expect(messages[1].content).toContain('Servicio Línea Telefónica Enero');
-    expect(messages[1].content).toContain('51356002');
+    expect(messages[1].content).toContain(
+      '51356002 Servicio Línea Telefónica',
+    );
   });
 
   it('no incluye la sección de ejemplos históricos cuando no se proveen', () => {
@@ -141,7 +148,9 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
       accounts: [],
     });
 
-    expect(messages[1].content).not.toContain('Ejemplos previos');
+    expect(messages[1].content).not.toContain(
+      'Histórico de facturas anteriores',
+    );
   });
 });
 
@@ -208,12 +217,16 @@ describe('buildProductCodeClassificationPrompt (paso 2b — solo productos)', ()
       items: [{ descripcion: 'X' }],
       products: [],
       historicalExamples: [
-        { descripcionItem: 'Galleta MUUU leche C', cuentaPuc: 'PROD-001' },
+        {
+          descripcionItem: 'Galleta MUUU leche C',
+          cuentaPuc: 'PROD-001',
+          cuentaNombre: 'Galleta MUUU leche',
+        },
       ],
     });
 
     expect(messages[1].content).toContain('Galleta MUUU leche C');
-    expect(messages[1].content).toContain('PROD-001');
+    expect(messages[1].content).toContain('PROD-001 Galleta MUUU leche');
   });
 });
 
@@ -231,5 +244,21 @@ describe('parseProductCodeClassificationResponse', () => {
       productCode: null,
       confidence: null,
     });
+  });
+});
+
+describe('attachCatalogNamesToHistoricalExamples', () => {
+  it('completa el nombre cruzando el código con siigo_accounts', () => {
+    const [example] = attachCatalogNamesToHistoricalExamples(
+      [
+        {
+          descripcionItem: 'BOLSA RECICLADA',
+          cuentaPuc: '51050601',
+        },
+      ],
+      [{ code: '51050601', name: 'Elementos de aseo' }],
+    );
+
+    expect(example.cuentaNombre).toBe('Elementos de aseo');
   });
 });

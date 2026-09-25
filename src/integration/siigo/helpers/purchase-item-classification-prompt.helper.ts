@@ -8,6 +8,9 @@ export interface PurchaseItemClassificationPromptItem {
 export interface PurchaseItemClassificationHistoricalExample {
   descripcionItem: string;
   cuentaPuc: string;
+  /** Nombre real de `siigo_accounts` (o del catálogo de productos) para
+   * ese código — la IA ve código + nombre, no solo el PUC/SKU. */
+  cuentaNombre?: string | null;
 }
 
 function extractJsonObject(rawText: string): string | null {
@@ -41,16 +44,69 @@ function itemsSection(items: PurchaseItemClassificationPromptItem[]): string {
     .join('\n');
 }
 
+export function formatHistoricalExampleTarget(
+  code: string,
+  name?: string | null,
+): string {
+  const trimmedCode = code.trim();
+  const trimmedName = name?.trim();
+
+  if (trimmedName && trimmedName !== trimmedCode) {
+    return `${trimmedCode} ${trimmedName}`;
+  }
+
+  return trimmedCode;
+}
+
+/** Completa `cuentaNombre` cruzando cada código contra el catálogo
+ * (`siigo_accounts` o productos SIIGO). Si el código no está, se deja el
+ * nombre que ya viniera (o null). */
+export function attachCatalogNamesToHistoricalExamples<
+  T extends {
+    cuentaPuc: string;
+    cuentaNombre?: string | null;
+  },
+>(
+  examples: T[],
+  catalog: Array<{ code: string; name: string }>,
+): T[] {
+  const nameByCode = new Map<string, string>();
+
+  for (const item of catalog) {
+    const code = item.code?.trim();
+    const name = item.name?.trim();
+
+    if (code && name && !nameByCode.has(code)) {
+      nameByCode.set(code, name);
+    }
+  }
+
+  return examples.map((example) => {
+    const code = example.cuentaPuc.trim();
+
+    return {
+      ...example,
+      cuentaNombre: nameByCode.get(code) || example.cuentaNombre || null,
+    };
+  });
+}
+
+const HISTORICAL_INVOICES_LABEL =
+  'Histórico de facturas anteriores de este proveedor';
+
 function historicalExamplesSection(
   examples: PurchaseItemClassificationHistoricalExample[] | undefined,
-  label: string,
+  label: string = HISTORICAL_INVOICES_LABEL,
 ): string {
   if (!examples || examples.length === 0) {
     return '';
   }
 
   return `\n${label}:\n${examples
-    .map((example) => `- "${example.descripcionItem}"→${example.cuentaPuc}`)
+    .map(
+      (example) =>
+        `- "${example.descripcionItem}"→${formatHistoricalExampleTarget(example.cuentaPuc, example.cuentaNombre)}`,
+    )
     .join('\n')}`;
 }
 
@@ -148,8 +204,8 @@ const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA sola cuenta PUC de gasto/costo pa
 
 REGLAS DE PRIORIDAD:
 
-1. Si existe un ejemplo previo del MISMO proveedor con un concepto igual o claramente equivalente, usá esa cuenta.
-2. Si no existe, clasificá según el concepto REALMENTE indicado en los ítems.
+1. Guiate SOBRE TODO por el histórico de facturas anteriores de este mismo proveedor. Si ya se envió una factura con un concepto igual o claramente equivalente, usá esa misma cuenta.
+2. Solo si no hay histórico comparable, clasificá según el concepto REALMENTE indicado en los ítems.
 3. No inventes ni completes significados que no estén respaldados por el texto. Una sigla, código o referencia desconocida no debe interpretarse como "leasing", "cuota", "equipo", "red", etc.
 4. El nombre del proveedor puede dar contexto, pero NO determina por sí solo la cuenta.
 5. Usá únicamente códigos que aparezcan literalmente en el catálogo.
@@ -178,7 +234,7 @@ Proveedor: ${params.supplierName}
 ${itemsSection(params.items)}
 
 Cuentas PUC transaccionales:
-${accountsCatalog}${historicalExamplesSection(params.historicalExamples, 'Ejemplos previos de este proveedor')}`;
+${accountsCatalog}${historicalExamplesSection(params.historicalExamples)}`;
 
   return [
     { role: 'system', content: SYSTEM_PROMPT_ACCOUNT_CODE },
@@ -244,9 +300,9 @@ const SYSTEM_PROMPT_PRODUCT_CODE = `Elegís el código de producto del catálogo
 
 Tu respuesta es UN SOLO código para la factura completa, nunca uno por ítem — no existe un campo para eso. Si hay varios ítems, elegí el producto que mejor represente el conjunto; no dejes de responder ni expliques la duda, solo elegí la mejor opción única.
 
-Reglas: si hay ejemplos previos de este proveedor, seguilos siempre. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. A diferencia de una cuenta contable, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada; productCode null solo es válido si genuinamente NINGÚN producto del catálogo se parece al ítem.
+Reglas: guiate SOBRE TODO por el histórico de facturas anteriores de este proveedor. Si ya se envió un concepto igual o equivalente, usá ese mismo código. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. A diferencia de una cuenta contable, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada; productCode null solo es válido si genuinamente NINGÚN producto del catálogo se parece al ítem.
 
-confidence: entero de 0 a 100, qué tan segura estás de la elección. 90-100 = hay un ejemplo previo de este proveedor con la misma descripción o casi idéntica. 60-89 = coincide bien pero sin ejemplo previo exacto. Por debajo de 50 = es una decisión forzada, sin señal fuerte. Sé honesta: es más útil reportar baja confianza en una elección dudosa que inflarla.
+confidence: entero de 0 a 100, qué tan segura estás de la elección. 90-100 = en el histórico de facturas anteriores hay la misma descripción o casi idéntica. 60-89 = coincide bien pero sin factura anterior equivalente. Por debajo de 50 = es una decisión forzada, sin señal fuerte. Sé honesta: es más útil reportar baja confianza en una elección dudosa que inflarla.
 
 Responde SOLO este JSON, sin texto extra: {"productCode":string|null,"confidence":number}`;
 
@@ -263,7 +319,7 @@ Proveedor: ${params.supplierName}
 ${itemsSection(params.items)}
 
 Catálogo de productos:
-${productsCatalog}${historicalExamplesSection(params.historicalExamples, 'Ejemplos previos de este proveedor')}`;
+${productsCatalog}${historicalExamplesSection(params.historicalExamples)}`;
 
   return [
     { role: 'system', content: SYSTEM_PROMPT_PRODUCT_CODE },

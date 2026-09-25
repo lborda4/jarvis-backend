@@ -68,15 +68,19 @@ describe('buildPurchaseClassificationPrompt', () => {
         {
           descripcionItem: 'Servicio de aseo mensual',
           cuentaPuc: '511010',
+          cuentaNombre: 'Servicios de aseo',
           impuestos: { iva: { id: 1, name: 'IVA 19%', percentage: 19 } },
           confirmadaPorContador: true,
         },
       ],
     });
 
+    expect(messages[1].content).toContain(
+      'Histórico de facturas anteriores de este proveedor',
+    );
     expect(messages[1].content).toContain('Servicio de aseo mensual');
     expect(messages[1].content).toContain('(confirmado)');
-    expect(messages[1].content).toContain('511010');
+    expect(messages[1].content).toContain('511010 Servicios de aseo');
   });
 
   it('no incluye la sección de ejemplos históricos cuando no se proveen', () => {
@@ -87,7 +91,9 @@ describe('buildPurchaseClassificationPrompt', () => {
       taxes: [],
     });
 
-    expect(messages[1].content).not.toContain('Ejemplos previos');
+    expect(messages[1].content).not.toContain(
+      'Histórico de facturas anteriores',
+    );
   });
 });
 

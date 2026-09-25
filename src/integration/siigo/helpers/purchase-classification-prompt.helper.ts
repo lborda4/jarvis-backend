@@ -2,6 +2,7 @@ import type { OpenRouterMessage } from '../../openrouter/clients/openrouter-http
 import type { SiigoAccountCatalogItemDto } from '../dto/list-siigo-accounts.dto';
 import type { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import type { HistorialFacturaImpuestos } from '../../interfaces/historial-factura-impuestos.interface';
+import { formatHistoricalExampleTarget } from './purchase-item-classification-prompt.helper';
 
 export interface PurchaseClassificationPromptItem {
   descripcion: string;
@@ -12,6 +13,8 @@ export interface PurchaseClassificationPromptItem {
 export interface PurchaseClassificationHistoricalExample {
   descripcionItem: string;
   cuentaPuc: string;
+  /** Nombre real de `siigo_accounts` para ese código. */
+  cuentaNombre?: string | null;
   impuestos: HistorialFacturaImpuestos;
   /** true = corrección confirmada por el contador (más confiable que la sincronizada de SIIGO). */
   confirmadaPorContador: boolean;
@@ -38,9 +41,9 @@ export interface ParsedPurchaseClassification {
 // Prompt deliberadamente corto: se manda en cada clasificación, así que su
 // tamaño se multiplica por cada documento. Sin explicaciones de más, sin
 // pedirle rationale/confidence — solo la sugerencia.
-const SYSTEM_PROMPT = `Clasificas facturas de compra colombianas para SIIGO. Dado ítems, catálogo de cuentas PUC, catálogo de IVA, catálogo de retenciones y (si hay) ejemplos previos de este proveedor, elegís cuenta, un IVA y 0+ retenciones.
+const SYSTEM_PROMPT = `Clasificas facturas de compra colombianas para SIIGO. Dado ítems, catálogo de cuentas PUC, catálogo de IVA, catálogo de retenciones y (si hay) el histórico de facturas anteriores de este proveedor, elegís cuenta, un IVA y 0+ retenciones.
 
-Reglas generales: usa SOLO ids/códigos que estén LITERALMENTE en los catálogos dados, nunca inventes uno. Si hay ejemplos previos, seguilos (más los marcados "confirmado").
+Reglas generales: usa SOLO ids/códigos que estén LITERALMENTE en los catálogos dados, nunca inventes uno. Guiate SOBRE TODO por el histórico de facturas anteriores: si ya se envió un concepto igual o equivalente, repetí esa cuenta (más las marcadas "confirmado"). Solo si no hay histórico comparable clasificá por el concepto de los ítems.
 
 Cuenta: las cuentas PUC son categorías amplias de gasto/costo, no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. Dejá accountCode null solo si de verdad ninguna categoría del catálogo aplica.
 
@@ -90,10 +93,10 @@ export function buildPurchaseClassificationPrompt(
 
   const historicalExamplesSection =
     params.historicalExamples && params.historicalExamples.length > 0
-      ? `\nEjemplos previos de este proveedor:\n${params.historicalExamples
+      ? `\nHistórico de facturas anteriores de este proveedor:\n${params.historicalExamples
           .map(
             (example) =>
-              `- "${example.descripcionItem}"→${example.cuentaPuc},${formatImpuestosSummary(example.impuestos)}${
+              `- "${example.descripcionItem}"→${formatHistoricalExampleTarget(example.cuentaPuc, example.cuentaNombre)},${formatImpuestosSummary(example.impuestos)}${
                 example.confirmadaPorContador ? '(confirmado)' : ''
               }`,
           )
