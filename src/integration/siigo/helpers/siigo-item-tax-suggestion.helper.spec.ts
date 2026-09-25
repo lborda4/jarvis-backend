@@ -54,13 +54,17 @@ describe('resolveSuggestedTaxForItem', () => {
     expect(suggestion?.id).toBe(3);
   });
 
-  it('returns null when multiple active IVA taxes share the same percentage (ambiguous)', () => {
+  it('si hay varios IVA al 19%, elige el de compras/general y nunca Activo Fijo', () => {
     const catalog: SiigoTaxCatalogItemDto[] = [
-      ...buildCatalog(),
       { id: 6, name: 'IVA Activo Fijo', type: 'IVA', percentage: 19, active: true },
+      { id: 1, name: 'IVA 19%', type: 'IVA', percentage: 19, active: true },
     ];
 
-    expect(resolveSuggestedTaxForItem(19, catalog)).toBeNull();
+    expect(resolveSuggestedTaxForItem(19, catalog)).toEqual({
+      id: 1,
+      name: 'IVA 19%',
+      percentage: 19,
+    });
   });
 });
 
@@ -92,7 +96,22 @@ describe('resolveFallbackIvaTaxId', () => {
         itemIvaPercentages: [19, 19],
         taxesCatalog: catalog,
       }),
-    ).toBe(191);
+    ).toBe(192);
+  });
+
+  it('nunca cae a IVA Activo Fijo si hay otro IVA a la misma tarifa', () => {
+    const catalog: SiigoTaxCatalogItemDto[] = [
+      { id: 6, name: 'IVA Activo Fijo', type: 'IVA', percentage: 19, active: true },
+      { id: 1, name: 'IVA 19%', type: 'IVA', percentage: 19, active: true },
+    ];
+
+    expect(
+      resolveFallbackIvaTaxId({
+        subtotal: 85714,
+        ivaAmount: 16286,
+        taxesCatalog: catalog,
+      }),
+    ).toBe(1);
   });
 
   it('no inventa un IVA si la factura no trae impuesto', () => {

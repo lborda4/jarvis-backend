@@ -108,10 +108,10 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
       'No inventes ni completes significados',
     );
     expect(messages[0].content).toContain(
-      'siempre da una sugerencia',
+      'accountCode NUNCA puede ser null',
     );
     expect(messages[0].content).toContain(
-      '{"accountCode":string|null,"confidence":number}',
+      '{"accountCode":string,"confidence":number}',
     );
   });
 

@@ -50,6 +50,31 @@ export function resolveAccountNameFromCatalog(
   return accountNameByCode.get(code.trim()) ?? fallbackName;
 }
 
+/** Elige SIEMPRE una cuenta del catálogo: primero un código preferido que
+ * exista literalmente (respuesta de IA o ejemplo histórico), si no la
+ * primera del catálogo. null solo si el catálogo viene vacío. */
+export function resolveRequiredAccountFromCatalog(
+  accounts: Array<Pick<SiigoAccount, 'code' | 'name'>>,
+  preferredCodes: Array<string | null | undefined> = [],
+): AccountCatalogItem | null {
+  if (accounts.length === 0) {
+    return null;
+  }
+
+  for (const candidate of preferredCodes) {
+    const trimmed = candidate?.trim();
+    const match = trimmed
+      ? accounts.find((account) => account.code === trimmed)
+      : undefined;
+
+    if (match) {
+      return { code: match.code, name: match.name };
+    }
+  }
+
+  return { code: accounts[0].code, name: accounts[0].name };
+}
+
 export function buildSupplierNameLookup(
   configurations: Array<
     Pick<SupplierConfiguration, 'supplierDocument' | 'supplierName'>

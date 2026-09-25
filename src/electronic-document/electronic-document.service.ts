@@ -1830,7 +1830,7 @@ export class ElectronicDocumentService {
           null;
 
         paymentMethods.set(
-          document.id,
+        document.id,
           accountBasedPaymentMethod ??
             (document.electronicDocumentType ===
             ElectronicDocumentType.PURCHASE_INVOICE
@@ -1864,9 +1864,9 @@ export class ElectronicDocumentService {
         ) ?? null;
 
       const suggestedDocumentRetentions = resolveSuggestedRetentionsForDocument(
-        document,
-        configurationIndex,
-        integrationId,
+          document,
+          configurationIndex,
+          integrationId,
       );
       retentions.set(
         document.id,

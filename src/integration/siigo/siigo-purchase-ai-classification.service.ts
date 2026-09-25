@@ -5,6 +5,7 @@ import { SupplierConfigurationsRepository } from '../repositories/supplier-confi
 import { SupplierItemAccountMappingsRepository } from '../repositories/supplier-item-account-mappings.repository';
 import {
   resolveSuggestedAccountForItem,
+  resolveSuggestedItemConfigFromConfiguration,
   resolveSuggestedPaymentMethodFromSync,
 } from '../helpers/supplier-preference.helper';
 import {
@@ -136,9 +137,10 @@ export class SiigoPurchaseAiClassificationService {
       supplierNit,
     );
 
-    // Cuenta ya resuelta con una regla exacta por ítem, y medio de pago fijo
-    // por el sync de historial: la preferencia ya sincronizada alcanza, no
-    // hace falta gastar una llamada a la IA.
+    // Cuenta o producto ya resueltos, y medio de pago fijo por el sync: la
+    // preferencia ya sincronizada alcanza, no hace falta gastar una llamada
+    // a la IA. Si el tipo dominante es Producto pero no hay código de
+    // producto, igual se llama (ver needsAiClassification).
     console.log(
       `[AI-CLASSIFY] [documentId=${documentId}] needsAi=${needsAi}`,
     );
@@ -255,20 +257,13 @@ export class SiigoPurchaseAiClassificationService {
   }
 
   /**
-   * true si falta info confiable de cuenta contable (algún ítem sin regla
-   * exacta proveedor+descripción) o de medio de pago (sin valor fijo
-   * calculado por el sync de historial). "Confiable" acá es el mismo umbral
-   * que ya usa todo el producto: VARIABILITY_THRESHOLD=0.7 en
-   * SiigoPurchaseHistorySyncService — un campo solo llega marcado
-   * `variable: false` (o `configuration.preference` solo se llena) cuando su
-   * valor dominante cubre ≥70% del historial de ese proveedor. No se
-   * introduce un umbral distinto para la IA: `resolveSuggestedPaymentMethodFromSync`
-   * y `resolveSuggestedAccountFromPreference` (el fallback dentro de
-   * `resolveSuggestedAccountForItem`) ya leen exactamente esa señal.
-   * `source: 'fallback'` (proveedor con una única cuenta en su historial,
-   * pero esta descripción de ítem es nueva) sigue disparando la IA aunque ya
-   * haya pasado el 70% a nivel proveedor — es una distinción aparte, no de
-   * umbral: esa cuenta nunca se validó contra ESTA descripción puntual.
+   * true si falta info confiable de cuenta, de producto o de medio de pago.
+   * "Confiable" acá es el mismo umbral que ya usa todo el producto:
+   * VARIABILITY_THRESHOLD=0.7 en SiigoPurchaseHistorySyncService.
+   * Si el historial marca tipoItem fijo (Product o Account) pero cuentaPuc
+   * es variable, se salta el paso 1 (el tipo ya se sabe) y se llama a la IA
+   * para elegir el código del catálogo. El medio de pago fijo no resuelve
+   * ese hueco.
    */
   private async needsAiClassification(
     payload: {
@@ -296,6 +291,37 @@ export class SiigoPurchaseAiClassificationService {
         `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=true: el documento no tiene ítems.`,
       );
       return true;
+    }
+
+    const itemConfig =
+      resolveSuggestedItemConfigFromConfiguration(configuration);
+
+    if (itemConfig?.itemType === 'Product' && !itemConfig.productCode) {
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=true: tipo Producto fijo para proveedor ${supplierNit} pero sin código de producto dominante (cuentaPuc variable).`,
+      );
+      return true;
+    }
+
+    if (itemConfig?.itemType === 'Product' && itemConfig.productCode) {
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=false: proveedor ${supplierNit} — medio de pago y producto ya resueltos con confianza por el historial.`,
+      );
+      return false;
+    }
+
+    if (itemConfig?.itemType === 'Account' && !itemConfig.accountCode) {
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=true: tipo Cuenta fijo para proveedor ${supplierNit} pero sin código de cuenta dominante (cuentaPuc variable).`,
+      );
+      return true;
+    }
+
+    if (itemConfig?.itemType === 'Account' && itemConfig.accountCode) {
+      console.log(
+        `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=false: proveedor ${supplierNit} — medio de pago y cuenta ya resueltos con confianza por el historial.`,
+      );
+      return false;
     }
 
     const supplierDocumentType = payload.supplier.documentType?.trim() || 'NIT';

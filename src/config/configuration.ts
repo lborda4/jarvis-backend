@@ -67,9 +67,20 @@ export interface NextPymeConfig {
   invoiceQueryUrl: string;
 }
 
+/** Cualquier modelo de OpenAI en OpenRouter (prefijo `openai/`). Si el env
+ * apunta a otro proveedor o a un router (`openrouter/auto`), se fuerza este. */
+const DEFAULT_OPENAI_MODEL = 'openai/gpt-4o-mini';
+
+function resolveOpenAiOnlyModel(value: string | undefined): string {
+  const trimmed = value?.trim();
+
+  return trimmed?.startsWith('openai/') ? trimmed : DEFAULT_OPENAI_MODEL;
+}
+
 /** Reemplaza la integración anterior con OpenAI directo — mismo formato
  * OpenAI-compatible (chat/completions), pero a través de OpenRouter, que
- * enruta a distintos modelos con una sola API key. */
+ * enruta a distintos modelos con una sola API key. El modelo se fija a
+ * OpenAI (ChatGPT): no se aceptan Claude, Gemini ni el auto-router. */
 export interface OpenRouterConfig {
   apiKey?: string;
   model: string;
@@ -202,7 +213,7 @@ export default (): AppConfiguration => ({
   },
   openRouter: {
     apiKey: trimOptional(process.env.OPENROUTER_API_KEY),
-    model: trimOptional(process.env.OPENROUTER_MODEL) ?? 'openai/gpt-4o-mini',
+    model: resolveOpenAiOnlyModel(process.env.OPENROUTER_MODEL),
     baseUrl:
       trimOptional(process.env.OPENROUTER_BASE_URL) ??
       'https://openrouter.ai/api/v1',

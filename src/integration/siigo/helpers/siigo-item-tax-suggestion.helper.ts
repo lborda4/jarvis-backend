@@ -8,15 +8,60 @@ export interface SuggestedItemTax {
 
 const IVA_MATCH_TOLERANCE = 0.01;
 
+/** Menor puntaje = mejor candidato. "IVA Activo Fijo" no puede ganar si
+ * existe otro IVA a la misma tarifa: al enviar, SIIGO lo aplica como
+ * impuesto de activo y el contador ve la compra contabilizada mal. */
+function scoreIvaTaxName(name: string): number {
+  const normalized = name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (/activo\s*fijo|fixed\s*asset/.test(normalized)) {
+    return 100;
+  }
+
+  if (/compra/.test(normalized)) {
+    return 0;
+  }
+
+  if (/bienes|general|gravado/.test(normalized)) {
+    return 1;
+  }
+
+  if (/servicio/.test(normalized)) {
+    return 2;
+  }
+
+  return 10;
+}
+
+export function pickPreferredIvaTax<T extends { name: string }>(
+  matches: T[],
+): T | null {
+  if (matches.length === 0) {
+    return null;
+  }
+
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  return [...matches].sort((left, right) => {
+    const scoreDiff = scoreIvaTaxName(left.name) - scoreIvaTaxName(right.name);
+
+    return scoreDiff !== 0
+      ? scoreDiff
+      : left.name.localeCompare(right.name, 'es');
+  })[0];
+}
+
 /**
  * Busca en el catálogo de impuestos de SIIGO de la empresa un IVA cuyo
  * porcentaje coincida (con tolerancia de punto flotante) con el que trae la
- * factura original. Solo hace match exacto por porcentaje — si no hay
- * ninguno, o si hay más de uno (ej. "IVA Servicios 19%" e "IVA Activo Fijo"
- * conviven en el mismo catálogo a la misma tarifa), devuelve null para que
- * el usuario elija el impuesto a mano en vez de mandarle a SIIGO un impuesto
- * adivinado — quedarse con el primero por orden de catálogo (antes
- * alfabético) es indistinguible de adivinar.
+ * factura original. Si hay varios a la misma tarifa (ej. "IVA 19%" e
+ * "IVA Activo Fijo"), elige el de compras/general — nunca Activo Fijo,
+ * porque SIIGO lo aplica como impuesto de activo y la compra queda mal.
  */
 export function resolveSuggestedTaxForItem(
   ivaPercentage: number | undefined,
@@ -26,13 +71,13 @@ export function resolveSuggestedTaxForItem(
     return null;
   }
 
-  const matches = findActiveIvaTaxesByRate(ivaPercentage, taxesCatalog);
+  const match = pickPreferredIvaTax(
+    findActiveIvaTaxesByRate(ivaPercentage, taxesCatalog),
+  );
 
-  if (matches.length !== 1) {
+  if (!match) {
     return null;
   }
-
-  const [match] = matches;
 
   return {
     id: match.id,
@@ -44,8 +89,9 @@ export function resolveSuggestedTaxForItem(
 /**
  * IVA de respaldo al enviar a SIIGO cuando el ítem no trae tax id: elige
  * uno cuya tarifa coincida con la factura (ítems o totales DIAN). Si hay
- * varios IVA al mismo %, usa el primero de ESA tarifa — nunca el primer IVA
- * del catálogo (eso mandaba 5% a facturas de 19%).
+ * varios IVA al mismo %, usa el preferido de ESA tarifa (compras/general,
+ * nunca Activo Fijo) — no el primer IVA del catálogo (eso mandaba 5% o
+ * Activo Fijo a facturas de 19%).
  */
 export function resolveFallbackIvaTaxId(params: {
   itemIvaPercentages?: Array<number | undefined>;
@@ -65,7 +111,7 @@ export function resolveFallbackIvaTaxId(params: {
 
   const matches = findActiveIvaTaxesByRate(rate, params.taxesCatalog);
 
-  return matches[0]?.id ?? null;
+  return pickPreferredIvaTax(matches)?.id ?? null;
 }
 
 export function resolveInvoiceIvaRate(

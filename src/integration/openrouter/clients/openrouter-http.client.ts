@@ -139,6 +139,12 @@ export class OpenRouterHttpClient {
       // instrucción del prompt — la mayoría de los modelos servidos por
       // OpenRouter (incluido openai/*) soportan este campo.
       response_format: { type: 'json_object' },
+      // OpenRouter puede enrutar un `openai/*` por otro backend si el
+      // primario falla. `only: OpenAI` deja la llamada en ChatGPT.
+      provider: {
+        only: ['OpenAI'],
+        allow_fallbacks: false,
+      },
     };
 
     const startedAt = Date.now();

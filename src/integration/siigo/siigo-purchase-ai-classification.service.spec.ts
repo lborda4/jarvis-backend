@@ -9,6 +9,8 @@ function buildService(overrides: {
     productName: string | null;
     confidence: number | null;
   };
+  configuration?: unknown;
+  itemMapping?: { accountCode: string; accountName: string } | null;
 }) {
   const document = {
     id: 'doc-1',
@@ -26,10 +28,12 @@ function buildService(overrides: {
   const supplierConfigurationsRepository = {
     findByCompanyIntegrationAndNormalizedSupplierDocument: jest
       .fn()
-      .mockResolvedValue(null),
+      .mockResolvedValue(overrides.configuration ?? null),
   };
   const supplierItemAccountMappingsRepository = {
-    findOneByKey: jest.fn().mockResolvedValue(null),
+    findOneByKey: jest
+      .fn()
+      .mockResolvedValue(overrides.itemMapping ?? null),
   };
   const integrationsRepository = {
     findByCompanyAndProvider: jest
@@ -54,7 +58,11 @@ function buildService(overrides: {
     siigoAiAccountSuggestionService as any,
   );
 
-  return { service, electronicDocumentService };
+  return {
+    service,
+    electronicDocumentService,
+    siigoAiAccountSuggestionService,
+  };
 }
 
 describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe forzar "Requiere revisión"', () => {
@@ -135,5 +143,77 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
       retentions: [],
       confidence: 30,
     });
+  });
+
+  it('llama a la IA cuando el tipo es Producto fijo pero no hay código de producto (cuentaPuc variable), aunque el medio de pago ya esté resuelto', async () => {
+    const { service, siigoAiAccountSuggestionService } = buildService({
+      classification: {
+        itemType: 'Product',
+        accountCode: null,
+        accountName: null,
+        productCode: 'SKU-ASEO-01',
+        productName: 'Detergente',
+        confidence: 70,
+      },
+      configuration: {
+        campoVariabilidad: {
+          tipoItem: { valor: 'Product', variable: false },
+          cuentaPuc: { valor: null, variable: true },
+          medioPago: {
+            valor: {
+              id: 5056,
+              name: 'Crédito proveedores',
+              type: 'Proveedor',
+              dueDate: true,
+            },
+            variable: false,
+          },
+        },
+      },
+      itemMapping: {
+        accountCode: '51050601',
+        accountName: 'Elementos de aseo',
+      },
+    });
+
+    await service.classifyDocuments(['doc-1'], 'company-1');
+
+    expect(
+      siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
+    ).toHaveBeenCalled();
+  });
+
+  it('llama a la IA cuando el tipo es Cuenta fijo pero no hay código de cuenta (cuentaPuc variable)', async () => {
+    const { service, siigoAiAccountSuggestionService } = buildService({
+      classification: {
+        itemType: 'Account',
+        accountCode: '51959501',
+        accountName: 'Diversos',
+        productCode: null,
+        productName: null,
+        confidence: 55,
+      },
+      configuration: {
+        campoVariabilidad: {
+          tipoItem: { valor: 'Account', variable: false },
+          cuentaPuc: { valor: null, variable: true },
+          medioPago: {
+            valor: {
+              id: 5056,
+              name: 'Crédito proveedores',
+              type: 'Proveedor',
+              dueDate: true,
+            },
+            variable: false,
+          },
+        },
+      },
+    });
+
+    await service.classifyDocuments(['doc-1'], 'company-1');
+
+    expect(
+      siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
+    ).toHaveBeenCalled();
   });
 });

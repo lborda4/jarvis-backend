@@ -13,6 +13,7 @@ import {
   buildAccountNameByCode,
   isAllowedAccountCode,
   resolveAccountNameFromCatalog,
+  resolveRequiredAccountFromCatalog,
 } from '../helpers/supplier-accounts-catalog.helper';
 import { resolveSuggestedItemConfigFromConfiguration } from '../helpers/supplier-preference.helper';
 import {
@@ -491,22 +492,25 @@ export class SiigoAiAccountSuggestionService {
     );
 
     const parsed = parseAccountCodeClassificationResponse(rawText);
-
-    if (!parsed.accountCode) {
-      return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
-    }
-
     const accountNameByCode = buildAccountNameByCode(transactionalAccounts);
-    const matchedAccount = transactionalAccounts.find(
-      (account) => account.code === parsed.accountCode,
+    const matchedAccount = resolveRequiredAccountFromCatalog(
+      transactionalAccounts,
+      [
+        parsed.accountCode,
+        ...accountHistoricalExamples.map((example) => example.cuentaPuc),
+      ],
     );
 
     if (!matchedAccount) {
-      this.logger.warn(
-        `[documentId=${documentId}] IA sugirió cuenta "${parsed.accountCode}" que no existe en el catálogo transaccional; se descarta.`,
-      );
-
       return { ...EMPTY_ITEM_CLASSIFICATION, itemType };
+    }
+
+    const usedAiCode = matchedAccount.code === parsed.accountCode;
+
+    if (!usedAiCode) {
+      this.logger.warn(
+        `[documentId=${documentId}] IA no devolvió una cuenta válida del catálogo (sugirió "${parsed.accountCode ?? 'null'}"); se usa ${matchedAccount.code} para no dejar el campo vacío.`,
+      );
     }
 
     return {
@@ -518,7 +522,7 @@ export class SiigoAiAccountSuggestionService {
         matchedAccount.name,
         accountNameByCode,
       ),
-      confidence: parsed.confidence,
+      confidence: usedAiCode ? parsed.confidence : 0,
     };
   }
 

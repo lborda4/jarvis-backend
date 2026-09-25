@@ -154,7 +154,8 @@ REGLAS DE PRIORIDAD:
 4. El nombre del proveedor puede dar contexto, pero NO determina por sí solo la cuenta.
 5. Usá únicamente códigos que aparezcan literalmente en el catálogo.
 6. Elegí siempre la categoría de gasto/costo más adecuada disponible, aunque el nombre de la cuenta no coincida literalmente con el texto.
-7. Si la descripción es ambigua, elegí la opción con mayor respaldo objetivo y reducí la confianza. No inventes detalles para aumentar la confianza, pero siempre da una sugerencia.
+7. Si la descripción es ambigua, elegí la opción con mayor respaldo objetivo y reducí la confianza. No inventes detalles para aumentar la confianza.
+8. Siempre devolvés una cuenta del catálogo. accountCode NUNCA puede ser null si el catálogo tiene al menos una cuenta.
 
 IMPORTANTE:
 No expliques el razonamiento, no describas alternativas y no inventes información.
@@ -162,7 +163,7 @@ No expliques el razonamiento, no describas alternativas y no inventes informaci�
 confidence debe ser un entero de 0 a 100.
 
 Respondé SOLO este JSON:
-{"accountCode":string|null,"confidence":number}`;
+{"accountCode":string,"confidence":number}`;
 
 export function buildAccountCodeClassificationPrompt(
   params: AccountCodeClassificationPromptParams,

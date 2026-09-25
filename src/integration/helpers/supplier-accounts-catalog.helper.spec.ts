@@ -1,6 +1,7 @@
 import {
   buildAccountNameByCode,
   resolveAccountNameFromCatalog,
+  resolveRequiredAccountFromCatalog,
 } from './supplier-accounts-catalog.helper';
 
 describe('buildAccountNameByCode', () => {
@@ -72,5 +73,31 @@ describe('resolveAccountNameFromCatalog', () => {
     expect(
       resolveAccountNameFromCatalog(' 71050511 ', '71050511', catalog),
     ).toBe('EMPAQUES/BOLSAS');
+  });
+});
+
+describe('resolveRequiredAccountFromCatalog', () => {
+  it('usa el código preferido si existe en el catálogo', () => {
+    expect(
+      resolveRequiredAccountFromCatalog(
+        [
+          { code: '51050601', name: 'Aseo' },
+          { code: '51959501', name: 'Diversos' },
+        ],
+        ['51959501'],
+      ),
+    ).toEqual({ code: '51959501', name: 'Diversos' });
+  });
+
+  it('cae a la primera cuenta del catálogo si la IA no trajo un código válido', () => {
+    expect(
+      resolveRequiredAccountFromCatalog(
+        [
+          { code: '51050601', name: 'Aseo' },
+          { code: '51959501', name: 'Diversos' },
+        ],
+        [null, 'NO-EXISTE'],
+      ),
+    ).toEqual({ code: '51050601', name: 'Aseo' });
   });
 });
