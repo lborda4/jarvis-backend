@@ -174,7 +174,7 @@ function mapDocumentItems(
 function resolveAiSuggestedProductForItem(
   document: ElectronicDocument,
   index: number,
-): ElectronicDocumentListItemDto['items'][number]['suggestedProduct'] {
+): SuggestedProduct | null {
   const product = document.payload?.aiSuggestion?.items?.[index]?.product;
   const code = product?.code?.trim();
 
