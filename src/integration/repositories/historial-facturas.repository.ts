@@ -144,7 +144,8 @@ export class HistorialFacturasRepository {
    * Todas las líneas de las `invoiceLimit` facturas más recientes de este
    * proveedor. Reciente = MAX(fecha_factura) de esa factura. No prioriza
    * correcciones del contador: eso se resuelve al elegir ejemplos
-   * comparables para la IA (selectHistoricalExamplesForPrompt).
+   * para la IA (selectHistoricalExamplesForPrompt: primero comparables,
+   * después recientes del mismo proveedor).
    */
   async findRecentInvoicesBySupplier(
     companyId: string,

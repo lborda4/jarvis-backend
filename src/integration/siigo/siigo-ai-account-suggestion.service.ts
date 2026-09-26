@@ -33,6 +33,8 @@ import { resolveAccountSuggestionConfidence } from './helpers/account-suggestion
 import {
   HISTORICAL_EXAMPLE_INVOICE_LIMIT,
   selectHistoricalExamplesForPrompt,
+  splitSupplierHistory,
+  uniqueSupplierUsedAccounts,
 } from './helpers/select-historical-examples.helper';
 import { SuggestPurchaseItemClassificationResponseDto } from './dto/suggest-purchase-item-classification.dto';
 import {
@@ -252,9 +254,10 @@ export class SiigoAiAccountSuggestionService {
           HISTORICAL_EXAMPLE_INVOICE_LIMIT,
         )
       : [];
+    const { invoiceRows: taxInvoiceRows } = splitSupplierHistory(historicalPool);
     const historicalRows = selectHistoricalExamplesForPrompt(
       itemDescriptions,
-      historicalPool,
+      taxInvoiceRows,
     );
 
     const prompt = buildPurchaseClassificationPrompt({
@@ -286,6 +289,10 @@ export class SiigoAiAccountSuggestionService {
         [],
       ),
     });
+
+    console.log(
+      `[AI-CLASSIFY] [documentId=${documentId}] IVA/retenciones ANTES de OpenRouter — historicoLineas=${historicalRows.length}`,
+    );
 
     const { content: rawText } =
       await this.openRouterHttpClient.createChatCompletion(prompt, {
@@ -452,6 +459,14 @@ export class SiigoAiAccountSuggestionService {
       ourCompanyDescription,
       documentKind,
       promptItems,
+      historicalExamples: selectHistoricalExamplesForPrompt(
+        itemDescriptions,
+        splitSupplierHistory(historicalPool).invoiceRows,
+      ).map((row) => ({
+        descripcionItem: row.descripcionItem,
+        itemType:
+          row.tipo === HistorialFacturaTipo.PRODUCTO ? 'Product' : 'Account',
+      })),
     });
 
     await onItemTypeResolved?.(itemType);
@@ -461,12 +476,18 @@ export class SiigoAiAccountSuggestionService {
         itemDescriptions,
         productsCatalog,
       );
+      const productCodes = new Set(
+        productsCatalog.map((product) => product.code.trim()),
+      );
+      const productHistoryRows = historicalPool.filter(
+        (row) =>
+          row.tipo === HistorialFacturaTipo.PRODUCTO ||
+          productCodes.has(row.cuentaPuc.trim()),
+      );
       const productHistoricalExamples = attachCatalogNamesToHistoricalExamples(
         selectHistoricalExamplesForPrompt(
           itemDescriptions,
-          historicalPool.filter(
-            (row) => row.tipo === HistorialFacturaTipo.PRODUCTO,
-          ),
+          splitSupplierHistory(productHistoryRows).invoiceRows,
         ).map((row) => ({
           descripcionItem: row.descripcionItem,
           cuentaPuc: row.cuentaPuc,
@@ -485,7 +506,7 @@ export class SiigoAiAccountSuggestionService {
       });
 
       console.log(
-        `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Producto) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, productosEnPrompt=${productsForPrompt.length}`,
+        `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Producto) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, productosEnPrompt=${productsForPrompt.length}, historicoLineas=${productHistoricalExamples.length}`,
       );
 
       const { content: rawText } =
@@ -544,16 +565,26 @@ export class SiigoAiAccountSuggestionService {
       };
     }
 
+    const accountCodes = new Set(
+      allTransactionalAccounts.map((account) => account.code.trim()),
+    );
+    const accountHistoryRows = historicalPool.filter(
+      (row) =>
+        row.tipo === HistorialFacturaTipo.CUENTA ||
+        accountCodes.has(row.cuentaPuc.trim()),
+    );
+    const { invoiceRows, balanceRows } = splitSupplierHistory(accountHistoryRows);
     const accountHistoricalExamples = attachCatalogNamesToHistoricalExamples(
-      selectHistoricalExamplesForPrompt(
-        itemDescriptions,
-        historicalPool.filter(
-          (row) => row.tipo === HistorialFacturaTipo.CUENTA,
-        ),
-      ).map((row) => ({
-        descripcionItem: row.descripcionItem,
-        cuentaPuc: row.cuentaPuc,
-      })),
+      selectHistoricalExamplesForPrompt(itemDescriptions, invoiceRows).map(
+        (row) => ({
+          descripcionItem: row.descripcionItem,
+          cuentaPuc: row.cuentaPuc,
+        }),
+      ),
+      allTransactionalAccounts,
+    );
+    const supplierUsedAccounts = uniqueSupplierUsedAccounts(
+      balanceRows,
       allTransactionalAccounts,
     );
 
@@ -568,10 +599,11 @@ export class SiigoAiAccountSuggestionService {
         name: account.name,
       })),
       historicalExamples: accountHistoricalExamples,
+      supplierUsedAccounts,
     });
 
     console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Cuenta) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, cuentasEnPrompt=${transactionalAccounts.length}`,
+      `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Cuenta) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, cuentasEnPrompt=${transactionalAccounts.length}, historicoLineas=${accountHistoricalExamples.length}, cuentasYaUsadas=${supplierUsedAccounts.map((account) => account.code).join(',') || 'ninguna'}`,
     );
 
     const { content: rawText } =
@@ -591,9 +623,6 @@ export class SiigoAiAccountSuggestionService {
     const parsed = parseAccountCodeClassificationResponse(
       rawText,
       promptItems.length,
-    );
-    const accountHistoryRows = historicalPool.filter(
-      (row) => row.tipo === HistorialFacturaTipo.CUENTA,
     );
     const historicalCodes = accountHistoricalExamples.map(
       (example) => example.cuentaPuc,
@@ -676,6 +705,10 @@ export class SiigoAiAccountSuggestionService {
     ourCompanyDescription: string | null;
     documentKind: 'PURCHASE_INVOICE' | 'SUPPORT_DOCUMENT';
     promptItems: PurchaseItemClassificationPromptItem[];
+    historicalExamples: Array<{
+      descripcionItem: string;
+      itemType: 'Account' | 'Product';
+    }>;
   }): Promise<'Account' | 'Product'> {
     const {
       documentId,
@@ -689,6 +722,7 @@ export class SiigoAiAccountSuggestionService {
       ourCompanyDescription,
       documentKind,
       promptItems,
+      historicalExamples,
     } = params;
 
     if (isSupportDocument || !hasProductsCatalog) {
@@ -720,10 +754,11 @@ export class SiigoAiAccountSuggestionService {
       ourCompanyDescription,
       documentKind,
       items: promptItems,
+      historicalExamples,
     });
 
     console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] Paso 1 (tipo) ANTES de llamar a OpenRouter — sin historial confiable del proveedor.`,
+      `[AI-CLASSIFY] [documentId=${documentId}] Paso 1 (tipo) ANTES de llamar a OpenRouter — historicoLineas=${historicalExamples.length}.`,
     );
 
     const { content: rawText } =

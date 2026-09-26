@@ -44,6 +44,24 @@ describe('buildItemTypeClassificationPrompt (paso 1 — sin catálogos)', () => 
 
     expect(messages[0].content).toContain('{"itemType":"Account"|"Product"}');
   });
+
+  it('incluye el histórico de tipo cuando este proveedor ya se contabilizó', () => {
+    const messages = buildItemTypeClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      items: [{ descripcion: 'Servicio de internet' }],
+      historicalExamples: [
+        { descripcionItem: 'Internet enero', itemType: 'Account' },
+      ],
+    });
+
+    expect(messages[0].content).toContain(
+      'Si hay histórico de facturas anteriores de ESTE proveedor',
+    );
+    expect(messages[1].content).toContain(
+      'Histórico de facturas anteriores de este proveedor',
+    );
+    expect(messages[1].content).toContain('"Internet enero"→Cuenta');
+  });
 });
 
 describe('parseItemTypeClassificationResponse', () => {
@@ -133,17 +151,20 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     });
 
     expect(messages[0].content).toContain(
-      'Usá el histórico SOLO si el ejemplo es igual',
+      'El histórico de facturas anteriores de ESTE proveedor es tu guía principal',
     );
     expect(messages[0].content).toContain(
-      'Ignorá ejemplos que no sean comparables',
+      'preferí una de las cuentas que este proveedor ya usó',
     );
     expect(messages[0].content).toContain('CADA ítem');
     expect(messages[0].content).toContain(
       'No inventes ni completes significados',
     );
     expect(messages[0].content).toContain(
-      'accountCode NUNCA puede ser null',
+      'tenés que responder SIEMPRE',
+    );
+    expect(messages[0].content).toContain(
+      'PROHIBIDO devolver null',
     );
     expect(messages[0].content).toContain(
       '{"items":[{"accountCode":string,"confidence":number}]}',
@@ -163,15 +184,43 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
           cuentaNombre: 'Servicio Línea Telefónica',
         },
       ],
+      supplierUsedAccounts: [
+        { code: '51356002', name: 'Servicio Línea Telefónica' },
+        { code: '51953001', name: 'Papelería' },
+      ],
     });
 
     expect(messages[1].content).toContain(
       'Histórico de facturas anteriores de este proveedor',
     );
-    expect(messages[1].content).toContain('Servicio Línea Telefónica Enero');
     expect(messages[1].content).toContain(
-      '51356002 Servicio Línea Telefónica',
+      'Concepto: "Servicio Línea Telefónica Enero"',
     );
+    expect(messages[1].content).toContain(
+      'Cuenta: 51356002 Servicio Línea Telefónica',
+    );
+    expect(messages[1].content).toContain(
+      'Cuentas que este proveedor ya usó (balance general',
+    );
+    expect(messages[1].content).toContain('51953001 Papelería');
+  });
+
+  it('si solo hay balance general, manda cuentas usadas sin concepto inventado', () => {
+    const messages = buildAccountCodeClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      ourCompanyName: 'Nosotros',
+      items: [{ descripcion: 'Servicio de aseo' }],
+      accounts: [{ code: '51050601', name: 'Aseo' }],
+      supplierUsedAccounts: [{ code: '51050601', name: 'Aseo' }],
+    });
+
+    expect(messages[1].content).toContain(
+      'Cuentas que este proveedor ya usó (balance general',
+    );
+    expect(messages[1].content).toContain('51050601 Aseo');
+    expect(messages[1].content).not.toContain('Concepto:');
+    expect(messages[1].content).not.toContain('Referencia de balance');
+    expect(messages[0].content).toContain('PROHIBIDO devolver null');
   });
 
   it('no incluye la sección de ejemplos históricos cuando no se proveen', () => {
@@ -279,8 +328,10 @@ describe('buildProductCodeClassificationPrompt (paso 2b — solo productos)', ()
       ],
     });
 
-    expect(messages[1].content).toContain('Galleta MUUU leche C');
-    expect(messages[1].content).toContain('PROD-001 Galleta MUUU leche');
+    expect(messages[1].content).toContain('Concepto: "Galleta MUUU leche C"');
+    expect(messages[1].content).toContain(
+      'Producto: PROD-001 Galleta MUUU leche',
+    );
   });
 });
 

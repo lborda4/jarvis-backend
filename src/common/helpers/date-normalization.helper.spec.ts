@@ -1,6 +1,8 @@
 import {
   convertDayMonthYearToIso,
+  endOfColombiaDate,
   matchIsoDate,
+  startOfColombiaDate,
 } from './date-normalization.helper';
 
 describe('matchIsoDate', () => {
@@ -48,5 +50,21 @@ describe('convertDayMonthYearToIso', () => {
 
   it('returns null when the value does not match', () => {
     expect(convertDayMonthYearToIso('not a date')).toBeNull();
+  });
+});
+
+describe('startOfColombiaDate / endOfColombiaDate', () => {
+  it('incluye una creación de las 9pm Colombia dentro del día local, no del UTC', () => {
+    const createdAt = new Date('2026-09-26T02:07:24.000Z');
+
+    expect(startOfColombiaDate('2026-09-25').getTime()).toBeLessThanOrEqual(
+      createdAt.getTime(),
+    );
+    expect(endOfColombiaDate('2026-09-25').getTime()).toBeGreaterThanOrEqual(
+      createdAt.getTime(),
+    );
+    expect(endOfColombiaDate('2026-09-25').toISOString()).toBe(
+      '2026-09-26T04:59:59.999Z',
+    );
   });
 });

@@ -53,17 +53,17 @@ export interface ParsedPurchaseClassification {
 // pedirle rationale/confidence — solo la sugerencia.
 const SYSTEM_PROMPT = `Clasificas facturas de compra y documentos soporte colombianos para SIIGO. Dado ítems, catálogo de cuentas PUC, catálogo de IVA, catálogo de retenciones y (si hay) el histórico de facturas anteriores de este proveedor, elegís cuenta, un IVA y 0+ retenciones. Tené en cuenta a qué se dedica la empresa que compra para elegir la cuenta de ESTA empresa.
 
-Reglas generales: usa SOLO ids/códigos que estén LITERALMENTE en los catálogos dados, nunca inventes uno. Usá el histórico SOLO si el concepto es igual o equivalente (más las marcadas "confirmado"); ignorá ejemplos que no sean comparables. Si no hay histórico comparable, clasificá por el concepto de los ítems.
+Reglas generales: usa SOLO ids/códigos que estén LITERALMENTE en los catálogos dados, nunca inventes uno. El histórico de facturas anteriores de ESTE proveedor es tu guía principal: esas líneas YA se contabilizaron. Si el concepto coincide o es equivalente (más las marcadas "confirmado"), repetí esa cuenta/IVA/retenciones. Si no hay línea equivalente, preferí una cuenta que este proveedor ya haya usado cuando encaje; si ninguna aplica, clasificá por el concepto de los ítems.
 
-Cuenta: las cuentas PUC son categorías amplias de gasto/costo, no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. Dejá accountCode null solo si de verdad ninguna categoría del catálogo aplica.
+Cuenta: las cuentas PUC son categorías amplias de gasto/costo, no una descripción exacta del ítem — elegí SIEMPRE la cuenta del catálogo que mejor encaje por tipo de gasto, aunque el nombre no coincida palabra por palabra. OBLIGATORIO: accountCode NUNCA puede ser null ni "null"; siempre respondé un código del catálogo.
 
 IVA y retenciones tienen efecto fiscal directo (montos que se declaran) y son más específicos: si no hay una opción segura, null (o [] en retentionIds) — acá sí mejor vacío que mal puesto.
 
-Responde SOLO este JSON, sin texto extra: {"accountCode":string|null,"taxId":number|null,"retentionIds":number[]}`;
+Responde SOLO este JSON, sin texto extra: {"accountCode":string,"taxId":number|null,"retentionIds":number[]}`;
 
 const SYSTEM_PROMPT_TAXES_ONLY = `Clasificas el IVA y las retenciones de una factura de compra o un documento soporte colombiano para SIIGO. La cuenta o el producto YA están resueltos por otra clasificación; NO elijas cuenta. Tené en cuenta a qué se dedica la empresa que compra si eso cambia el tratamiento fiscal.
 
-Reglas: usa SOLO ids que estén LITERALMENTE en los catálogos dados. Usá el histórico SOLO si el concepto coincide con los ítems actuales (más las marcadas "confirmado"); si no es comparable, ignorálo. IVA y retenciones tienen efecto fiscal directo: si no hay una opción segura, taxId null y retentionIds [].
+Reglas: usa SOLO ids que estén LITERALMENTE en los catálogos dados. El histórico de facturas anteriores de ESTE proveedor es tu guía principal: si el concepto coincide (más las marcadas "confirmado"), repetí ese IVA/retenciones. Si no hay línea equivalente, usá el tratamiento fiscal que este proveedor ya tuvo cuando encaje. IVA y retenciones tienen efecto fiscal directo: si no hay una opción segura, taxId null y retentionIds [].
 
 Responde SOLO este JSON, sin texto extra: {"taxId":number|null,"retentionIds":number[]}`;
 
@@ -109,10 +109,10 @@ export function buildPurchaseClassificationPrompt(
 
   const historicalExamplesSection =
     params.historicalExamples && params.historicalExamples.length > 0
-      ? `\nHistórico de facturas anteriores de este proveedor:\n${params.historicalExamples
+      ? `\nHistórico de facturas anteriores de este proveedor (concepto + código y nombre de cuenta):\n${params.historicalExamples
           .map(
             (example) =>
-              `- "${example.descripcionItem}"→${formatHistoricalExampleTarget(example.cuentaPuc, example.cuentaNombre)},${formatImpuestosSummary(example.impuestos)}${
+              `- Concepto: "${example.descripcionItem}" | Cuenta: ${formatHistoricalExampleTarget(example.cuentaPuc, example.cuentaNombre)},${formatImpuestosSummary(example.impuestos)}${
                 example.confirmadaPorContador ? '(confirmado)' : ''
               }`,
           )

@@ -78,9 +78,13 @@ describe('buildPurchaseClassificationPrompt', () => {
     expect(messages[1].content).toContain(
       'Histórico de facturas anteriores de este proveedor',
     );
-    expect(messages[1].content).toContain('Servicio de aseo mensual');
+    expect(messages[1].content).toContain(
+      'Concepto: "Servicio de aseo mensual"',
+    );
     expect(messages[1].content).toContain('(confirmado)');
-    expect(messages[1].content).toContain('511010 Servicios de aseo');
+    expect(messages[1].content).toContain(
+      'Cuenta: 511010 Servicios de aseo',
+    );
   });
 
   it('con includeAccount=false solo pide IVA y retenciones, sin catálogo de cuentas', () => {
@@ -102,7 +106,7 @@ describe('buildPurchaseClassificationPrompt', () => {
 
     expect(messages[0].content).toContain('NO elijas cuenta');
     expect(messages[0].content).toContain(
-      'Usá el histórico SOLO si el concepto coincide',
+      'El histórico de facturas anteriores de ESTE proveedor es tu guía principal',
     );
     expect(messages[0].content).toContain(
       '{"taxId":number|null,"retentionIds":number[]}',

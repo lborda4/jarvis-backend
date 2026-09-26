@@ -131,11 +131,12 @@ export function attachCatalogNamesToHistoricalExamples<
 }
 
 const HISTORICAL_INVOICES_LABEL =
-  'Histórico de facturas anteriores de este proveedor';
+  'Histórico de facturas anteriores de este proveedor (concepto + código y nombre de cuenta)';
 
 function historicalExamplesSection(
   examples: PurchaseItemClassificationHistoricalExample[] | undefined,
   label: string = HISTORICAL_INVOICES_LABEL,
+  targetLabel = 'Cuenta',
 ): string {
   if (!examples || examples.length === 0) {
     return '';
@@ -144,8 +145,20 @@ function historicalExamplesSection(
   return `\n${label}:\n${examples
     .map(
       (example) =>
-        `- "${example.descripcionItem}"→${formatHistoricalExampleTarget(example.cuentaPuc, example.cuentaNombre)}`,
+        `- Concepto: "${example.descripcionItem}" | ${targetLabel}: ${formatHistoricalExampleTarget(example.cuentaPuc, example.cuentaNombre)}`,
     )
+    .join('\n')}`;
+}
+
+function supplierUsedAccountsSection(
+  accounts: Array<{ code: string; name?: string | null }> | undefined,
+): string {
+  if (!accounts || accounts.length === 0) {
+    return '';
+  }
+
+  return `\nCuentas que este proveedor ya usó (balance general; sin descripción de concepto):\n${accounts
+    .map((account) => `- ${formatHistoricalExampleTarget(account.code, account.name)}`)
     .join('\n')}`;
 }
 
@@ -160,19 +173,42 @@ function historicalExamplesSection(
 // mayoría de los tokens del prompt combinado original.
 // ---------------------------------------------------------------------------
 
+export interface ItemTypeClassificationHistoricalExample {
+  descripcionItem: string;
+  itemType: 'Account' | 'Product';
+}
+
 export interface ItemTypeClassificationPromptParams {
   supplierName: string;
   ourCompanyName?: string;
   ourCompanyDescription?: string | null;
   documentKind?: ClassificationDocumentKind | null;
   items: PurchaseItemClassificationPromptItem[];
+  historicalExamples?: ItemTypeClassificationHistoricalExample[];
 }
 
 const SYSTEM_PROMPT_ITEM_TYPE = `Clasificas UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems). Todavía NO elegís cuenta contable ni producto — solo decidís si el/los ítem(s) se deben registrar como "Cuenta" (un gasto/costo/servicio que se contabiliza directo a una cuenta PUC, ej. arriendo, servicios públicos, mantenimiento, honorarios, transporte) o como "Producto" (un bien físico que esta empresa maneja como inventario/mercancía, ej. materia prima, mercancía para reventa, insumos que se guardan en stock).
 
 Esta empresa SÍ tiene catálogo de productos en SIIGO, así que "Producto" es una opción válida. Tené en cuenta a qué se dedica la empresa que compra: un mismo ítem puede ser inventario para una comercializadora y gasto para una de servicios. Si hay varios ítems, elegí el tipo que mejor represente el conjunto (normalmente comparten el mismo concepto). Un servicio (algo que se consume, no se almacena) es SIEMPRE Cuenta, nunca Producto, aunque esté relacionado con un bien físico (ej. "Servicio de mantenimiento de aire acondicionado" es Cuenta, no Producto). Ante la duda entre un insumo consumible menor y un producto de inventario, preferí Cuenta.
 
+Si hay histórico de facturas anteriores de ESTE proveedor, usalo como guía principal para el tipo: repetí cómo YA se contabilizó a este proveedor, salvo que la línea actual sea claramente lo contrario.
+
 Responde SOLO este JSON, sin texto extra: {"itemType":"Account"|"Product"}`;
+
+function itemTypeHistorySection(
+  examples: ItemTypeClassificationHistoricalExample[] | undefined,
+): string {
+  if (!examples || examples.length === 0) {
+    return '';
+  }
+
+  return `\nHistórico de facturas anteriores de este proveedor (cómo YA se contabilizó):\n${examples
+    .map(
+      (example) =>
+        `- "${example.descripcionItem}"→${example.itemType === 'Product' ? 'Producto' : 'Cuenta'}`,
+    )
+    .join('\n')}`;
+}
 
 export function buildItemTypeClassificationPrompt(
   params: ItemTypeClassificationPromptParams,
@@ -180,7 +216,7 @@ export function buildItemTypeClassificationPrompt(
   const userContent = `${formatPromptHeader(params.ourCompanyName, params.ourCompanyDescription, params.documentKind)}
 Proveedor: ${params.supplierName}
 Ítems:
-${itemsSection(params.items)}`;
+${itemsSection(params.items)}${itemTypeHistorySection(params.historicalExamples)}`;
 
   return [
     { role: 'system', content: SYSTEM_PROMPT_ITEM_TYPE },
@@ -240,8 +276,10 @@ export interface AccountCodeClassificationPromptParams {
   /** Solo cuentas transaccionales — las de agrupación no son un destino
    * válido para contabilizar un movimiento. */
   accounts: AccountCatalogItem[];
-  /** Líneas comparables de las facturas recientes de ESTE proveedor. */
+  /** Líneas de facturas anteriores de ESTE proveedor (guía principal). */
   historicalExamples?: PurchaseItemClassificationHistoricalExample[];
+  /** Cuentas distintas con las que YA se contabilizó a este proveedor. */
+  supplierUsedAccounts?: Array<{ code: string; name?: string | null }>;
 }
 
 const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA cuenta PUC de gasto/costo para CADA ítem de una factura de compra o un documento soporte. El documento puede traer conceptos distintos (papelería, aseo, mantenimiento) y cada línea va a su propia cuenta; no unifiques el documento en un solo código.
@@ -250,17 +288,18 @@ Tené en cuenta a qué se dedica la empresa que compra: un mismo ítem puede ser
 
 REGLAS DE PRIORIDAD:
 
-1. Usá el histórico SOLO si el ejemplo es igual o claramente equivalente a ESA línea. Ignorá ejemplos que no sean comparables con esa línea.
-2. Si no hay histórico comparable para ese ítem, clasificá según el concepto REALMENTE indicado en esa línea.
-3. No inventes ni completes significados que no estén respaldados por el texto. Una sigla, código o referencia desconocida no debe interpretarse como "leasing", "cuota", "equipo", "red", etc.
-4. El nombre del proveedor puede dar contexto, pero NO determina por sí solo la cuenta.
-5. Usá únicamente códigos que aparezcan literalmente en el catálogo.
-6. Elegí siempre la categoría de gasto/costo más adecuada disponible, aunque el nombre de la cuenta no coincida literalmente con el texto.
-7. Si la descripción es ambigua, elegí la opción con mayor respaldo objetivo y reducí la confianza. No inventes detalles para aumentar la confianza.
-8. Cada ítem SIEMPRE lleva una cuenta del catálogo. accountCode NUNCA puede ser null si el catálogo tiene al menos una cuenta.
+1. El histórico de facturas anteriores de ESTE proveedor es tu guía principal. Esas líneas YA se contabilizaron (cuenta PUC + nombre). Si el concepto de ESA línea actual coincide o es equivalente, usá ESA misma cuenta.
+2. Si no hay línea equivalente, preferí una de las cuentas que este proveedor ya usó cuando encaje con el tipo de gasto de esa línea.
+3. Si ninguna cuenta ya usada aplica, clasificá según el concepto REALMENTE indicado en esa línea usando el catálogo.
+4. No inventes ni completes significados que no estén respaldados por el texto. Una sigla, código o referencia desconocida no debe interpretarse como "leasing", "cuota", "equipo", "red", etc.
+5. El nombre del proveedor puede dar contexto, pero NO determina por sí solo la cuenta.
+6. Usá únicamente códigos que aparezcan literalmente en el catálogo.
+7. Elegí siempre la categoría de gasto/costo más adecuada disponible, aunque el nombre de la cuenta no coincida literalmente con el texto.
+8. Si la descripción es ambigua, elegí la opción con mayor respaldo objetivo y reducí la confianza. No inventes detalles para aumentar la confianza.
+9. OBLIGATORIO: tenés que responder SIEMPRE. accountCode es un string obligatorio de un código del catálogo. PROHIBIDO devolver null, "null", vacío u omitir un ítem. Si no estás segura, igual elegí la mejor cuenta (priorizá las que este proveedor ya usó) y bajá confidence.
 
 IMPORTANTE:
-No expliques el razonamiento, no describas alternativas y no inventes información.
+No expliques el razonamiento, no describas alternativas y no inventes información. No te abstengas: siempre hay una cuenta que responder.
 
 confidence debe ser un entero de 0 a 100.
 
@@ -280,7 +319,7 @@ Proveedor: ${params.supplierName}
 ${itemsSection(params.items)}
 
 Cuentas PUC transaccionales:
-${accountsCatalog}${historicalExamplesSection(params.historicalExamples)}`;
+${accountsCatalog}${supplierUsedAccountsSection(params.supplierUsedAccounts)}${historicalExamplesSection(params.historicalExamples)}`;
 
   return [
     { role: 'system', content: SYSTEM_PROMPT_ACCOUNT_CODE },
@@ -366,13 +405,15 @@ export interface ProductCodeClassificationPromptParams {
   documentKind?: ClassificationDocumentKind | null;
   items: PurchaseItemClassificationPromptItem[];
   products: AccountCatalogItem[];
-  /** Líneas comparables de las facturas recientes de ESTE proveedor. */
+  /** Líneas de facturas anteriores de ESTE proveedor (guía principal). */
   historicalExamples?: PurchaseItemClassificationHistoricalExample[];
+  /** Productos distintos con los que YA se contabilizó a este proveedor. */
+  supplierUsedAccounts?: Array<{ code: string; name?: string | null }>;
 }
 
 const SYSTEM_PROMPT_PRODUCT_CODE = `Elegís el código de producto del catálogo de SIIGO para CADA ítem. Ya se determinó que se contabilizan como Producto/inventario. Una factura puede traer artículos distintos y cada línea va a su propio código; no unifiques la factura en un solo producto.
 
-Reglas: usá el histórico SOLO si el ejemplo es igual o equivalente a ESA línea; si no es comparable, ignorálo y elegí por el catálogo. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. A diferencia de una cuenta contable, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada; productCode null solo es válido si genuinamente NINGÚN producto del catálogo se parece a ESA línea.
+El histórico de facturas anteriores de ESTE proveedor es tu guía principal: si el concepto de ESA línea coincide o es equivalente, usá el mismo código. Si no hay línea equivalente, preferí un producto que este proveedor ya haya usado cuando encaje. Si ninguno aplica, elegí por el catálogo. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. A diferencia de una cuenta contable, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada; productCode null solo es válido si genuinamente NINGÚN producto del catálogo se parece a ESA línea.
 
 confidence: entero de 0 a 100. 90-100 = en el histórico hay la misma descripción o casi idéntica para esa línea. 60-89 = coincide bien pero sin factura anterior equivalente. Por debajo de 50 = decisión forzada.
 
@@ -392,7 +433,11 @@ Proveedor: ${params.supplierName}
 ${itemsSection(params.items)}
 
 Catálogo de productos:
-${productsCatalog}${historicalExamplesSection(params.historicalExamples)}`;
+${productsCatalog}${historicalExamplesSection(
+  params.historicalExamples,
+  'Histórico de facturas anteriores de este proveedor (concepto + código y nombre de producto)',
+  'Producto',
+)}`;
 
   return [
     { role: 'system', content: SYSTEM_PROMPT_PRODUCT_CODE },

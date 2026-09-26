@@ -16,6 +16,27 @@ export interface HistoricalExampleCandidate {
   fuente?: string;
 }
 
+export function isBalanceHistoryFuente(fuente?: string): boolean {
+  return fuente === HistorialFacturaFuente.SIIGO_BALANCE_TERCERO;
+}
+
+export function splitSupplierHistory<T extends { fuente?: string }>(
+  rows: T[],
+): { invoiceRows: T[]; balanceRows: T[] } {
+  const invoiceRows: T[] = [];
+  const balanceRows: T[] = [];
+
+  for (const row of rows) {
+    if (isBalanceHistoryFuente(row.fuente)) {
+      balanceRows.push(row);
+    } else {
+      invoiceRows.push(row);
+    }
+  }
+
+  return { invoiceRows, balanceRows };
+}
+
 export function extractExampleKeywords(text: string): string[] {
   return [
     ...new Set(
@@ -59,10 +80,12 @@ export function similarityScore(
 }
 
 /**
- * Elige hasta `limit` líneas históricas comparables con los ítems actuales.
- * Descarta las que no se parecen, no deja que una factura ocupe todo el
- * cupo y, a igualdad de similitud, prefiere la corrección del contador y
- * después la más reciente.
+ * Elige hasta `limit` líneas históricas de ESTE proveedor. Primero las
+ * comparables con los ítems actuales; si sobra cupo (o no hay overlap),
+ * completa con las más recientes para que la IA siempre vea con qué
+ * cuentas ya se contabilizó a este proveedor. No deja que una factura
+ * ocupe todo el cupo y, a igualdad de similitud, prefiere la corrección
+ * del contador y después la más reciente.
  */
 export function selectHistoricalExamplesForPrompt<
   T extends HistoricalExampleCandidate,
@@ -76,18 +99,12 @@ export function selectHistoricalExamplesForPrompt<
   );
   const itemKeywords = new Set(itemDescriptions.flatMap(extractExampleKeywords));
 
-  const scored = rows
-    .map((row, index) => ({
-      row,
-      index,
-      score: similarityScore(
-        row.descripcionItem,
-        itemNormalized,
-        itemKeywords,
-      ),
-      normalized: normalizeItemDescription(row.descripcionItem),
-    }))
-    .filter((entry) => entry.score > 0);
+  const scored = rows.map((row, index) => ({
+    row,
+    index,
+    score: similarityScore(row.descripcionItem, itemNormalized, itemKeywords),
+    normalized: normalizeItemDescription(row.descripcionItem),
+  }));
 
   scored.sort((a, b) => {
     if (b.score !== a.score) {
@@ -146,4 +163,45 @@ export function selectHistoricalExamplesForPrompt<
   }
 
   return selected;
+}
+
+/** Códigos distintos con los que YA se contabilizó a este proveedor. */
+export function uniqueSupplierUsedAccounts(
+  rows: Array<{ cuentaPuc: string }>,
+  catalog: Array<{ code: string; name: string }> = [],
+  limit = HISTORICAL_EXAMPLE_LINE_LIMIT,
+): Array<{ code: string; name: string }> {
+  const nameByCode = new Map<string, string>();
+
+  for (const item of catalog) {
+    const code = item.code?.trim();
+    const name = item.name?.trim();
+
+    if (code && name && !nameByCode.has(code)) {
+      nameByCode.set(code, name);
+    }
+  }
+
+  const seen = new Set<string>();
+  const unique: Array<{ code: string; name: string }> = [];
+
+  for (const row of rows) {
+    const code = row.cuentaPuc.trim();
+
+    if (!code || seen.has(code)) {
+      continue;
+    }
+
+    seen.add(code);
+    unique.push({
+      code,
+      name: nameByCode.get(code) ?? '',
+    });
+
+    if (unique.length >= limit) {
+      break;
+    }
+  }
+
+  return unique;
 }

@@ -1,3 +1,6 @@
+/** Colombia no tiene DST: el día calendario del producto es UTC-5. */
+const COLOMBIA_UTC_OFFSET = '-05:00';
+
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DATE_PREFIX_PATTERN = /^(\d{4}-\d{2}-\d{2})/;
 const DAY_MONTH_YEAR_PATTERN =
@@ -40,4 +43,14 @@ export function convertDayMonthYearToIso(
   const month = match[2].padStart(2, '0');
   const year = match[3];
   return `${year}-${month}-${day}`;
+}
+
+/** Inicio del día YYYY-MM-DD en Colombia (para filtrar createdAt). */
+export function startOfColombiaDate(isoDate: string): Date {
+  return new Date(`${isoDate}T00:00:00.000${COLOMBIA_UTC_OFFSET}`);
+}
+
+/** Fin del día YYYY-MM-DD en Colombia (para filtrar createdAt). */
+export function endOfColombiaDate(isoDate: string): Date {
+  return new Date(`${isoDate}T23:59:59.999${COLOMBIA_UTC_OFFSET}`);
 }

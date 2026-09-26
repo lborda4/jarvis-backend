@@ -99,7 +99,8 @@ function resolveEffectiveItems(input: PurchaseInvoiceReviewInput): EffectiveItem
     // vienen validados contra el catálogo real; item.codigo no.
     const hasCode = Boolean(
       exactItemAccount?.code?.trim() ||
-        input.suggestedItemConfig?.accountCode?.trim(),
+        input.suggestedItemConfig?.accountCode?.trim() ||
+        input.payloadItems[index]?.accountMapping?.code?.trim(),
     );
     return { tipo, hasCode };
   });

@@ -2,6 +2,8 @@ import { HistorialFacturaFuente } from '../../enums/historial-factura-fuente.enu
 import {
   MAX_HISTORICAL_EXAMPLES_PER_INVOICE,
   selectHistoricalExamplesForPrompt,
+  splitSupplierHistory,
+  uniqueSupplierUsedAccounts,
 } from './select-historical-examples.helper';
 
 function row(overrides: {
@@ -19,7 +21,7 @@ function row(overrides: {
 }
 
 describe('selectHistoricalExamplesForPrompt', () => {
-  it('de una factura con muchas líneas solo manda las comparables con el ítem actual', () => {
+  it('prioriza las líneas comparables y completa el cupo con el resto de la factura del proveedor', () => {
     const selected = selectHistoricalExamplesForPrompt(
       ['Resma de papel tamaño carta'],
       [
@@ -33,12 +35,11 @@ describe('selectHistoricalExamplesForPrompt', () => {
       ],
     );
 
-    expect(selected.map((example) => example.descripcionItem)).toEqual([
-      'Resma de papel oficio',
-    ]);
+    expect(selected[0].descripcionItem).toBe('Resma de papel oficio');
+    expect(selected).toHaveLength(MAX_HISTORICAL_EXAMPLES_PER_INVOICE);
   });
 
-  it('elige la compra reciente comparable y descarta una corrección antigua de otro concepto', () => {
+  it('pone primero la compra reciente comparable y después el resto del histórico del proveedor', () => {
     const selected = selectHistoricalExamplesForPrompt(
       ['Galleta MUUU leche C'],
       [
@@ -58,19 +59,29 @@ describe('selectHistoricalExamplesForPrompt', () => {
 
     expect(selected.map((example) => example.descripcionItem)).toEqual([
       'Galleta de leche surtida',
+      'Tela ripstop 160',
     ]);
   });
 
-  it('no manda ejemplos si ninguno se parece a la descripción actual', () => {
+  it('si ninguno se parece, igual manda las líneas recientes del proveedor', () => {
     const selected = selectHistoricalExamplesForPrompt(
       ['PONY MALTA GO PET 20'],
       [
-        row({ descripcionItem: 'Tela ripstop 160' }),
-        row({ descripcionItem: 'Hilo de coser negro' }),
+        row({
+          descripcionItem: 'Tela ripstop 160',
+          fechaFactura: '2026-01-01',
+        }),
+        row({
+          descripcionItem: 'Hilo de coser negro',
+          fechaFactura: '2026-08-01',
+        }),
       ],
     );
 
-    expect(selected).toEqual([]);
+    expect(selected.map((example) => example.descripcionItem)).toEqual([
+      'Hilo de coser negro',
+      'Tela ripstop 160',
+    ]);
   });
 
   it('a igualdad de concepto, prefiere la corrección del contador sobre la fila de SIIGO', () => {
@@ -121,5 +132,48 @@ describe('selectHistoricalExamplesForPrompt', () => {
     expect(selected.some((example) => example.facturaId === 'fac-otra')).toBe(
       true,
     );
+  });
+});
+
+describe('splitSupplierHistory', () => {
+  it('separa facturas con descripción del balance general', () => {
+    const { invoiceRows, balanceRows } = splitSupplierHistory([
+      row({
+        descripcionItem: 'Resma de papel',
+        fuente: HistorialFacturaFuente.SIIGO_ORIGINAL,
+      }),
+      row({
+        descripcionItem: 'Referencia de balance por tercero',
+        fuente: HistorialFacturaFuente.SIIGO_BALANCE_TERCERO,
+      }),
+    ]);
+
+    expect(invoiceRows).toHaveLength(1);
+    expect(invoiceRows[0].descripcionItem).toBe('Resma de papel');
+    expect(balanceRows).toHaveLength(1);
+    expect(balanceRows[0].fuente).toBe(
+      HistorialFacturaFuente.SIIGO_BALANCE_TERCERO,
+    );
+  });
+});
+
+describe('uniqueSupplierUsedAccounts', () => {
+  it('lista cada cuenta distinta del proveedor con el nombre del catálogo', () => {
+    expect(
+      uniqueSupplierUsedAccounts(
+        [
+          { cuentaPuc: '51356002' },
+          { cuentaPuc: '51953001' },
+          { cuentaPuc: '51356002' },
+        ],
+        [
+          { code: '51356002', name: 'Servicio Linea Telefonica' },
+          { code: '51953001', name: 'Papelería' },
+        ],
+      ),
+    ).toEqual([
+      { code: '51356002', name: 'Servicio Linea Telefonica' },
+      { code: '51953001', name: 'Papelería' },
+    ]);
   });
 });

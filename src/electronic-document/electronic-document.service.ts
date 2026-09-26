@@ -7,6 +7,10 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { withPostgresAdvisoryLock } from '../common/helpers/postgres-advisory-lock.helper';
+import {
+  endOfColombiaDate,
+  startOfColombiaDate,
+} from '../common/helpers/date-normalization.helper';
 import { mapWithConcurrency } from '../common/helpers/concurrency.helper';
 import { CompaniesRepository } from '../company/repositories/companies.repository';
 import {
@@ -1217,10 +1221,10 @@ export class ElectronicDocumentService {
     const limit = normalizeElectronicDocumentPageLimit(query.limit);
 
     const dateFrom = query.dateFrom?.trim()
-      ? new Date(`${query.dateFrom.trim()}T00:00:00.000Z`)
+      ? startOfColombiaDate(query.dateFrom.trim())
       : undefined;
     const dateTo = query.dateTo?.trim()
-      ? new Date(`${query.dateTo.trim()}T23:59:59.999Z`)
+      ? endOfColombiaDate(query.dateTo.trim())
       : undefined;
 
     const electronicDocumentType = parseOptionalElectronicDocumentTypeFilter(
