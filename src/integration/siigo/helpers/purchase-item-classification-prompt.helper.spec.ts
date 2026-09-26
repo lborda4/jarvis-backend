@@ -24,6 +24,18 @@ describe('buildItemTypeClassificationPrompt (paso 1 — sin catálogos)', () => 
     expect(messages[1].content).not.toContain('Catálogo de productos');
   });
 
+  it('incluye el rubro de la empresa que compra cuando hay description', () => {
+    const messages = buildItemTypeClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      ourCompanyName: 'MAGNA FILIA SAS',
+      ourCompanyDescription: 'Restaurante de comida rápida.',
+      items: [{ descripcion: 'Aceite de cocina' }],
+    });
+
+    expect(messages[1].content).toContain('MAGNA FILIA SAS');
+    expect(messages[1].content).toContain('A qué se dedica: Restaurante de comida rápida.');
+  });
+
   it('pide solo itemType, sin accountCode/productCode/confidence', () => {
     const messages = buildItemTypeClassificationPrompt({
       supplierName: 'Proveedor S.A.S',
@@ -77,6 +89,24 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     expect(messages[1].content).toContain('Servicio de internet');
     expect(messages[1].content).toContain('51356001');
     expect(messages[1].content).not.toContain('Catálogo de productos');
+  });
+
+  it('incluye el rubro y marca Documento soporte cuando hay description', () => {
+    const messages = buildAccountCodeClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      ourCompanyName: 'MAGNA FILIA SAS',
+      ourCompanyDescription: 'Restaurante de comida rápida.',
+      documentKind: 'SUPPORT_DOCUMENT',
+      items: [{ descripcion: 'Aceite de cocina' }],
+      accounts: [{ code: '1405', name: 'Inventario' }],
+    });
+
+    expect(messages[0].content).toContain('documento soporte');
+    expect(messages[0].content).toContain('A qué se dedica');
+    expect(messages[1].content).toContain('Documento: Documento soporte');
+    expect(messages[1].content).toContain(
+      'A qué se dedica: Restaurante de comida rápida.',
+    );
   });
 
   it('pide confidence pero no rationale/IVA/retenciones/itemType', () => {

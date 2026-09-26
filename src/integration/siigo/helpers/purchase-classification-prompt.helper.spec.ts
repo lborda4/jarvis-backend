@@ -113,6 +113,25 @@ describe('buildPurchaseClassificationPrompt', () => {
     expect(messages[1].content).not.toContain('519530');
   });
 
+  it('incluye el rubro y marca Documento soporte cuando hay description', () => {
+    const messages = buildPurchaseClassificationPrompt({
+      supplierName: 'Proveedor S.A.S',
+      ourCompanyName: 'MAGNA FILIA SAS',
+      ourCompanyDescription: 'Restaurante de comida rápida.',
+      documentKind: 'SUPPORT_DOCUMENT',
+      items: [{ descripcion: 'Aceite de cocina', cantidad: 1, valorUnitario: 1 }],
+      accounts: [],
+      taxes: [],
+      includeAccount: false,
+    });
+
+    expect(messages[0].content).toContain('documento soporte');
+    expect(messages[1].content).toContain('Documento: Documento soporte');
+    expect(messages[1].content).toContain(
+      'A qué se dedica: Restaurante de comida rápida.',
+    );
+  });
+
   it('no incluye la sección de ejemplos históricos cuando no se proveen', () => {
     const messages = buildPurchaseClassificationPrompt({
       supplierName: 'Proveedor S.A.S',

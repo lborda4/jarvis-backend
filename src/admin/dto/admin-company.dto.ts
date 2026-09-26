@@ -79,6 +79,14 @@ export class AdminCompanyListItemDto {
   @ApiProperty()
   name: string;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'A qué se dedica la empresa. Se envía a la IA al clasificar facturas de compra.',
+    example: 'Comercializadora de elementos de aseo y cafetería.',
+  })
+  description: string | null;
+
   @ApiPropertyOptional({ enum: CompanyPersonType, nullable: true })
   personType: CompanyPersonType | null;
 
@@ -123,6 +131,13 @@ export class CreateAdminCompanyRequestDto {
 
   @ApiProperty({ example: 'Empresa Demo SAS' })
   name: string;
+
+  @ApiPropertyOptional({
+    description:
+      'A qué se dedica la empresa (rubro, actividad). Se usa en los prompts de IA.',
+    example: 'Comercializadora de elementos de aseo y cafetería.',
+  })
+  description?: string;
 
   @ApiProperty({
     enum: CompanyPersonType,
@@ -269,6 +284,21 @@ export class UpdateCompanyCityRequestDto {
 }
 
 export class UpdateCompanyCityResponseDto {
+  @ApiProperty({ type: AdminCompanyListItemDto })
+  company: AdminCompanyListItemDto;
+}
+
+export class UpdateCompanyDescriptionRequestDto {
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'A qué se dedica la empresa. Enviar vacío/null para quitarla.',
+    example: 'Comercializadora de elementos de aseo y cafetería.',
+  })
+  description: string | null;
+}
+
+export class UpdateCompanyDescriptionResponseDto {
   @ApiProperty({ type: AdminCompanyListItemDto })
   company: AdminCompanyListItemDto;
 }

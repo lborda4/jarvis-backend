@@ -44,6 +44,45 @@ function itemsSection(items: PurchaseItemClassificationPromptItem[]): string {
     .join('\n');
 }
 
+export type ClassificationDocumentKind =
+  | 'PURCHASE_INVOICE'
+  | 'SUPPORT_DOCUMENT';
+
+/** Nombre + rubro de la empresa que compra. El rubro (description) es lo
+ * que le permite a la IA distinguir inventario vs gasto y elegir la cuenta
+ * PUC correcta para ESTA empresa, no una genérica. */
+export function formatCompanyContext(
+  name?: string | null,
+  description?: string | null,
+): string {
+  const trimmedName = name?.trim() || 'nuestra empresa';
+  const trimmedDescription = description?.trim();
+
+  if (!trimmedDescription) {
+    return `Empresa que compra: ${trimmedName}`;
+  }
+
+  return `Empresa que compra: ${trimmedName}\nA qué se dedica: ${trimmedDescription}`;
+}
+
+export function formatPromptHeader(
+  name?: string | null,
+  description?: string | null,
+  documentKind?: ClassificationDocumentKind | null,
+): string {
+  const companyContext = formatCompanyContext(name, description);
+
+  if (documentKind === 'SUPPORT_DOCUMENT') {
+    return `Documento: Documento soporte\n${companyContext}`;
+  }
+
+  if (documentKind === 'PURCHASE_INVOICE') {
+    return `Documento: Factura de compra\n${companyContext}`;
+  }
+
+  return companyContext;
+}
+
 export function formatHistoricalExampleTarget(
   code: string,
   name?: string | null,
@@ -123,19 +162,23 @@ function historicalExamplesSection(
 
 export interface ItemTypeClassificationPromptParams {
   supplierName: string;
+  ourCompanyName?: string;
+  ourCompanyDescription?: string | null;
+  documentKind?: ClassificationDocumentKind | null;
   items: PurchaseItemClassificationPromptItem[];
 }
 
 const SYSTEM_PROMPT_ITEM_TYPE = `Clasificas UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems). Todavía NO elegís cuenta contable ni producto — solo decidís si el/los ítem(s) se deben registrar como "Cuenta" (un gasto/costo/servicio que se contabiliza directo a una cuenta PUC, ej. arriendo, servicios públicos, mantenimiento, honorarios, transporte) o como "Producto" (un bien físico que esta empresa maneja como inventario/mercancía, ej. materia prima, mercancía para reventa, insumos que se guardan en stock).
 
-Esta empresa SÍ tiene catálogo de productos en SIIGO, así que "Producto" es una opción válida. Si hay varios ítems, elegí el tipo que mejor represente el conjunto (normalmente comparten el mismo concepto). Un servicio (algo que se consume, no se almacena) es SIEMPRE Cuenta, nunca Producto, aunque esté relacionado con un bien físico (ej. "Servicio de mantenimiento de aire acondicionado" es Cuenta, no Producto). Ante la duda entre un insumo consumible menor y un producto de inventario, preferí Cuenta.
+Esta empresa SÍ tiene catálogo de productos en SIIGO, así que "Producto" es una opción válida. Tené en cuenta a qué se dedica la empresa que compra: un mismo ítem puede ser inventario para una comercializadora y gasto para una de servicios. Si hay varios ítems, elegí el tipo que mejor represente el conjunto (normalmente comparten el mismo concepto). Un servicio (algo que se consume, no se almacena) es SIEMPRE Cuenta, nunca Producto, aunque esté relacionado con un bien físico (ej. "Servicio de mantenimiento de aire acondicionado" es Cuenta, no Producto). Ante la duda entre un insumo consumible menor y un producto de inventario, preferí Cuenta.
 
 Responde SOLO este JSON, sin texto extra: {"itemType":"Account"|"Product"}`;
 
 export function buildItemTypeClassificationPrompt(
   params: ItemTypeClassificationPromptParams,
 ): OpenRouterMessage[] {
-  const userContent = `Proveedor: ${params.supplierName}
+  const userContent = `${formatPromptHeader(params.ourCompanyName, params.ourCompanyDescription, params.documentKind)}
+Proveedor: ${params.supplierName}
 Ítems:
 ${itemsSection(params.items)}`;
 
@@ -191,6 +234,8 @@ export interface AccountCodeClassificationPromptParams {
   /** Nombre de la empresa que compra (nosotros) — contexto de a qué rubro
    * pertenece el gasto para esta empresa en particular. */
   ourCompanyName: string;
+  ourCompanyDescription?: string | null;
+  documentKind?: ClassificationDocumentKind | null;
   items: PurchaseItemClassificationPromptItem[];
   /** Solo cuentas transaccionales — las de agrupación no son un destino
    * válido para contabilizar un movimiento. */
@@ -199,7 +244,9 @@ export interface AccountCodeClassificationPromptParams {
   historicalExamples?: PurchaseItemClassificationHistoricalExample[];
 }
 
-const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA cuenta PUC de gasto/costo para CADA ítem. Una factura puede traer conceptos distintos (papelería, aseo, mantenimiento) y cada línea va a su propia cuenta; no unifiques la factura en un solo código.
+const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA cuenta PUC de gasto/costo para CADA ítem de una factura de compra o un documento soporte. El documento puede traer conceptos distintos (papelería, aseo, mantenimiento) y cada línea va a su propia cuenta; no unifiques el documento en un solo código.
+
+Tené en cuenta a qué se dedica la empresa que compra: un mismo ítem puede ser un gasto distinto según el rubro (inventario, insumo, servicio, costo de venta). Usá el campo "A qué se dedica" para elegir la cuenta de ESTA empresa, no una genérica.
 
 REGLAS DE PRIORIDAD:
 
@@ -227,7 +274,7 @@ export function buildAccountCodeClassificationPrompt(
     .map((account) => `${account.code} ${account.name}`)
     .join('\n');
 
-  const userContent = `Empresa que compra: ${params.ourCompanyName}
+  const userContent = `${formatPromptHeader(params.ourCompanyName, params.ourCompanyDescription, params.documentKind)}
 Proveedor: ${params.supplierName}
 Ítems:
 ${itemsSection(params.items)}
@@ -315,6 +362,8 @@ export function parseAccountCodeClassificationResponse(
 export interface ProductCodeClassificationPromptParams {
   supplierName: string;
   ourCompanyName: string;
+  ourCompanyDescription?: string | null;
+  documentKind?: ClassificationDocumentKind | null;
   items: PurchaseItemClassificationPromptItem[];
   products: AccountCatalogItem[];
   /** Líneas comparables de las facturas recientes de ESTE proveedor. */
@@ -337,7 +386,7 @@ export function buildProductCodeClassificationPrompt(
     .map((product) => `${product.code} ${product.name}`)
     .join('\n');
 
-  const userContent = `Empresa que compra: ${params.ourCompanyName}
+  const userContent = `${formatPromptHeader(params.ourCompanyName, params.ourCompanyDescription, params.documentKind)}
 Proveedor: ${params.supplierName}
 Ítems:
 ${itemsSection(params.items)}

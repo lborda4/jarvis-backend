@@ -225,9 +225,10 @@ export class SiigoAiAccountSuggestionService {
       companyId,
     );
 
-    const [allTaxes, integration] = await Promise.all([
+    const [allTaxes, integration, company] = await Promise.all([
       this.siigoTaxesCatalogService.listTaxes({}, companyId),
       getSiigoIntegration(this.integrationsRepository, companyId),
+      this.companiesRepository.findById(companyId),
     ]);
 
     const activeIvaTaxes = allTaxes.filter(
@@ -258,6 +259,13 @@ export class SiigoAiAccountSuggestionService {
 
     const prompt = buildPurchaseClassificationPrompt({
       supplierName: document.payload.supplier.name || 'Desconocido',
+      ourCompanyName: company?.name || 'nuestra empresa',
+      ourCompanyDescription: company?.description?.trim() || null,
+      documentKind:
+        document.electronicDocumentType ===
+        ElectronicDocumentType.SUPPORT_DOCUMENT
+          ? 'SUPPORT_DOCUMENT'
+          : 'PURCHASE_INVOICE',
       items: document.payload.items.map((item) => ({
         descripcion: item.descripcion,
         cantidad: item.cantidad,
@@ -425,6 +433,10 @@ export class SiigoAiAccountSuggestionService {
     }));
     const supplierName = document.payload.supplier.name || 'Desconocido';
     const ourCompanyName = company?.name || 'nuestra empresa';
+    const ourCompanyDescription = company?.description?.trim() || null;
+    const documentKind = isSupportDocument
+      ? 'SUPPORT_DOCUMENT'
+      : 'PURCHASE_INVOICE';
     const hasProductsCatalog = productsCatalog.length > 0;
 
     const itemType = await this.resolveItemType({
@@ -436,6 +448,9 @@ export class SiigoAiAccountSuggestionService {
       isSupportDocument,
       hasProductsCatalog,
       supplierName,
+      ourCompanyName,
+      ourCompanyDescription,
+      documentKind,
       promptItems,
     });
 
@@ -462,6 +477,8 @@ export class SiigoAiAccountSuggestionService {
       const prompt = buildProductCodeClassificationPrompt({
         supplierName,
         ourCompanyName,
+        ourCompanyDescription,
+        documentKind,
         items: promptItems,
         products: productsForPrompt,
         historicalExamples: productHistoricalExamples,
@@ -543,6 +560,8 @@ export class SiigoAiAccountSuggestionService {
     const prompt = buildAccountCodeClassificationPrompt({
       supplierName,
       ourCompanyName,
+      ourCompanyDescription,
+      documentKind,
       items: promptItems,
       accounts: transactionalAccounts.map((account) => ({
         code: account.code,
@@ -653,6 +672,9 @@ export class SiigoAiAccountSuggestionService {
     isSupportDocument: boolean;
     hasProductsCatalog: boolean;
     supplierName: string;
+    ourCompanyName: string;
+    ourCompanyDescription: string | null;
+    documentKind: 'PURCHASE_INVOICE' | 'SUPPORT_DOCUMENT';
     promptItems: PurchaseItemClassificationPromptItem[];
   }): Promise<'Account' | 'Product'> {
     const {
@@ -663,6 +685,9 @@ export class SiigoAiAccountSuggestionService {
       isSupportDocument,
       hasProductsCatalog,
       supplierName,
+      ourCompanyName,
+      ourCompanyDescription,
+      documentKind,
       promptItems,
     } = params;
 
@@ -691,6 +716,9 @@ export class SiigoAiAccountSuggestionService {
 
     const prompt = buildItemTypeClassificationPrompt({
       supplierName,
+      ourCompanyName,
+      ourCompanyDescription,
+      documentKind,
       items: promptItems,
     });
 

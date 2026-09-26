@@ -118,7 +118,10 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
         .mockResolvedValue(null),
     };
     const companiesRepository = {
-      findById: jest.fn().mockResolvedValue({ name: 'MAGNA FILIA SAS' }),
+      findById: jest.fn().mockResolvedValue({
+        name: 'MAGNA FILIA SAS',
+        description: 'Restaurante de comida rápida.',
+      }),
     };
 
     const service = new SiigoAiAccountSuggestionService(
@@ -134,7 +137,7 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
       companiesRepository as any,
     );
 
-    return { service, siigoProductsCatalogService };
+    return { service, siigoProductsCatalogService, openRouterHttpClient };
   }
 
   it('no consulta el catálogo de productos para Documento soporte — fuerza el prompt "solo cuenta" para que la IA nunca elija Producto', async () => {
@@ -151,6 +154,33 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
     await service.classifyItemTypeAndAccount('doc-1', 'company-1');
 
     expect(siigoProductsCatalogService.listProducts).not.toHaveBeenCalled();
+  });
+
+  it('envía la descripción de la empresa en el prompt de cuenta de Documento soporte', async () => {
+    const document = {
+      id: 'doc-1',
+      electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      payload: {
+        supplier: { name: 'Proveedor SAS', documentNumber: '900123456' },
+        items: [{ descripcion: 'Aceite de cocina' }],
+      },
+    };
+    const { service, openRouterHttpClient } = buildService(document);
+
+    await service.classifyItemTypeAndAccount('doc-1', 'company-1');
+
+    expect(openRouterHttpClient.createChatCompletion).toHaveBeenCalledTimes(1);
+    const [messages] = openRouterHttpClient.createChatCompletion.mock.calls[0];
+    const userContent = messages.find((message: { role: string }) => message.role === 'user')
+      ?.content as string;
+    const systemContent = messages.find((message: { role: string }) => message.role === 'system')
+      ?.content as string;
+
+    expect(userContent).toContain('Documento: Documento soporte');
+    expect(userContent).toContain(
+      'A qué se dedica: Restaurante de comida rápida.',
+    );
+    expect(systemContent).toContain('documento soporte');
   });
 
   it('sí consulta el catálogo de productos para Factura de compra (comportamiento sin cambios)', async () => {
@@ -291,6 +321,7 @@ describe('SiigoAiAccountSuggestionService.suggestForDocument', () => {
   it('reusa classifyItemTypeAndAccount para la cuenta y solo pide IVA/retenciones', async () => {
     const document = {
       id: 'doc-1',
+      electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
       payload: {
         supplier: { name: 'Proveedor SAS', documentNumber: '900123456' },
         items: [
@@ -339,6 +370,12 @@ describe('SiigoAiAccountSuggestionService.suggestForDocument', () => {
     const historialFacturasRepository = {
       findRecentInvoicesBySupplier: jest.fn().mockResolvedValue([]),
     };
+    const companiesRepository = {
+      findById: jest.fn().mockResolvedValue({
+        name: 'MAGNA FILIA SAS',
+        description: 'Restaurante de comida rápida.',
+      }),
+    };
 
     const service = new SiigoAiAccountSuggestionService(
       openRouterHttpClient as any,
@@ -350,7 +387,7 @@ describe('SiigoAiAccountSuggestionService.suggestForDocument', () => {
       historialFacturasRepository as any,
       {} as any,
       {} as any,
-      {} as any,
+      companiesRepository as any,
     );
 
     jest.spyOn(service, 'classifyItemTypeAndAccount').mockResolvedValue({
@@ -389,7 +426,12 @@ describe('SiigoAiAccountSuggestionService.suggestForDocument', () => {
       openRouterHttpClient.createChatCompletion.mock.calls[0];
     expect(options.context.purpose).toBe('purchase-tax-classification');
     expect(messages[0].content).toContain('NO elijas cuenta');
+    expect(messages[0].content).toContain('documento soporte');
     expect(messages[1].content).not.toContain('Cuentas PUC');
+    expect(messages[1].content).toContain('Documento: Documento soporte');
+    expect(messages[1].content).toContain(
+      'A qué se dedica: Restaurante de comida rápida.',
+    );
     expect(electronicDocumentService.updatePayload).toHaveBeenCalledWith(
       'doc-1',
       expect.objectContaining({

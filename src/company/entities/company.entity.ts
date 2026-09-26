@@ -23,6 +23,10 @@ export class Company {
   @Column()
   name: string;
 
+  /** A qué se dedica la empresa — contexto para los prompts de IA. */
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
+
   @Column({ name: 'invite_code', unique: true, length: 20 })
   inviteCode: string;
 

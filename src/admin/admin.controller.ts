@@ -27,6 +27,8 @@ import {
   RegenerateCompanyInviteCodeResponseDto,
   UpdateCompanyCityRequestDto,
   UpdateCompanyCityResponseDto,
+  UpdateCompanyDescriptionRequestDto,
+  UpdateCompanyDescriptionResponseDto,
   UpdateCompanyNextPymeTokenRequestDto,
   UpdateCompanyNextPymeTokenResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
@@ -166,6 +168,24 @@ export class AdminController {
     @Body() request: UpdateCompanyCityRequestDto,
   ): Promise<UpdateCompanyCityResponseDto> {
     return this.adminService.updateCompanyCity(companyId, request, user.userId);
+  }
+
+  @Patch('companies/:companyId/description')
+  @ApiOperation({
+    summary: 'Configurar descripción de la empresa',
+    description:
+      'Guarda a qué se dedica la empresa. Se envía en los prompts de IA al clasificar facturas de compra.',
+  })
+  updateCompanyDescription(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('companyId') companyId: string,
+    @Body() request: UpdateCompanyDescriptionRequestDto,
+  ): Promise<UpdateCompanyDescriptionResponseDto> {
+    return this.adminService.updateCompanyDescription(
+      companyId,
+      request,
+      user.userId,
+    );
   }
 
   @Patch('companies/:companyId/integrations/:provider/subscription')

@@ -2,7 +2,11 @@ import type { OpenRouterMessage } from '../../openrouter/clients/openrouter-http
 import type { SiigoAccountCatalogItemDto } from '../dto/list-siigo-accounts.dto';
 import type { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import type { HistorialFacturaImpuestos } from '../../interfaces/historial-factura-impuestos.interface';
-import { formatHistoricalExampleTarget } from './purchase-item-classification-prompt.helper';
+import {
+  formatHistoricalExampleTarget,
+  formatPromptHeader,
+  type ClassificationDocumentKind,
+} from './purchase-item-classification-prompt.helper';
 
 export interface PurchaseClassificationPromptItem {
   descripcion: string;
@@ -22,6 +26,9 @@ export interface PurchaseClassificationHistoricalExample {
 
 export interface PurchaseClassificationPromptParams {
   supplierName: string;
+  ourCompanyName?: string;
+  ourCompanyDescription?: string | null;
+  documentKind?: ClassificationDocumentKind | null;
   items: PurchaseClassificationPromptItem[];
   accounts: SiigoAccountCatalogItemDto[];
   /** Catálogo de impuestos IVA disponibles (para taxId). */
@@ -44,7 +51,7 @@ export interface ParsedPurchaseClassification {
 // Prompt deliberadamente corto: se manda en cada clasificación, así que su
 // tamaño se multiplica por cada documento. Sin explicaciones de más, sin
 // pedirle rationale/confidence — solo la sugerencia.
-const SYSTEM_PROMPT = `Clasificas facturas de compra colombianas para SIIGO. Dado ítems, catálogo de cuentas PUC, catálogo de IVA, catálogo de retenciones y (si hay) el histórico de facturas anteriores de este proveedor, elegís cuenta, un IVA y 0+ retenciones.
+const SYSTEM_PROMPT = `Clasificas facturas de compra y documentos soporte colombianos para SIIGO. Dado ítems, catálogo de cuentas PUC, catálogo de IVA, catálogo de retenciones y (si hay) el histórico de facturas anteriores de este proveedor, elegís cuenta, un IVA y 0+ retenciones. Tené en cuenta a qué se dedica la empresa que compra para elegir la cuenta de ESTA empresa.
 
 Reglas generales: usa SOLO ids/códigos que estén LITERALMENTE en los catálogos dados, nunca inventes uno. Usá el histórico SOLO si el concepto es igual o equivalente (más las marcadas "confirmado"); ignorá ejemplos que no sean comparables. Si no hay histórico comparable, clasificá por el concepto de los ítems.
 
@@ -54,7 +61,7 @@ IVA y retenciones tienen efecto fiscal directo (montos que se declaran) y son m�
 
 Responde SOLO este JSON, sin texto extra: {"accountCode":string|null,"taxId":number|null,"retentionIds":number[]}`;
 
-const SYSTEM_PROMPT_TAXES_ONLY = `Clasificas el IVA y las retenciones de una factura de compra colombiana para SIIGO. La cuenta o el producto YA están resueltos por otra clasificación; NO elijas cuenta.
+const SYSTEM_PROMPT_TAXES_ONLY = `Clasificas el IVA y las retenciones de una factura de compra o un documento soporte colombiano para SIIGO. La cuenta o el producto YA están resueltos por otra clasificación; NO elijas cuenta. Tené en cuenta a qué se dedica la empresa que compra si eso cambia el tratamiento fiscal.
 
 Reglas: usa SOLO ids que estén LITERALMENTE en los catálogos dados. Usá el histórico SOLO si el concepto coincide con los ítems actuales (más las marcadas "confirmado"); si no es comparable, ignorálo. IVA y retenciones tienen efecto fiscal directo: si no hay una opción segura, taxId null y retentionIds [].
 
@@ -113,8 +120,14 @@ export function buildPurchaseClassificationPrompt(
       : '';
 
   const includeAccount = params.includeAccount !== false;
+  const companyContext = formatPromptHeader(
+    params.ourCompanyName,
+    params.ourCompanyDescription,
+    params.documentKind,
+  );
   const userContent = includeAccount
-    ? `Proveedor: ${params.supplierName}
+    ? `${companyContext}
+Proveedor: ${params.supplierName}
 Ítems:
 ${itemsDescription}
 
@@ -126,7 +139,8 @@ ${taxesCatalog || 'ninguno'}
 
 Retenciones:
 ${retentionsCatalog || 'ninguna'}${historicalExamplesSection}`
-    : `Proveedor: ${params.supplierName}
+    : `${companyContext}
+Proveedor: ${params.supplierName}
 Ítems:
 ${itemsDescription}
 

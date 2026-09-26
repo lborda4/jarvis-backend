@@ -41,6 +41,8 @@ import {
   RegenerateCompanyInviteCodeResponseDto,
   UpdateCompanyCityRequestDto,
   UpdateCompanyCityResponseDto,
+  UpdateCompanyDescriptionRequestDto,
+  UpdateCompanyDescriptionResponseDto,
   UpdateCompanyNextPymeTokenRequestDto,
   UpdateCompanyNextPymeTokenResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
@@ -207,6 +209,7 @@ export class AdminService {
           personType,
           responsible,
           inviteCode: generateCompanyInviteCode(),
+          description: request?.description?.trim() || null,
           cityCode: request?.cityCode?.trim() || null,
           cityName: request?.cityName?.trim() || null,
           nextPymeToken: request?.nextPymeToken?.trim() || null,
@@ -340,6 +343,25 @@ export class AdminService {
 
     company.cityCode = request.cityCode?.trim() || null;
     company.cityName = request.cityName?.trim() || null;
+    const saved = await this.companiesRepository.save(company);
+
+    return {
+      company: this.mapCompany(saved),
+    };
+  }
+
+  async updateCompanyDescription(
+    companyId: string,
+    request: UpdateCompanyDescriptionRequestDto,
+    _adminUserId: string,
+  ): Promise<UpdateCompanyDescriptionResponseDto> {
+    const company = await this.companiesRepository.findById(companyId);
+
+    if (!company) {
+      throw new NotFoundException('Empresa no encontrada.');
+    }
+
+    company.description = request.description?.trim() || null;
     const saved = await this.companiesRepository.save(company);
 
     return {
@@ -488,6 +510,7 @@ export class AdminService {
       id: company.id,
       nit: company.nit,
       name: company.name,
+      description: company.description,
       personType: company.personType,
       responsible: company.responsible,
       createdAt: company.createdAt.toISOString(),
