@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
@@ -8,11 +13,11 @@ import { HistorialFacturaTipo } from '../enums/historial-factura-tipo.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SiigoAccountsRepository } from '../repositories/siigo-accounts.repository';
 import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
-import { OpenRouterHttpClient } from '../openrouter/clients/openrouter-http.client';
 import {
-  isAllowedAccountCode,
-  resolveRequiredAccountFromCatalog,
-} from '../helpers/supplier-accounts-catalog.helper';
+  OpenRouterHttpClient,
+  type OpenRouterMessage,
+} from '../openrouter/clients/openrouter-http.client';
+import { isAllowedAccountCode } from '../helpers/supplier-accounts-catalog.helper';
 import { applyItemClassificationToPayload } from '../../electronic-document/helpers/electronic-document-account-mapping.helper';
 import { resolveSuggestedItemConfigFromConfiguration } from '../helpers/supplier-preference.helper';
 import {
@@ -50,6 +55,8 @@ import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 // tokens de salida — probado en vivo con openai/gpt-4o-mini en ~15-20 tokens
 // reales de respuesta.
 const ITEM_CLASSIFICATION_MAX_TOKENS = 10000;
+// Keep each code-classification request small, including retry requests.
+const ITEM_CLASSIFICATION_BATCH_SIZE = 15;
 // Paso 1 (decidir SOLO Cuenta vs Producto, sin catálogos) responde un JSON
 // mínimo — un tope bajo alcanza de sobra y evita gastar de más si el modelo
 // se explaya con texto extra.
@@ -113,7 +120,7 @@ function pickUnanimous<T extends string>(
 ): T | null {
   const present = values.filter((value): value is T => Boolean(value));
 
-  if (present.length === 0) {
+  if (present.length === 0 || present.length !== values.length) {
     return null;
   }
 
@@ -254,7 +261,8 @@ export class SiigoAiAccountSuggestionService {
           HISTORICAL_EXAMPLE_INVOICE_LIMIT,
         )
       : [];
-    const { invoiceRows: taxInvoiceRows } = splitSupplierHistory(historicalPool);
+    const { invoiceRows: taxInvoiceRows } =
+      splitSupplierHistory(historicalPool);
     const historicalRows = selectHistoricalExamplesForPrompt(
       itemDescriptions,
       taxInvoiceRows,
@@ -435,7 +443,8 @@ export class SiigoAiAccountSuggestionService {
     const itemDescriptions = document.payload.items.map(
       (item) => item.descripcion,
     );
-    const promptItems = itemDescriptions.map((descripcion) => ({
+    const promptItems = itemDescriptions.map((descripcion, index) => ({
+      itemId: String(index + 1),
       descripcion,
     }));
     const supplierName = document.payload.supplier.name || 'Desconocido';
@@ -495,38 +504,29 @@ export class SiigoAiAccountSuggestionService {
         productsCatalog,
       );
 
-      const prompt = buildProductCodeClassificationPrompt({
-        supplierName,
-        ourCompanyName,
-        ourCompanyDescription,
-        documentKind,
-        items: promptItems,
-        products: productsForPrompt,
-        historicalExamples: productHistoricalExamples,
-      });
-
-      console.log(
-        `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Producto) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, productosEnPrompt=${productsForPrompt.length}, historicoLineas=${productHistoricalExamples.length}`,
-      );
-
-      const { content: rawText } =
-        await this.openRouterHttpClient.createChatCompletion(prompt, {
-          maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS,
-          context: {
+      const parsed = {
+        items: await this.classifyCodesWithRetries(
+          promptItems,
+          (pendingItems) =>
+            buildProductCodeClassificationPrompt({
+              supplierName,
+              ourCompanyName,
+              ourCompanyDescription,
+              documentKind,
+              items: pendingItems,
+              products: productsForPrompt,
+              historicalExamples: productHistoricalExamples,
+            }),
+          parseProductCodeClassificationResponse,
+          (item) =>
+            productsCatalog.some((entry) => entry.code === item.productCode),
+          {
             companyId,
             documentId,
             purpose: 'purchase-item-product-code-classification',
           },
-        });
-
-      console.log(
-        `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Producto) DESPUÉS de llamar a OpenRouter — respuesta cruda: ${rawText}`,
-      );
-
-      const parsed = parseProductCodeClassificationResponse(
-        rawText,
-        promptItems.length,
-      );
+        ),
+      };
       const resolvedItems = parsed.items.map((item) => {
         const matchedProduct = item.productCode
           ? productsCatalog.find((product) => product.code === item.productCode)
@@ -550,7 +550,9 @@ export class SiigoAiAccountSuggestionService {
         resolvedItems.map((item) => item.productCode),
       );
       const unanimousProduct = unanimousProductCode
-        ? resolvedItems.find((item) => item.productCode === unanimousProductCode)
+        ? resolvedItems.find(
+            (item) => item.productCode === unanimousProductCode,
+          )
         : undefined;
 
       return {
@@ -573,7 +575,8 @@ export class SiigoAiAccountSuggestionService {
         row.tipo === HistorialFacturaTipo.CUENTA ||
         accountCodes.has(row.cuentaPuc.trim()),
     );
-    const { invoiceRows, balanceRows } = splitSupplierHistory(accountHistoryRows);
+    const { invoiceRows, balanceRows } =
+      splitSupplierHistory(accountHistoryRows);
     const accountHistoricalExamples = attachCatalogNamesToHistoricalExamples(
       selectHistoricalExamplesForPrompt(itemDescriptions, invoiceRows).map(
         (row) => ({
@@ -588,49 +591,38 @@ export class SiigoAiAccountSuggestionService {
       allTransactionalAccounts,
     );
 
-    const prompt = buildAccountCodeClassificationPrompt({
-      supplierName,
-      ourCompanyName,
-      ourCompanyDescription,
-      documentKind,
-      items: promptItems,
-      accounts: transactionalAccounts.map((account) => ({
-        code: account.code,
-        name: account.name,
-      })),
-      historicalExamples: accountHistoricalExamples,
-      supplierUsedAccounts,
-    });
-
-    console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Cuenta) ANTES de llamar a OpenRouter — items=${JSON.stringify(itemDescriptions)}, cuentasEnPrompt=${transactionalAccounts.length}, historicoLineas=${accountHistoricalExamples.length}, cuentasYaUsadas=${supplierUsedAccounts.map((account) => account.code).join(',') || 'ninguna'}`,
-    );
-
-    const { content: rawText } =
-      await this.openRouterHttpClient.createChatCompletion(prompt, {
-        maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS,
-        context: {
+    const parsed = {
+      items: await this.classifyCodesWithRetries(
+        promptItems,
+        (pendingItems) =>
+          buildAccountCodeClassificationPrompt({
+            supplierName,
+            ourCompanyName,
+            ourCompanyDescription,
+            documentKind,
+            items: pendingItems,
+            accounts: transactionalAccounts.map((account) => ({
+              code: account.code,
+              name: account.name,
+            })),
+            historicalExamples: accountHistoricalExamples,
+            supplierUsedAccounts,
+          }),
+        parseAccountCodeClassificationResponse,
+        (item) =>
+          transactionalAccounts.some(
+            (entry) => entry.code === item.accountCode,
+          ),
+        {
           companyId,
           documentId,
           purpose: 'purchase-item-account-code-classification',
         },
-      });
-
-    console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] Paso 2 (Cuenta) DESPUÉS de llamar a OpenRouter — respuesta cruda: ${rawText}`,
-    );
-
-    const parsed = parseAccountCodeClassificationResponse(
-      rawText,
-      promptItems.length,
-    );
-    const historicalCodes = accountHistoricalExamples.map(
-      (example) => example.cuentaPuc,
-    );
+      ),
+    };
     const resolvedItems = parsed.items.map((item, index) => {
-      const matchedAccount = resolveRequiredAccountFromCatalog(
-        transactionalAccounts,
-        [item.accountCode, ...historicalCodes],
+      const matchedAccount = transactionalAccounts.find(
+        (account) => account.code === item.accountCode,
       );
 
       if (!matchedAccount) {
@@ -641,14 +633,6 @@ export class SiigoAiAccountSuggestionService {
           productName: null,
           confidence: 0,
         };
-      }
-
-      const usedAiCode = matchedAccount.code === item.accountCode;
-
-      if (!usedAiCode) {
-        this.logger.warn(
-          `[documentId=${documentId}] IA no devolvió una cuenta válida del catálogo (sugirió "${item.accountCode ?? 'null'}"); se usa ${matchedAccount.code}.`,
-        );
       }
 
       return {
@@ -680,6 +664,68 @@ export class SiigoAiAccountSuggestionService {
       ),
       items: resolvedItems,
     };
+  }
+
+  private async classifyCodesWithRetries<T>(
+    items: Array<PurchaseItemClassificationPromptItem & { itemId: string }>,
+    buildPrompt: (pending: typeof items) => OpenRouterMessage[],
+    parse: (raw: string, ids: string[]) => { items: T[] },
+    isValid: (item: T) => boolean,
+    context: { companyId: string; documentId: string; purpose: string },
+  ): Promise<T[]> {
+    const resolved = new Map<string, T>();
+    let pending = items;
+    for (let attempt = 0; attempt < 3 && pending.length > 0; attempt++) {
+      for (
+        let offset = 0;
+        offset < pending.length;
+        offset += ITEM_CLASSIFICATION_BATCH_SIZE
+      ) {
+        const batch = pending.slice(
+          offset,
+          offset + ITEM_CLASSIFICATION_BATCH_SIZE,
+        );
+        try {
+          const { content } =
+            await this.openRouterHttpClient.createChatCompletion(
+              buildPrompt(batch),
+              { maxTokens: ITEM_CLASSIFICATION_MAX_TOKENS, context },
+            );
+          const parsed = parse(
+            content,
+            batch.map((item) => item.itemId),
+          );
+          batch.forEach((item, index) => {
+            if (isValid(parsed.items[index]))
+              resolved.set(item.itemId, parsed.items[index]);
+          });
+        } catch (error) {
+          if (!(error instanceof BadGatewayException)) throw error;
+          this.logger.warn(
+            'Fallo de IA en intento ' +
+              (attempt + 1) +
+              '; se conservan los items resueltos.',
+          );
+        }
+      }
+      pending = pending.filter((item) => !resolved.has(item.itemId));
+      if (pending.length && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      }
+    }
+    if (pending.length) {
+      this.logger.warn(
+        'ítems sin código válido tras 3 intentos: ' +
+          pending.map((item) => item.itemId).join(', '),
+      );
+    }
+    const empty = parse(
+      '',
+      items.map((item) => item.itemId),
+    ).items;
+    return items.map(
+      (item, index) => resolved.get(item.itemId) ?? empty[index],
+    );
   }
 
   /**

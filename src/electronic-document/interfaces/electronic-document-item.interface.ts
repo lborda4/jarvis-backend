@@ -1,3 +1,5 @@
+import type { AiSuggestionItemSnapshot } from './electronic-document-payload.interface';
+
 export interface ElectronicDocumentItemAccountMapping {
   code: string;
   description?: string;
@@ -9,6 +11,8 @@ export interface ElectronicDocumentItem {
   valorUnitario: number;
   total: number;
   codigo?: string;
+  /** Sugerencia de IA de esta línea; independiente de la asignación contable. */
+  aiSuggestion?: AiSuggestionItemSnapshot | null;
   accountMapping?: ElectronicDocumentItemAccountMapping;
   /** Tipo SIIGO que eligió el contador al guardar el borrador. */
   itemType?: 'Product' | 'FixedAsset' | 'Account';

@@ -79,6 +79,26 @@ export function applyItemClassificationToPayload(
     items: applyAiClassificationToPayloadItems(payload.items ?? [], {
       itemType: classification.itemType,
       items: classifiedItems,
+    }).map((item, index) => {
+      const suggestion = classifiedItems[index];
+      return {
+        ...item,
+        aiSuggestion: {
+          account: suggestion?.accountCode
+            ? {
+                code: suggestion.accountCode,
+                name: suggestion.accountName ?? suggestion.accountCode,
+              }
+            : null,
+          product: suggestion?.productCode
+            ? {
+                code: suggestion.productCode,
+                name: suggestion.productName ?? suggestion.productCode,
+              }
+            : null,
+          confidence: suggestion?.confidence ?? 0,
+        },
+      };
     }),
     aiSuggestion: {
       itemType: classification.itemType,
@@ -94,21 +114,6 @@ export function applyItemClassificationToPayload(
             name: classification.productName ?? classification.productCode,
           }
         : null,
-      items: classifiedItems.map((item) => ({
-        account: item.accountCode
-          ? {
-              code: item.accountCode,
-              name: item.accountName ?? item.accountCode,
-            }
-          : null,
-        product: item.productCode
-          ? {
-              code: item.productCode,
-              name: item.productName ?? item.productCode,
-            }
-          : null,
-        confidence: item.confidence,
-      })),
       retentions: [],
       confidence:
         foundNothing || classification.confidence == null

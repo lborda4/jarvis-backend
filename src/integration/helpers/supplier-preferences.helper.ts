@@ -123,7 +123,11 @@ export function resolveSuggestedAccountsForDocumentItems(
       return resolved;
     }
 
-    const aiAccount = document.payload.aiSuggestion?.items?.[index]?.account;
+    const aiAccount = (
+      item.aiSuggestion !== undefined
+        ? item.aiSuggestion
+        : document.payload.aiSuggestion?.items?.[index]
+    )?.account;
     const code = aiAccount?.code?.trim();
 
     if (!code) {
@@ -225,8 +229,12 @@ export function resolveSuggestedAccountForDocument(
 export function resolveSuggestedProductsForDocumentItems(
   document: SupplierDocumentIdentity,
 ): Array<SuggestedProduct | null> {
-  return (document.payload.items ?? []).map((_item, index) => {
-    const product = document.payload.aiSuggestion?.items?.[index]?.product;
+  return (document.payload.items ?? []).map((item, index) => {
+    const product = (
+      item.aiSuggestion !== undefined
+        ? item.aiSuggestion
+        : document.payload.aiSuggestion?.items?.[index]
+    )?.product;
     const code = product?.code?.trim();
 
     if (!code) {

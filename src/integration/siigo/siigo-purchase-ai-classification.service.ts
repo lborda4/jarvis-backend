@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
@@ -13,7 +13,10 @@ import {
   normalizeSupplierDocument,
 } from './helpers/siigo-context.helper';
 import { OpenRouterHttpClient } from '../openrouter/clients/openrouter-http.client';
-import { SiigoAiAccountSuggestionService } from './siigo-ai-account-suggestion.service';
+import {
+  SiigoAiAccountSuggestionService,
+  ItemTypeAndAccountClassification,
+} from './siigo-ai-account-suggestion.service';
 import { applyItemClassificationToPayload } from '../../electronic-document/helpers/electronic-document-account-mapping.helper';
 
 /**
@@ -142,9 +145,7 @@ export class SiigoPurchaseAiClassificationService {
     // preferencia ya sincronizada alcanza, no hace falta gastar una llamada
     // a la IA. Si el tipo dominante es Producto pero no hay código de
     // producto, igual se llama (ver needsAiClassification).
-    console.log(
-      `[AI-CLASSIFY] [documentId=${documentId}] needsAi=${needsAi}`,
-    );
+    console.log(`[AI-CLASSIFY] [documentId=${documentId}] needsAi=${needsAi}`);
 
     if (!needsAi) {
       console.log(
@@ -158,38 +159,49 @@ export class SiigoPurchaseAiClassificationService {
       `[AI-CLASSIFY] [documentId=${documentId}] ANTES de invocar classifyItemTypeAndAccount — ${new Date().toISOString()}`,
     );
 
-    const classification =
-      await this.siigoAiAccountSuggestionService.classifyItemTypeAndAccount(
-        documentId,
-        companyId,
-        async (itemType) => {
-          // Publica el paso 1 antes de ejecutar la recomendación del código.
-          // El listado se refresca mientras corre el proceso en background,
-          // por lo que puede mostrar Cuenta/Producto sin esperar el paso 2.
-          const documentAfterTypeClassification =
-            await this.electronicDocumentService.requireById(
-              documentId,
-              companyId,
-            );
-          const previousSuggestion =
-            documentAfterTypeClassification.payload.aiSuggestion;
-
-          await this.electronicDocumentService.updatePayload(
+    const classification = await this.siigoAiAccountSuggestionService
+      .classifyItemTypeAndAccount(documentId, companyId, async (itemType) => {
+        // Publica el paso 1 antes de ejecutar la recomendación del código.
+        // El listado se refresca mientras corre el proceso en background,
+        // por lo que puede mostrar Cuenta/Producto sin esperar el paso 2.
+        const documentAfterTypeClassification =
+          await this.electronicDocumentService.requireById(
             documentId,
-            {
-              ...documentAfterTypeClassification.payload,
-              aiSuggestion: {
-                itemType,
-                account: null,
-                product: null,
-                retentions: previousSuggestion?.retentions ?? [],
-                confidence: null,
-              },
-            },
             companyId,
           );
-        },
-      );
+        const previousSuggestion =
+          documentAfterTypeClassification.payload.aiSuggestion;
+
+        await this.electronicDocumentService.updatePayload(
+          documentId,
+          {
+            ...documentAfterTypeClassification.payload,
+            aiSuggestion: {
+              itemType,
+              account: null,
+              product: null,
+              retentions: previousSuggestion?.retentions ?? [],
+              confidence: null,
+            },
+          },
+          companyId,
+        );
+      })
+      .catch((error): ItemTypeAndAccountClassification => {
+        if (!(error instanceof BadGatewayException)) throw error;
+        this.logger.warn(
+          'IA no disponible; el documento requiere revision: ' + documentId,
+        );
+        return {
+          itemType: null,
+          accountCode: null,
+          accountName: null,
+          productCode: null,
+          productName: null,
+          confidence: 0,
+          items: [],
+        };
+      });
 
     console.log(
       `[AI-CLASSIFY] [documentId=${documentId}] DESPUÉS de invocar classifyItemTypeAndAccount — ${new Date().toISOString()} — itemType=${classification.itemType ?? 'null'}, accountCode=${classification.accountCode ?? 'null'}, accountName=${classification.accountName ?? 'null'}, productCode=${classification.productCode ?? 'null'}, productName=${classification.productName ?? 'null'}, confidence=${classification.confidence ?? 'null'}`,

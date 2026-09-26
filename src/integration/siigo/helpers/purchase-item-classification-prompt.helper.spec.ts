@@ -33,7 +33,9 @@ describe('buildItemTypeClassificationPrompt (paso 1 — sin catálogos)', () => 
     });
 
     expect(messages[1].content).toContain('MAGNA FILIA SAS');
-    expect(messages[1].content).toContain('A qué se dedica: Restaurante de comida rápida.');
+    expect(messages[1].content).toContain(
+      'A qué se dedica: Restaurante de comida rápida.',
+    );
   });
 
   it('pide solo itemType, sin accountCode/productCode/confidence', () => {
@@ -156,18 +158,22 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     expect(messages[0].content).toContain(
       'preferí una de las cuentas que este proveedor ya usó',
     );
-    expect(messages[0].content).toContain('CADA ítem');
+    expect(messages[0].content).toContain(
+      'Clasifica cada ítem considerando su uso en la empresa',
+    );
+    expect(messages[0].content).toContain(
+      'Distintos productos pueden compartir la misma cuenta',
+    );
+    expect(messages[0].content).toContain(
+      'No separes alimentos en cuentas diferentes',
+    );
     expect(messages[0].content).toContain(
       'No inventes ni completes significados',
     );
+    expect(messages[0].content).toContain('tenés que responder SIEMPRE');
+    expect(messages[0].content).toContain('PROHIBIDO devolver null');
     expect(messages[0].content).toContain(
-      'tenés que responder SIEMPRE',
-    );
-    expect(messages[0].content).toContain(
-      'PROHIBIDO devolver null',
-    );
-    expect(messages[0].content).toContain(
-      '{"items":[{"accountCode":string,"confidence":number}]}',
+      '{"items":[{"itemId":string,"accountCode":string,"confidence":number}]}',
     );
   });
 
@@ -238,63 +244,56 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
 });
 
 describe('parseAccountCodeClassificationResponse', () => {
-  it('parsea un JSON por ítem', () => {
+  const parse = parseAccountCodeClassificationResponse;
+  it('relaciona por ID aunque falte un ítem intermedio y cambie el orden', () => {
     expect(
-      parseAccountCodeClassificationResponse(
-        '{"items":[{"accountCode":"51050601","confidence":90},{"accountCode":"51959501","confidence":70}]}',
-        2,
-      ),
-    ).toEqual({
-      items: [
-        { accountCode: '51050601', confidence: 90 },
-        { accountCode: '51959501', confidence: 70 },
-      ],
-    });
+      parse(
+        JSON.stringify({
+          items: [
+            { itemId: '3', accountCode: 'C', confidence: 70 },
+            { itemId: '1', accountCode: 'A', confidence: 90 },
+          ],
+        }),
+        ['1', '2', '3'],
+      ).items,
+    ).toEqual([
+      { accountCode: 'A', confidence: 90 },
+      { accountCode: null, confidence: null },
+      { accountCode: 'C', confidence: 70 },
+    ]);
   });
-
-  it('si llega el formato viejo de una sola cuenta, solo llena el primer ítem', () => {
+  it('descarta duplicados, IDs ajenos y respuestas sin ID', () => {
     expect(
-      parseAccountCodeClassificationResponse(
-        '{"accountCode": "51356001", "confidence": 92}',
-        2,
-      ),
-    ).toEqual({
-      items: [
-        { accountCode: '51356001', confidence: 92 },
+      parse(
+        JSON.stringify({
+          items: [
+            { itemId: '1', accountCode: 'A' },
+            { itemId: '1', accountCode: 'B' },
+            { itemId: '99', accountCode: 'C' },
+            { accountCode: 'D' },
+          ],
+        }),
+        ['1', '2'],
+      ).items,
+    ).toEqual([
+      { accountCode: null, confidence: null },
+      { accountCode: null, confidence: null },
+    ]);
+  });
+  it.each(['texto', '{', 'null', '{"accountCode":"A"}'])(
+    'rechaza formatos inválidos: %s',
+    (raw) => {
+      expect(parse(raw, ['12']).items).toEqual([
         { accountCode: null, confidence: null },
-      ],
-    });
-  });
-
-  it('clampea confidence fuera de [0, 100]', () => {
+      ]);
+    },
+  );
+  it('mantiene los IDs originales en solicitudes parciales', () => {
     expect(
-      parseAccountCodeClassificationResponse(
-        '{"accountCode": "X", "confidence": 140}',
-      ).items[0].confidence,
-    ).toBe(100);
-    expect(
-      parseAccountCodeClassificationResponse(
-        '{"accountCode": "X", "confidence": -20}',
-      ).items[0].confidence,
-    ).toBe(0);
-  });
-
-  it('confidence null si no es numérico; accountCode null si no viene', () => {
-    expect(
-      parseAccountCodeClassificationResponse(
-        '{"accountCode": "X", "confidence": "alta"}',
-      ).items[0].confidence,
-    ).toBeNull();
-    expect(
-      parseAccountCodeClassificationResponse('{"confidence": 80}').items[0]
-        .accountCode,
-    ).toBeNull();
-  });
-
-  it('devuelve ítems vacíos si la respuesta no es JSON válido', () => {
-    expect(parseAccountCodeClassificationResponse('no puedo ayudar', 1)).toEqual({
-      items: [{ accountCode: null, confidence: null }],
-    });
+      parse('{"items":[{"itemId":"12","accountCode":"A","confidence":140}]}', [
+        '12',
+      ]).items,
+    ).toEqual([{ accountCode: 'A', confidence: 100 }]);
   });
 });
 
@@ -336,24 +335,56 @@ describe('buildProductCodeClassificationPrompt (paso 2b — solo productos)', ()
 });
 
 describe('parseProductCodeClassificationResponse', () => {
-  it('parsea un JSON por ítem', () => {
+  const parse = parseProductCodeClassificationResponse;
+  it('relaciona por ID aunque falte un ítem intermedio y cambie el orden', () => {
     expect(
-      parseProductCodeClassificationResponse(
-        '{"items":[{"productCode":"PROD-001","confidence":75},{"productCode":"PROD-002","confidence":40}]}',
-        2,
-      ),
-    ).toEqual({
-      items: [
-        { productCode: 'PROD-001', confidence: 75 },
-        { productCode: 'PROD-002', confidence: 40 },
-      ],
-    });
+      parse(
+        JSON.stringify({
+          items: [
+            { itemId: '3', productCode: 'C', confidence: 70 },
+            { itemId: '1', productCode: 'A', confidence: 90 },
+          ],
+        }),
+        ['1', '2', '3'],
+      ).items,
+    ).toEqual([
+      { productCode: 'A', confidence: 90 },
+      { productCode: null, confidence: null },
+      { productCode: 'C', confidence: 70 },
+    ]);
   });
-
-  it('devuelve ítems vacíos si la respuesta no es JSON válido', () => {
-    expect(parseProductCodeClassificationResponse('no puedo ayudar', 1)).toEqual({
-      items: [{ productCode: null, confidence: null }],
-    });
+  it('descarta duplicados, IDs ajenos y respuestas sin ID', () => {
+    expect(
+      parse(
+        JSON.stringify({
+          items: [
+            { itemId: '1', productCode: 'A' },
+            { itemId: '1', productCode: 'B' },
+            { itemId: '99', productCode: 'C' },
+            { productCode: 'D' },
+          ],
+        }),
+        ['1', '2'],
+      ).items,
+    ).toEqual([
+      { productCode: null, confidence: null },
+      { productCode: null, confidence: null },
+    ]);
+  });
+  it.each(['texto', '{', 'null', '{"productCode":"A"}'])(
+    'rechaza formatos inválidos: %s',
+    (raw) => {
+      expect(parse(raw, ['12']).items).toEqual([
+        { productCode: null, confidence: null },
+      ]);
+    },
+  );
+  it('mantiene los IDs originales en solicitudes parciales', () => {
+    expect(
+      parse('{"items":[{"itemId":"12","productCode":"A","confidence":140}]}', [
+        '12',
+      ]).items,
+    ).toEqual([{ productCode: 'A', confidence: 100 }]);
   });
 });
 

@@ -68,10 +68,7 @@ describe('applyItemClassificationToPayload', () => {
   it('escribe accountMapping por línea y el snapshot de aiSuggestion', () => {
     const payload = applyItemClassificationToPayload(
       {
-        items: [
-          buildItem('Resma de papel'),
-          buildItem('Jabón líquido'),
-        ],
+        items: [buildItem('Resma de papel'), buildItem('Jabón líquido')],
       } as ElectronicDocumentPayload,
       {
         itemType: 'Account',
@@ -103,9 +100,12 @@ describe('applyItemClassificationToPayload', () => {
       '51953001',
       '51050601',
     ]);
-    expect(payload.aiSuggestion?.items?.map((item) => item.account?.code)).toEqual([
-      '51953001',
-      '51050601',
+    expect(
+      payload.items.map((item) => item.aiSuggestion?.account?.code),
+    ).toEqual(['51953001', '51050601']);
+    expect(payload.aiSuggestion).not.toHaveProperty('items');
+    expect(payload.items.map((item) => item.aiSuggestion?.confidence)).toEqual([
+      80, 70,
     ]);
     expect(payload.aiSuggestion?.confidence).toBe(70);
   });

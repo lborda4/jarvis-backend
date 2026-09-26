@@ -157,6 +157,7 @@ function applyDraftCodesToPayloadItems(
         saved.unitValue > 0 ? saved.unitValue : (existing?.valorUnitario ?? 0),
       total: existing?.total ?? saved.quantity * saved.unitValue,
       codigo: existing?.codigo,
+      aiSuggestion: existing?.aiSuggestion,
       ivaPercentage: existing?.ivaPercentage,
       discount: saved.discount > 0 ? saved.discount : existing?.discount,
       itemType: saved.tipo,

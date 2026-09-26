@@ -1,3 +1,4 @@
+import { BadGatewayException } from '@nestjs/common';
 import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classification.service';
 
 function buildService(overrides: {
@@ -38,9 +39,7 @@ function buildService(overrides: {
       .mockResolvedValue(overrides.configuration ?? null),
   };
   const supplierItemAccountMappingsRepository = {
-    findOneByKey: jest
-      .fn()
-      .mockResolvedValue(overrides.itemMapping ?? null),
+    findOneByKey: jest.fn().mockResolvedValue(overrides.itemMapping ?? null),
   };
   const integrationsRepository = {
     findByCompanyAndProvider: jest
@@ -94,7 +93,6 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
       itemType: 'Account',
       account: null,
       product: null,
-      items: [],
       retentions: [],
       confidence: 0,
     });
@@ -148,7 +146,6 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
       itemType: 'Account',
       account: { code: '5135', name: 'Gastos diversos' },
       product: null,
-      items: [],
       retentions: [],
       confidence: 65,
     });
@@ -177,7 +174,6 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
         code: 'BOTATITAN235209042',
         name: 'Bota Titán',
       },
-      items: [],
       retentions: [],
       confidence: 30,
     });
@@ -245,7 +241,11 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     await service.classifyDocuments(['doc-1'], 'company-1');
 
     const [, payload] = electronicDocumentService.updatePayload.mock
-      .calls[0] as [string, { items: Array<{ accountMapping?: { code: string } }> }, string];
+      .calls[0] as [
+      string,
+      { items: Array<{ accountMapping?: { code: string } }> },
+      string,
+    ];
 
     expect(payload.items[0].accountMapping).toEqual({
       code: '51953001',
@@ -286,4 +286,36 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
       siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
     ).toHaveBeenCalled();
   });
+});
+
+it('persists review status when the AI provider fails before resolving the type', async () => {
+  const {
+    service,
+    electronicDocumentService,
+    siigoAiAccountSuggestionService,
+  } = buildService({
+    classification: {
+      itemType: null,
+      accountCode: null,
+      accountName: null,
+      productCode: null,
+      productName: null,
+      confidence: null,
+    },
+  });
+  siigoAiAccountSuggestionService.classifyItemTypeAndAccount.mockRejectedValue(
+    new BadGatewayException(),
+  );
+  await service.classifyDocuments(['doc-1'], 'company-1');
+  expect(electronicDocumentService.updatePayload).toHaveBeenCalledWith(
+    'doc-1',
+    expect.objectContaining({
+      aiSuggestion: expect.objectContaining({
+        confidence: 0,
+        account: null,
+        product: null,
+      }),
+    }),
+    'company-1',
+  );
 });

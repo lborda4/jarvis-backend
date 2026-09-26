@@ -326,7 +326,12 @@ describe('resolveSuggestedAccountForDocument — PURCHASE_CREATED', () => {
     });
 
     expect(
-      resolveSuggestedAccountForDocument(document, new Map(), new Map(), INTEGRATION_ID),
+      resolveSuggestedAccountForDocument(
+        document,
+        new Map(),
+        new Map(),
+        INTEGRATION_ID,
+      ),
     ).toEqual({ code: '51356001', name: 'Servicio internet', uses: 1 });
   });
 
@@ -352,7 +357,12 @@ describe('resolveSuggestedAccountForDocument — PURCHASE_CREATED', () => {
     });
 
     expect(
-      resolveSuggestedAccountForDocument(document, new Map(), new Map(), INTEGRATION_ID),
+      resolveSuggestedAccountForDocument(
+        document,
+        new Map(),
+        new Map(),
+        INTEGRATION_ID,
+      ),
     ).toEqual({ code: '5199990001', name: 'Cuenta confirmada', uses: 1 });
   });
 });
@@ -363,7 +373,12 @@ describe('resolveSuggestedRetentionsForDocument', () => {
       preference: {
         account: { code: '5135950001', name: 'Cuenta confirmada' },
         retentions: [
-          { id: 4, name: 'Retefuente servicios 4%', type: 'Retefuente', percentage: 4 },
+          {
+            id: 4,
+            name: 'Retefuente servicios 4%',
+            type: 'Retefuente',
+            percentage: 4,
+          },
         ],
       },
     });
@@ -391,7 +406,12 @@ describe('resolveSuggestedRetentionsForDocument', () => {
     );
 
     expect(retentions).toEqual([
-      { id: 4, name: 'Retefuente servicios 4%', type: 'Retefuente', percentage: 4 },
+      {
+        id: 4,
+        name: 'Retefuente servicios 4%',
+        type: 'Retefuente',
+        percentage: 4,
+      },
     ]);
   });
 
@@ -414,7 +434,11 @@ describe('resolveSuggestedRetentionsForDocument', () => {
     });
 
     expect(
-      resolveSuggestedRetentionsForDocument(document, new Map(), INTEGRATION_ID),
+      resolveSuggestedRetentionsForDocument(
+        document,
+        new Map(),
+        INTEGRATION_ID,
+      ),
     ).toEqual([]);
   });
 });
@@ -582,9 +606,21 @@ describe('resolveSuggestedAccountsForDocumentItems / resolveSuggestedAccountForD
           account: null,
           product: null,
           items: [
-            { account: { code: '51953001', name: 'Papelería' }, product: null, confidence: 80 },
-            { account: { code: '51050601', name: 'Aseo' }, product: null, confidence: 85 },
-            { account: { code: '51400501', name: 'Mantenimiento' }, product: null, confidence: 70 },
+            {
+              account: { code: '51953001', name: 'Papelería' },
+              product: null,
+              confidence: 80,
+            },
+            {
+              account: { code: '51050601', name: 'Aseo' },
+              product: null,
+              confidence: 85,
+            },
+            {
+              account: { code: '51400501', name: 'Mantenimiento' },
+              product: null,
+              confidence: 70,
+            },
           ],
           retentions: [],
           confidence: 70,
@@ -604,5 +640,87 @@ describe('resolveSuggestedAccountsForDocumentItems / resolveSuggestedAccountForD
       '51050601',
       '51400501',
     ]);
+  });
+});
+
+describe('sugerencias guardadas dentro de cada ítem', () => {
+  function documentWithSuggestion() {
+    const document = buildDocument();
+    document.payload.items = [
+      {
+        descripcion: 'Alimentos',
+        cantidad: 1,
+        valorUnitario: 1000,
+        total: 1000,
+        aiSuggestion: {
+          account: { code: '61600502', name: 'Costo Almuerzos' },
+          product: null,
+          confidence: 85,
+        },
+      },
+    ];
+    document.payload.aiSuggestion = {
+      retentions: [],
+      items: [
+        {
+          account: { code: '51953001', name: 'Anterior' },
+          product: { code: 'OLD', name: 'Anterior' },
+        },
+      ],
+    };
+    return document;
+  }
+
+  it('prefiere la cuenta del ítem al arreglo antiguo', () => {
+    expect(
+      resolveSuggestedAccountsForDocumentItems(
+        documentWithSuggestion(),
+        new Map(),
+        new Map(),
+        INTEGRATION_ID,
+      ),
+    ).toEqual([
+      { code: '61600502', name: 'Costo Almuerzos', source: 'fallback' },
+    ]);
+  });
+
+  it('lee el arreglo antiguo cuando el ítem no tiene el campo nuevo', () => {
+    const document = documentWithSuggestion();
+    delete document.payload.items[0].aiSuggestion;
+    expect(
+      resolveSuggestedAccountsForDocumentItems(
+        document,
+        new Map(),
+        new Map(),
+        INTEGRATION_ID,
+      )[0]?.code,
+    ).toBe('51953001');
+  });
+
+  it('una sugerencia explícitamente vacía no revive la anterior', () => {
+    const document = documentWithSuggestion();
+    document.payload.items[0].aiSuggestion = null;
+    expect(
+      resolveSuggestedAccountsForDocumentItems(
+        document,
+        new Map(),
+        new Map(),
+        INTEGRATION_ID,
+      ),
+    ).toEqual([null]);
+    expect(resolveSuggestedProductForDocument(document)).toBeNull();
+  });
+
+  it('lee el producto del ítem antes del producto antiguo', () => {
+    const document = documentWithSuggestion();
+    document.payload.items[0].aiSuggestion = {
+      account: null,
+      product: { code: 'NEW', name: 'Nuevo' },
+      confidence: 90,
+    };
+    expect(resolveSuggestedProductForDocument(document)).toEqual({
+      code: 'NEW',
+      name: 'Nuevo',
+    });
   });
 });

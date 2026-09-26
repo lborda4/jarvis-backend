@@ -31,7 +31,8 @@ export function computeElectronicDocumentRequiresReview(
 ): boolean {
   return (
     isSiigoCompany &&
-    document.electronicDocumentType === ElectronicDocumentType.PURCHASE_INVOICE &&
+    document.electronicDocumentType ===
+      ElectronicDocumentType.PURCHASE_INVOICE &&
     resolvePurchaseInvoiceRequiresReview({
       draft: document.draft ?? document.payload?.accounting ?? null,
       payloadItems: document.payload?.items ?? [],
@@ -39,13 +40,8 @@ export function computeElectronicDocumentRequiresReview(
       suggestedProduct,
       suggestedItemConfig,
       itemAccountSuggestions,
-      itemProductSuggestions: (document.payload?.aiSuggestion?.items ?? []).map(
-        (item) => {
-          const code = item.product?.code?.trim();
-          return code
-            ? { code, name: item.product?.name?.trim() || code }
-            : null;
-        },
+      itemProductSuggestions: (document.payload?.items ?? []).map(
+        (_item, index) => resolveAiSuggestedProductForItem(document, index),
       ),
       aiConfidence,
       aiClassificationAttempted: document.payload?.aiSuggestion != null,
@@ -175,7 +171,12 @@ function resolveAiSuggestedProductForItem(
   document: ElectronicDocument,
   index: number,
 ): SuggestedProduct | null {
-  const product = document.payload?.aiSuggestion?.items?.[index]?.product;
+  const item = document.payload?.items?.[index];
+  const product = (
+    item?.aiSuggestion !== undefined
+      ? item.aiSuggestion
+      : document.payload?.aiSuggestion?.items?.[index]
+  )?.product;
   const code = product?.code?.trim();
 
   if (!code) {

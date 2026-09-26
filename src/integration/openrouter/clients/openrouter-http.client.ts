@@ -202,6 +202,16 @@ export class OpenRouterHttpClient {
       const reasoningTokens =
         usage?.completion_tokens_details?.reasoning_tokens ?? null;
       const finishReason = data.choices?.[0]?.finish_reason ?? null;
+      const content = this.extractMessageContent(data);
+      if (!content.trim() || (finishReason && finishReason !== 'stop')) {
+        throw new Error(
+          `Respuesta de IA incompleta (${finishReason ?? 'sin contenido'}).`,
+        );
+      }
+      const parsed: unknown = JSON.parse(content);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('La respuesta de IA no contiene un objeto JSON.');
+      }
 
       console.log(
         `[AI] Respuesta de OpenRouter ${logTags} [generationId=${data.id ?? 'n/a'}] [model=${data.model ?? 'n/a'}] [promptTokens=${usage?.prompt_tokens ?? 'n/a'}] [completionTokens=${usage?.completion_tokens ?? 'n/a'}] [reasoningTokens=${reasoningTokens ?? 0}] [cost=${usage?.cost ?? 'n/a'}] [finishReason=${finishReason ?? 'n/a'}] [elapsedMs=${Date.now() - startedAt}]`,
@@ -225,7 +235,7 @@ export class OpenRouterHttpClient {
       }
 
       return {
-        content: this.extractMessageContent(data),
+        content,
         aiRequestId,
       };
     } catch (error) {

@@ -24,7 +24,7 @@ export interface AiSuggestionSnapshot {
   itemType?: 'Account' | 'Product' | null;
   account?: { code: string; name: string } | null;
   product?: { code: string; name: string } | null;
-  /** Una sugerencia por línea, en el mismo orden que payload.items. */
+  /** @deprecated Solo lectura de payloads antiguos. Nuevas sugerencias en items[].aiSuggestion. */
   items?: AiSuggestionItemSnapshot[];
   retentions: SupplierRetentionPreference[];
   /** 0-100, qué tan segura estuvo la IA de account/product — ver

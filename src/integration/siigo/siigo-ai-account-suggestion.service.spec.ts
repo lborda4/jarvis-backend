@@ -1,3 +1,5 @@
+import { BadGatewayException } from '@nestjs/common';
+import { parseAccountCodeClassificationResponse } from './helpers/purchase-item-classification-prompt.helper';
 import {
   SiigoAiAccountSuggestionService,
   selectProductsForClassificationPrompt,
@@ -88,7 +90,8 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
       // las dos: trae itemType (paso 1) Y accountCode (paso 2), ninguna de
       // las dos lee campos que no le interesan.
       createChatCompletion: jest.fn().mockResolvedValue({
-        content: '{"itemType":"Account","accountCode":"5135","confidence":80}',
+        content:
+          '{"itemType":"Account","items":[{"itemId":"1","accountCode":"5135","confidence":80}]}',
       }),
     };
     const electronicDocumentService = {
@@ -171,10 +174,12 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
 
     expect(openRouterHttpClient.createChatCompletion).toHaveBeenCalledTimes(1);
     const [messages] = openRouterHttpClient.createChatCompletion.mock.calls[0];
-    const userContent = messages.find((message: { role: string }) => message.role === 'user')
-      ?.content as string;
-    const systemContent = messages.find((message: { role: string }) => message.role === 'system')
-      ?.content as string;
+    const userContent = messages.find(
+      (message: { role: string }) => message.role === 'user',
+    )?.content as string;
+    const systemContent = messages.find(
+      (message: { role: string }) => message.role === 'system',
+    )?.content as string;
 
     expect(userContent).toContain('Documento: Documento soporte');
     expect(userContent).toContain(
@@ -202,9 +207,11 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
   });
 });
 
-describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — siempre hay cuenta si existe catálogo', () => {
+describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — validacion por ID y catalogo', () => {
   function buildAccountService(params: {
     aiContent: string;
+    responses?: string[];
+    descriptions?: string[];
     historicalRows?: Array<{
       descripcionItem: string;
       cuentaPuc: string;
@@ -219,7 +226,9 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — siempre
       electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
       payload: {
         supplier: { name: 'Proveedor SAS', documentNumber: '900123456' },
-        items: [{ descripcion: 'Servicio de aseo' }],
+        items: (params.descriptions ?? ['Aseo']).map((descripcion) => ({
+          descripcion,
+        })),
       },
     };
     const openRouterHttpClient = {
@@ -228,6 +237,11 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — siempre
         content: params.aiContent,
       }),
     };
+    for (const content of params.responses ?? []) {
+      openRouterHttpClient.createChatCompletion.mockResolvedValueOnce({
+        content,
+      });
+    }
     const service = new SiigoAiAccountSuggestionService(
       openRouterHttpClient as any,
       { requireById: jest.fn().mockResolvedValue(document) } as any,
@@ -255,15 +269,138 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — siempre
           .fn()
           .mockResolvedValue(null),
       } as any,
-      { findById: jest.fn().mockResolvedValue({ name: 'MAGNA FILIA SAS' }) } as any,
+      {
+        findById: jest.fn().mockResolvedValue({ name: 'MAGNA FILIA SAS' }),
+      } as any,
     );
 
-    return service;
+    return Object.assign(service, {
+      completionMock: openRouterHttpClient.createChatCompletion,
+    });
   }
 
-  it('si la IA devuelve un código inexistente, usa el histórico comparable con confidence de factura similar', async () => {
+  it('divide 31 items en lotes de 15 y reintenta solo los pendientes con el mismo contexto', async () => {
+    const ids = Array.from({ length: 31 }, (_, index) => String(index + 1));
+    const response = (itemIds: string[]) =>
+      JSON.stringify({
+        items: [...itemIds].reverse().map((itemId) => ({
+          itemId,
+          accountCode: itemId === '8' ? '51959501' : '51050601',
+          confidence: 80,
+        })),
+      });
     const service = buildAccountService({
-      aiContent: '{"items":[{"accountCode":"NO-EXISTE","confidence":90}]}',
+      descriptions: ids.map((id) => `Concepto ${id}`),
+      responses: [
+        response(ids.slice(0, 15).filter((id) => id !== '8')),
+        response(ids.slice(15, 30)),
+        response(ids.slice(30)),
+      ],
+      aiContent: response(['8']),
+    });
+
+    const result = await service.classifyItemTypeAndAccount(
+      'doc-1',
+      'company-1',
+    );
+
+    expect(result.items.map((item) => item.accountCode)).toEqual(
+      ids.map((id) => (id === '8' ? '51959501' : '51050601')),
+    );
+    expect(service.completionMock).toHaveBeenCalledTimes(4);
+    const calls = service.completionMock.mock.calls as unknown as Array<
+      [
+        Array<{ content: string }>,
+        { context: { companyId: string; documentId: string; purpose: string } },
+      ]
+    >;
+    const expectedIds = [
+      ids.slice(0, 15),
+      ids.slice(15, 30),
+      ids.slice(30),
+      ['8'],
+    ];
+    calls.forEach(([messages, options], index) => {
+      const content = messages[1].content;
+      expect(
+        [...content.matchAll(/itemId="([^"]+)"/g)].map((match) => match[1]),
+      ).toEqual(expectedIds[index]);
+      expect(content).toContain('MAGNA FILIA SAS');
+      expect(content).toContain('Proveedor SAS');
+      expect(content).toContain('Documento: Documento soporte');
+      expect(content).toContain('51050601 Aseo');
+      expect(messages[0].content).toBe(calls[0][0][0].content);
+      expect(options.context).toEqual({
+        companyId: 'company-1',
+        documentId: 'doc-1',
+        purpose: 'purchase-item-account-code-classification',
+      });
+    });
+  });
+
+  it('reintenta solo el ID omitido y conserva las otras lineas', async () => {
+    const service = buildAccountService({
+      descriptions: ['Primero', 'Segundo', 'Tercero'],
+      responses: [
+        '{"items":[{"itemId":"3","accountCode":"51959501"},{"itemId":"1","accountCode":"51050601"}]}',
+      ],
+      aiContent: '{"items":[{"itemId":"2","accountCode":"51959501"}]}',
+    });
+    const result = await service.classifyItemTypeAndAccount(
+      'doc-1',
+      'company-1',
+    );
+    expect(result.items.map((item) => item.accountCode)).toEqual([
+      '51050601',
+      '51959501',
+      '51959501',
+    ]);
+    expect(service.completionMock).toHaveBeenCalledTimes(2);
+    const retry = service.completionMock.mock.calls[1] as unknown as [
+      Array<{ content: string }>,
+    ];
+    expect(retry[0][1].content).toContain('itemId="2"');
+    expect(retry[0][1].content).not.toContain('itemId="1"');
+    expect(retry[0][1].content).not.toContain('itemId="3"');
+  });
+
+  it('no resume como cuenta comun cuando queda un ID sin resolver', async () => {
+    const service = buildAccountService({
+      descriptions: ['Primero', 'Segundo'],
+      aiContent: '{"items":[{"itemId":"1","accountCode":"51050601"}]}',
+    });
+    const result = await service.classifyItemTypeAndAccount(
+      'doc-1',
+      'company-1',
+    );
+    expect(service.completionMock).toHaveBeenCalledTimes(3);
+    expect(result.items.map((item) => item.accountCode)).toEqual([
+      '51050601',
+      null,
+    ]);
+    expect(result.accountCode).toBeNull();
+    expect(result.confidence).toBe(0);
+  });
+
+  it('reintenta IDs duplicados aunque sus cuentas existan', async () => {
+    const service = buildAccountService({
+      responses: [
+        '{"items":[{"itemId":"1","accountCode":"51050601"},{"itemId":"1","accountCode":"51959501"}]}',
+      ],
+      aiContent: '{"items":[{"itemId":"1","accountCode":"51959501"}]}',
+    });
+    const result = await service.classifyItemTypeAndAccount(
+      'doc-1',
+      'company-1',
+    );
+    expect(service.completionMock).toHaveBeenCalledTimes(2);
+    expect(result.accountCode).toBe('51959501');
+  });
+
+  it('rechaza cuentas inexistentes sin usar el historial', async () => {
+    const service = buildAccountService({
+      aiContent:
+        '{"items":[{"itemId":"1","accountCode":"NO-EXISTE","confidence":90}]}',
       historicalRows: [
         {
           descripcionItem: 'Servicio de aseo mensual',
@@ -281,14 +418,16 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — siempre
       'company-1',
     );
 
-    expect(result.accountCode).toBe('51050601');
-    expect(result.accountName).toBe('Aseo');
-    expect(result.items[0].confidence).toBe(ACCOUNT_CONFIDENCE.SIMILAR_INVOICE);
+    expect(service.completionMock).toHaveBeenCalledTimes(3);
+    expect(result.accountCode).toBeNull();
+    expect(result.accountName).toBeNull();
+    expect(result.items[0].confidence).toBe(0);
   });
 
-  it('si el parseo no trae accountCode, usa la primera cuenta del catálogo con confidence baja', async () => {
+  it('no asigna la primera cuenta cuando falta el codigo', async () => {
     const service = buildAccountService({
-      aiContent: '{"items":[{"accountCode":null,"confidence":40}]}',
+      aiContent:
+        '{"items":[{"itemId":"1","accountCode":null,"confidence":40}]}',
     });
 
     const result = await service.classifyItemTypeAndAccount(
@@ -296,14 +435,16 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — siempre
       'company-1',
     );
 
-    expect(result.accountCode).toBe('51050601');
-    expect(result.accountName).toBe('Aseo');
-    expect(result.items[0].confidence).toBe(ACCOUNT_CONFIDENCE.CATALOG);
+    expect(service.completionMock).toHaveBeenCalledTimes(3);
+    expect(result.accountCode).toBeNull();
+    expect(result.accountName).toBeNull();
+    expect(result.items[0].confidence).toBe(0);
   });
 
   it('si la IA devuelve un código del catálogo sin historial, usa esa cuenta con confidence de catálogo', async () => {
     const service = buildAccountService({
-      aiContent: '{"items":[{"accountCode":"51959501","confidence":75}]}',
+      aiContent:
+        '{"items":[{"itemId":"1","accountCode":"51959501","confidence":75}]}',
     });
 
     const result = await service.classifyItemTypeAndAccount(
@@ -446,5 +587,52 @@ describe('SiigoAiAccountSuggestionService.suggestForDocument', () => {
       }),
       'company-1',
     );
+  });
+});
+
+describe('classification recovery', () => {
+  it('retries failed calls and preserves resolved lines', async () => {
+    const client = {
+      createChatCompletion: jest
+        .fn()
+        .mockResolvedValueOnce({
+          content: '{"items":[{"itemId":"1","accountCode":"5135"}]}',
+        })
+        .mockRejectedValueOnce(new BadGatewayException())
+        .mockResolvedValueOnce({
+          content: '{"items":[{"itemId":"2","accountCode":"5195"}]}',
+        }),
+    };
+    const service = new SiigoAiAccountSuggestionService(
+      client as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    const prompt = jest.fn().mockReturnValue([]);
+    const result = await (service as any).classifyCodesWithRetries(
+      [
+        { itemId: '1', descripcion: 'A' },
+        { itemId: '2', descripcion: 'B' },
+      ],
+      prompt,
+      parseAccountCodeClassificationResponse,
+      (item: any) => Boolean(item.accountCode),
+      { companyId: 'c', documentId: 'd', purpose: 'test' },
+    );
+    expect(result.map((item: any) => item.accountCode)).toEqual([
+      '5135',
+      '5195',
+    ]);
+    expect(prompt.mock.calls[1][0]).toEqual([
+      { itemId: '2', descripcion: 'B' },
+    ]);
+    expect(client.createChatCompletion).toHaveBeenCalledTimes(3);
   });
 });
