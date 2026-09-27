@@ -311,8 +311,8 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     );
 
     expect(payload.withholdings).toEqual([
-      { dianTaxCode: '06', percentage: 2.5 },
-      { dianTaxCode: '05', percentage: 15 },
+      { dianTaxCode: '06', percentage: 2.5, amount: 1023 },
+      { dianTaxCode: '05', percentage: 15, amount: 6144.6 },
     ]);
   });
 
@@ -369,6 +369,46 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
 
     expect(payload.invoice.dueDate).toBe('2026-10-18');
     expect(payload.invoice.durationMeasure).toBe(30);
+  });
+
+  it('guarda medio de pago, ciudad/departamento del emisor y el adquiriente certificado', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        payment_form: {
+          payment_form_id: '2',
+          payment_method_id: '45',
+          payment_due_date: '2026-10-21',
+        },
+        seller: {
+          identification_number: '901464201',
+          name: 'MAGNA FILIA SAS',
+          type_identification: '31',
+          address: 'CR 49 # 134 - 68',
+          municipality: {
+            name: 'Bogotá, D.C.',
+            code: '001',
+            department: { name: 'Bogotá', code: '11' },
+          },
+        },
+        customer: {
+          identification_number: '800216499',
+          name: 'AGOFER SAS',
+          type_identification: '31',
+          address: 'CL 12 A 38 45',
+          city: 'Bogotá, D.C.',
+          department: 'Bogotá',
+        },
+      }),
+      'cufe-123',
+    );
+
+    expect(payload.invoice.paymentMethodCode).toBe('45');
+    expect(payload.supplier.cityName).toBe('Bogotá, D.C.');
+    expect(payload.supplier.stateName).toBe('Bogotá');
+    expect(payload.supplier.countryName).toBe('Colombia');
+    expect(payload.buyer?.name).toBe('AGOFER SAS');
+    expect(payload.buyer?.documentNumber).toBe('800216499');
+    expect(payload.buyer?.cityName).toBe('Bogotá, D.C.');
   });
 
   it('conserva un payment_due_date real', () => {

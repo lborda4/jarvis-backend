@@ -1,5 +1,12 @@
-import { NextPymeInvoiceQueryResult } from '../../integration/jarvis/nextpyme/nextpyme-api.client';
-import { ElectronicDocumentPayload } from '../interfaces/electronic-document-payload.interface';
+import {
+  NextPymeInvoiceQueryParty,
+  NextPymeInvoiceQueryResult,
+} from '../../integration/jarvis/nextpyme/nextpyme-api.client';
+import { resolveCountryName } from '../helpers/dian-location.helper';
+import {
+  ElectronicDocumentPayload,
+  ElectronicDocumentSupplier,
+} from '../interfaces/electronic-document-payload.interface';
 
 function toNumber(value: string | number | undefined): number {
   if (value === undefined || value === null || value === '') {
@@ -107,6 +114,61 @@ function resolveInvoiceDueDate(
   return addDaysToIsoDate(issueDate, durationMeasure) ?? undefined;
 }
 
+function isChargeIndicator(
+  value: string | boolean | undefined,
+): boolean {
+  return value === true || value === 'true' || value === '1';
+}
+
+function mapParty(
+  party: NextPymeInvoiceQueryParty | undefined,
+  fallbackDocumentType: string,
+): ElectronicDocumentSupplier | undefined {
+  if (!party) {
+    return undefined;
+  }
+
+  const documentNumber = String(party.identification_number ?? '').replace(
+    /\D/g,
+    '',
+  );
+  const name = party.name?.trim() || '';
+
+  if (!documentNumber && !name) {
+    return undefined;
+  }
+
+  const stateName =
+    party.municipality?.department?.name?.trim() ||
+    party.department?.trim() ||
+    '';
+  const cityName =
+    party.municipality?.name?.trim() || party.city?.trim() || '';
+
+  return {
+    documentNumber,
+    documentType: resolveDocumentType(party.type_identification) || fallbackDocumentType,
+    name,
+    commercialName: name,
+    address: party.address?.trim() || '',
+    phone: party.phone?.trim() || '',
+    email: party.email?.trim() || '',
+    stateName,
+    cityName,
+    countryCode: 'Co',
+    countryName: resolveCountryName('Co') ?? 'Colombia',
+    stateCode:
+      party.municipality?.department?.code?.trim().padStart(2, '0') || '',
+    cityCode:
+      buildDivipolaCityCode(
+        party.municipality?.department?.code,
+        party.municipality?.code,
+      ) ||
+      party.code?.trim() ||
+      '',
+  };
+}
+
 function resolveIsCreditPayment(
   paymentFormId: string | number | undefined,
 ): boolean | undefined {
@@ -172,17 +234,34 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
   // se descartan entradas sin tax_code o con porcentaje 0/inválido, nunca se
   // adivina el código.
   const withholdings = (result.with_holding_tax_totals ?? [])
-    .map((tax) => ({
-      dianTaxCode: String(tax.tax_code ?? '').trim(),
-      percentage: toNumber(tax.percent),
-    }))
+    .map((tax) => {
+      const amount = toNumber(tax.tax_amount ?? tax.amount);
+
+      return {
+        dianTaxCode: String(tax.tax_code ?? '').trim(),
+        percentage: toNumber(tax.percent),
+        ...(amount > 0 ? { amount } : {}),
+      };
+    })
     .filter((tax) => tax.dianTaxCode && tax.percentage > 0);
 
   const invoiceNumber =
     `${result.prefix ?? ''}${result.number ?? ''}`.trim() || cufe.slice(0, 12);
+  const paymentMethodCode = String(
+    result.payment_form?.payment_method_id ?? '',
+  ).trim();
   const isCreditPayment = resolveIsCreditPayment(
     result.payment_form?.payment_form_id,
   );
+  const supplier =
+    mapParty(seller, 'NIT') ??
+    ({
+      documentNumber: '',
+      documentType: 'NIT',
+      name: '',
+    } satisfies ElectronicDocumentSupplier);
+  const buyer = mapParty(result.customer, 'NIT');
+  const globalSurcharge = toNumber(totals.charge_total_amount);
   const durationMeasure = toNumber(result.payment_form?.duration_measure);
   const dueDate = resolveInvoiceDueDate(
     result.payment_form?.payment_due_date,
@@ -202,13 +281,17 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
           firstTax?.percent !== undefined
             ? toNumber(firstTax.percent)
             : undefined;
-        // Descuento propio de la línea (allowance_charges). Un descuento
-        // general a nivel de documento, no atribuible a una línea puntual,
-        // no se reparte acá — se deja tal cual viene por línea.
-        const discount = (line.allowance_charges ?? []).reduce(
-          (sum, charge) => sum + toNumber(charge.amount),
-          0,
-        );
+        const lineCharges = line.allowance_charges ?? [];
+        const discount = lineCharges.reduce((sum, charge) => {
+          return isChargeIndicator(charge.charge_indicator)
+            ? sum
+            : sum + toNumber(charge.amount);
+        }, 0);
+        const surcharge = lineCharges.reduce((sum, charge) => {
+          return isChargeIndicator(charge.charge_indicator)
+            ? sum + toNumber(charge.amount)
+            : sum;
+        }, 0);
 
         return {
           descripcion: line.description?.trim() || 'Ítem importado',
@@ -218,6 +301,7 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
           ...(line.code?.trim() ? { codigo: line.code.trim() } : {}),
           ...(ivaPercentage !== undefined ? { ivaPercentage } : {}),
           ...(discount > 0 ? { discount } : {}),
+          ...(surcharge > 0 ? { surcharge } : {}),
         };
       })
     : [
@@ -230,28 +314,8 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       ];
 
   return {
-    supplier: {
-      documentNumber: String(seller.identification_number ?? '').replace(
-        /\D/g,
-        '',
-      ),
-      documentType: resolveDocumentType(seller.type_identification),
-      name: seller.name?.trim() || '',
-      commercialName: seller.name?.trim() || '',
-      address: seller.address?.trim() || '',
-      phone: seller.phone?.trim() || '',
-      email: seller.email?.trim() || '',
-      stateCode:
-        seller.municipality?.department?.code?.trim().padStart(2, '0') || '',
-      cityCode:
-        buildDivipolaCityCode(
-          seller.municipality?.department?.code,
-          seller.municipality?.code,
-        ) ||
-        seller.code?.trim() ||
-        '',
-      countryCode: 'Co',
-    },
+    supplier,
+    ...(buyer ? { buyer } : {}),
     invoice: {
       cufe,
       prefix: result.prefix?.trim() || undefined,
@@ -260,6 +324,7 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       ...(dueDate ? { dueDate } : {}),
       ...(isCreditPayment !== undefined ? { isCreditPayment } : {}),
       ...(durationMeasure > 0 ? { durationMeasure } : {}),
+      ...(paymentMethodCode ? { paymentMethodCode } : {}),
       currency: 'COP',
     },
     items,
@@ -269,6 +334,7 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       total: payable,
       iva,
       ...(discount > 0 ? { discount } : {}),
+      ...(globalSurcharge > 0 ? { surcharge: globalSurcharge } : {}),
     },
     ...(result.notes?.trim() ? { observations: result.notes.trim() } : {}),
     ...(withholdings.length > 0 ? { withholdings } : {}),

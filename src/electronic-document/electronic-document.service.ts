@@ -44,6 +44,8 @@ import {
   SaveElectronicDocumentDraftRequestDto,
   SaveElectronicDocumentDraftResponseDto,
 } from './dto/save-electronic-document-draft.dto';
+import { PurchaseInvoiceDownloadDto } from './dto/purchase-invoice-download.dto';
+import { mapElectronicDocumentToPurchaseInvoiceDownload } from './mappers/electronic-document-to-purchase-invoice-download.mapper';
 import { SupplierItemAccountMapping } from '../integration/entities/supplier-item-account-mapping.entity';
 import { SupplierItemAccountMappingsRepository } from '../integration/repositories/supplier-item-account-mappings.repository';
 import {
@@ -218,6 +220,52 @@ export class ElectronicDocumentService {
     }
 
     return document;
+  }
+
+  /**
+   * Datos visuales de una factura de compra para que el frontend arme la
+   * representación gráfica (PDF + QR DIAN). Usa el payload certificado, no
+   * el borrador de contabilización.
+   */
+  async getPurchaseInvoiceDownload(
+    documentId: string,
+    companyId: string,
+  ): Promise<PurchaseInvoiceDownloadDto> {
+    const document = await this.requireById(documentId, companyId);
+
+    if (
+      document.electronicDocumentType !==
+      ElectronicDocumentType.PURCHASE_INVOICE
+    ) {
+      throw new BadRequestException(
+        'Solo se puede descargar la representación de una factura de compra.',
+      );
+    }
+
+    const cufe =
+      document.cufe?.trim() || document.payload?.invoice?.cufe?.trim() || '';
+
+    if (!cufe) {
+      throw new BadRequestException(
+        'La factura no tiene CUFE; no se puede generar la representación gráfica.',
+      );
+    }
+
+    const company =
+      document.company ??
+      (await this.companiesRepository.findById(companyId.trim()));
+
+    if (!company) {
+      throw new BadRequestException(
+        `No se encontró la empresa con id ${companyId}.`,
+      );
+    }
+
+    this.logger.log(
+      `Descarga de factura leída desde electronic_documents.payload (id=${document.id}, cufe=${cufe}, items=${document.payload?.items?.length ?? 0})`,
+    );
+
+    return mapElectronicDocumentToPurchaseInvoiceDownload(document, company);
   }
 
   async updateStatus(
