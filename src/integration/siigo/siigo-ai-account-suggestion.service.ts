@@ -4,6 +4,10 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import {
+  companyDescriptionForPrompt,
+  readCompanyAiContext,
+} from '../../company/company-ai-context';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
@@ -17,7 +21,6 @@ import {
   OpenRouterHttpClient,
   type OpenRouterMessage,
 } from '../openrouter/clients/openrouter-http.client';
-import { isAllowedAccountCode } from '../helpers/supplier-accounts-catalog.helper';
 import { applyItemClassificationToPayload } from '../../electronic-document/helpers/electronic-document-account-mapping.helper';
 import { resolveSuggestedItemConfigFromConfiguration } from '../helpers/supplier-preference.helper';
 import {
@@ -271,7 +274,10 @@ export class SiigoAiAccountSuggestionService {
     const prompt = buildPurchaseClassificationPrompt({
       supplierName: document.payload.supplier.name || 'Desconocido',
       ourCompanyName: company?.name || 'nuestra empresa',
-      ourCompanyDescription: company?.description?.trim() || null,
+      ourCompanyDescription: companyDescriptionForPrompt(
+        company?.description,
+        false,
+      ),
       documentKind:
         document.electronicDocumentType ===
         ElectronicDocumentType.SUPPORT_DOCUMENT
@@ -410,20 +416,12 @@ export class SiigoAiAccountSuggestionService {
         this.companiesRepository.findById(companyId),
       ]);
 
-    // findTransactionalByCompanyAndIntegration no filtra por clase — trae
-    // TODAS las cuentas transaccionales (activo, pasivo, patrimonio, ingreso,
-    // gasto, costo). Un ítem de factura de COMPRA solo puede ir a gasto/costo
-    // (clase 5/6/7, mismo criterio que resolveSuggestedAccountFromPreference
-    // e isAllowedAccountCode) — sin este filtro la IA queda libre de elegir
-    // (y de hecho eligió, caso real reportado) una cuenta de INGRESO como si
-    // fuera válida para contabilizar una compra.
-    const transactionalAccounts = allTransactionalAccounts.filter((account) =>
-      isAllowedAccountCode(account.code),
-    );
+    // Account codes are company-specific; the prompt filters by name and function.
+    const transactionalAccounts = allTransactionalAccounts;
 
     if (transactionalAccounts.length === 0) {
       console.log(
-        `[AI-CLASSIFY] [documentId=${documentId}] Omitido: 0 cuentas transaccionales permitidas (clase 5/6/7) para companyId=${companyId} — no se llamó a la IA.`,
+        `[AI-CLASSIFY] [documentId=${documentId}] Omitido: 0 cuentas transaccionales disponibles para companyId=${companyId} — no se llamó a la IA.`,
       );
       return EMPTY_ITEM_CLASSIFICATION;
     }
@@ -449,7 +447,11 @@ export class SiigoAiAccountSuggestionService {
     }));
     const supplierName = document.payload.supplier.name || 'Desconocido';
     const ourCompanyName = company?.name || 'nuestra empresa';
-    const ourCompanyDescription = company?.description?.trim() || null;
+    const ourCompanyDescription = companyDescriptionForPrompt(
+      company?.description,
+      document.electronicDocumentType ===
+        ElectronicDocumentType.PURCHASE_INVOICE,
+    );
     const documentKind = isSupportDocument
       ? 'SUPPORT_DOCUMENT'
       : 'PURCHASE_INVOICE';
@@ -601,6 +603,8 @@ export class SiigoAiAccountSuggestionService {
             ourCompanyDescription,
             documentKind,
             items: pendingItems,
+            blockedAccounts: readCompanyAiContext(company?.description)
+              .blockedAccounts,
             accounts: transactionalAccounts.map((account) => ({
               code: account.code,
               name: account.name,

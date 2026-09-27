@@ -1,3 +1,4 @@
+import { resolveItemAiSuggestion } from '../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { resolveSendConfigurationFromPayload } from '../../electronic-document/helpers/electronic-document-send-configuration.helper';
 import { ElectronicDocumentPayload } from '../../electronic-document/interfaces/electronic-document-payload.interface';
@@ -119,19 +120,11 @@ export function resolveSuggestedAccountsForDocumentItems(
       };
     }
 
-    if (resolved) {
-      return resolved;
-    }
-
-    const aiAccount = (
-      item.aiSuggestion !== undefined
-        ? item.aiSuggestion
-        : document.payload.aiSuggestion?.items?.[index]
-    )?.account;
+    const aiAccount = resolveItemAiSuggestion(document.payload, index)?.account;
     const code = aiAccount?.code?.trim();
 
     if (!code) {
-      return null;
+      return resolved;
     }
 
     return {
@@ -230,11 +223,7 @@ export function resolveSuggestedProductsForDocumentItems(
   document: SupplierDocumentIdentity,
 ): Array<SuggestedProduct | null> {
   return (document.payload.items ?? []).map((item, index) => {
-    const product = (
-      item.aiSuggestion !== undefined
-        ? item.aiSuggestion
-        : document.payload.aiSuggestion?.items?.[index]
-    )?.product;
+    const product = resolveItemAiSuggestion(document.payload, index)?.product;
     const code = product?.code?.trim();
 
     if (!code) {
@@ -259,6 +248,8 @@ export function resolveSuggestedProductForDocument(
     return null;
   }
 
+  if (document.payload.items?.some((item) => item.aiSuggestion !== undefined))
+    return null;
   const product = document.payload.aiSuggestion?.product;
   const code = product?.code?.trim();
 

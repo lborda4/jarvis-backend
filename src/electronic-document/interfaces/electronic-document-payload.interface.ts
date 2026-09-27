@@ -99,12 +99,7 @@ export interface ElectronicDocumentPayload {
    * opcional. */
   costCenterCode?: string;
   siigoSendConfiguration?: SupplierPreferenceSnapshot | null;
-  /**
-   * Sugerencia de IA calculada en segundo plano al importar (solo para
-   * proveedores con tiene_variabilidad=true o sin historial). Se usa como
-   * fallback de sugerencia cuando no hay preferencia genérica del proveedor
-   * — ver resolveSuggestedAccountForDocument/resolveSuggestedRetentionsForDocument.
-   */
+  /** @deprecated Read-only compatibility. New AI suggestions live in items[].aiSuggestion. */
   aiSuggestion?: AiSuggestionSnapshot | null;
   /** Retenciones sugeridas por el vendedor, certificadas en la factura DIAN
    * original — ver ElectronicDocumentWithholding. Usado como ÚLTIMO

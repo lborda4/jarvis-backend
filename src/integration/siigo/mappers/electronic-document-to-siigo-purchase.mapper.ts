@@ -1,3 +1,4 @@
+import { resolveItemAiSuggestion } from '../../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
 import { BadRequestException } from '@nestjs/common';
 import { ElectronicDocumentPayload } from '../../../electronic-document/interfaces/electronic-document-payload.interface';
 import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
@@ -24,8 +25,10 @@ export function mapElectronicDocumentToSiigoPurchase(
   const hasIva = payload.totals.iva > 0;
   const itemTaxes = hasIva ? [{ id: config.defaultTaxId }] : undefined;
 
-  const items = payload.items.map((item) => {
-    const accountCode = item.accountMapping?.code?.trim();
+  const items = payload.items.map((item, index) => {
+    const accountCode =
+      item.accountMapping?.code?.trim() ||
+      resolveItemAiSuggestion(payload, index)?.account?.code?.trim();
 
     if (!accountCode) {
       throw new BadRequestException(
@@ -75,7 +78,9 @@ function validatePayloadForPurchase(payload: ElectronicDocumentPayload): void {
   }
 
   if (!payload.invoice.cufe?.trim()) {
-    throw new BadRequestException('El payload no contiene el CUFE de la factura.');
+    throw new BadRequestException(
+      'El payload no contiene el CUFE de la factura.',
+    );
   }
 
   if (!payload.invoice.number?.trim()) {

@@ -147,6 +147,7 @@ function buildService(
     electronicDocumentService,
     nextPymeApiClient,
     siigoDocumentPreparationService,
+    siigoPurchaseAiClassificationService,
     postgresNotifyService,
   };
 }
@@ -244,49 +245,53 @@ describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, ví
     const {
       service,
       siigoDocumentPreparationService,
+      siigoPurchaseAiClassificationService,
       jobRowsRepository,
       jobsRepository,
     } = buildService({
-        jobRowsRepository: {
-          countOutstandingByJob: jest.fn().mockResolvedValue(1),
-          claimPendingBatch: jest.fn().mockResolvedValue([reusedRow]),
-        },
-        nextPymeApiClient: {
-          getInvoiceByCufe: jest.fn().mockResolvedValue({
-            outcome: 'found',
-            data: {
-              seller: { identification_number: '900123456' },
-              legal_monetary_totals: { payable_amount: '100000' },
-              invoice_lines: [],
+      jobRowsRepository: {
+        countOutstandingByJob: jest.fn().mockResolvedValue(1),
+        claimPendingBatch: jest.fn().mockResolvedValue([reusedRow]),
+      },
+      nextPymeApiClient: {
+        getInvoiceByCufe: jest.fn().mockResolvedValue({
+          outcome: 'found',
+          data: {
+            seller: { identification_number: '900123456' },
+            legal_monetary_totals: { payable_amount: '100000' },
+            invoice_lines: [],
+          },
+          attempts: 1,
+          retryDelayMs: 0,
+        }),
+      },
+      electronicDocumentService: {
+        createFromPurchaseInvoiceRows: jest.fn().mockResolvedValue({
+          documentsCreated: 0,
+          documentsReused: 1,
+          itemsTotal: 1,
+          documentsSkippedByPlanLimit: 0,
+          rows: [
+            {
+              cufe: 'cufe-reused',
+              documentId: 'doc-existing-1',
+              skippedByPlanLimit: false,
+              alreadyInSiigo: false,
+              reused: true,
             },
-            attempts: 1,
-            retryDelayMs: 0,
-          }),
-        },
-        electronicDocumentService: {
-          createFromPurchaseInvoiceRows: jest.fn().mockResolvedValue({
-            documentsCreated: 0,
-            documentsReused: 1,
-            itemsTotal: 1,
-            documentsSkippedByPlanLimit: 0,
-            rows: [
-              {
-                cufe: 'cufe-reused',
-                documentId: 'doc-existing-1',
-                skippedByPlanLimit: false,
-                alreadyInSiigo: false,
-                reused: true,
-              },
-            ],
-          }),
-        },
-      });
+          ],
+        }),
+      },
+    });
 
     await (service as any).processOneBatchForJob(buildJob());
 
     expect(
       siigoDocumentPreparationService.prepareDocumentsInBackground,
     ).not.toHaveBeenCalled();
+    expect(
+      siigoPurchaseAiClassificationService.classifyDocumentsInBackground,
+    ).toHaveBeenCalledWith(['doc-existing-1'], 'company-1');
 
     // Sí queda guardado el documentId en la fila del job (para mostrarlo en
     // la tabla), solo que sin disparar ninguna preparación nueva sobre él.
@@ -343,7 +348,11 @@ describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, ví
             itemsTotal: 1,
             documentsSkippedByPlanLimit: 0,
             rows: [
-              { cufe: 'cufe-ok', documentId: 'doc-1', skippedByPlanLimit: false },
+              {
+                cufe: 'cufe-ok',
+                documentId: 'doc-1',
+                skippedByPlanLimit: false,
+              },
             ],
           }),
         },

@@ -12,6 +12,8 @@ import { Integration } from '../../integration/entities/integration.entity';
 import { CompanyPersonType } from '../enums/company-person-type.enum';
 import type { CompanyResponsible } from '../interfaces/company-responsible.interface';
 
+import type { CompanyAiContext } from '../company-ai-context';
+
 @Entity('companies')
 export class Company {
   @PrimaryGeneratedColumn('uuid')
@@ -24,8 +26,8 @@ export class Company {
   name: string;
 
   /** A qué se dedica la empresa — contexto para los prompts de IA. */
-  @Column({ type: 'text', nullable: true })
-  description: string | null;
+  @Column({ type: 'jsonb', nullable: true })
+  description: CompanyAiContext | null;
 
   @Column({ name: 'invite_code', unique: true, length: 20 })
   inviteCode: string;

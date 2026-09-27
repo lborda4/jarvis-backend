@@ -1,3 +1,7 @@
+import {
+  summarizeDocumentAiSuggestion,
+  resolveItemAiSuggestion,
+} from '../helpers/electronic-document-ai-suggestion.helper';
 import { ElectronicDocument } from '../entities/electronic-document.entity';
 import { ElectronicDocumentListItemDto } from '../dto/electronic-document-list-item.dto';
 import { SuggestedAccount } from '../../integration/helpers/supplier-accounts-catalog.helper';
@@ -44,7 +48,8 @@ export function computeElectronicDocumentRequiresReview(
         (_item, index) => resolveAiSuggestedProductForItem(document, index),
       ),
       aiConfidence,
-      aiClassificationAttempted: document.payload?.aiSuggestion != null,
+      aiClassificationAttempted:
+        summarizeDocumentAiSuggestion(document.payload) != null,
     })
   );
 }
@@ -68,9 +73,10 @@ export function mapElectronicDocumentToListItem(
    * recalcularlo acá — evita el doble cálculo en el camino de filtrado. */
   precomputedRequiresReview?: boolean,
 ): ElectronicDocumentListItemDto {
-  const aiConfidence = document.payload?.aiSuggestion?.confidence ?? null;
+  const aiConfidence =
+    summarizeDocumentAiSuggestion(document.payload)?.confidence ?? null;
   const aiSuggestedItemType =
-    document.payload?.aiSuggestion?.itemType ??
+    summarizeDocumentAiSuggestion(document.payload)?.itemType ??
     (suggestedProduct ? 'Product' : suggestedAccount ? 'Account' : null);
   const requiresReview =
     precomputedRequiresReview ??
@@ -171,12 +177,7 @@ function resolveAiSuggestedProductForItem(
   document: ElectronicDocument,
   index: number,
 ): SuggestedProduct | null {
-  const item = document.payload?.items?.[index];
-  const product = (
-    item?.aiSuggestion !== undefined
-      ? item.aiSuggestion
-      : document.payload?.aiSuggestion?.items?.[index]
-  )?.product;
+  const product = resolveItemAiSuggestion(document.payload, index)?.product;
   const code = product?.code?.trim();
 
   if (!code) {

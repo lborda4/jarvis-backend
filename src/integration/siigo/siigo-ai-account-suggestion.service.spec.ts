@@ -140,8 +140,84 @@ describe('SiigoAiAccountSuggestionService.classifyItemTypeAndAccount — Documen
       companiesRepository as any,
     );
 
-    return { service, siigoProductsCatalogService, openRouterHttpClient };
+    return {
+      service,
+      siigoProductsCatalogService,
+      openRouterHttpClient,
+      companiesRepository,
+      siigoAccountsRepository,
+    };
   }
+
+  it('envía descripción y reglas de la empresa en los pasos de tipo y cuenta de compra', async () => {
+    const document = {
+      id: 'doc-1',
+      electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE,
+      payload: {
+        supplier: { name: 'Proveedor', documentNumber: '900123456' },
+        items: [{ descripcion: 'Alimentos' }],
+      },
+    };
+    const { service, openRouterHttpClient, companiesRepository } =
+      buildService(document);
+    companiesRepository.findById.mockResolvedValue({
+      name: 'Jardín',
+      description: {
+        description: 'Jardín infantil',
+        rules: ['Alimentos para almuerzos'],
+      },
+    });
+    await service.classifyItemTypeAndAccount('doc-1', 'company-1');
+    expect(openRouterHttpClient.createChatCompletion).toHaveBeenCalledTimes(2);
+    for (const [messages] of openRouterHttpClient.createChatCompletion.mock
+      .calls) {
+      expect(JSON.stringify(messages)).toContain('Jardín infantil');
+      expect(JSON.stringify(messages)).toContain('Alimentos para almuerzos');
+    }
+  });
+
+  it('uses the company catalog without assuming global account prefixes', async () => {
+    const document = {
+      id: 'doc-1',
+      electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      payload: {
+        supplier: { name: 'Proveedor', documentNumber: '900123456' },
+        items: [{ descripcion: 'Servicio' }],
+      },
+    };
+    const {
+      service,
+      openRouterHttpClient,
+      companiesRepository,
+      siigoAccountsRepository,
+    } = buildService(document);
+    companiesRepository.findById.mockResolvedValue({
+      name: 'Empresa',
+      description: {
+        description: 'Servicios',
+        rules: [],
+        blockedAccounts: ['TEMP-001'],
+      },
+    });
+    siigoAccountsRepository.findTransactionalByCompanyAndIntegration.mockResolvedValue(
+      [{ code: 'GASTO-A', name: 'Servicios contratados' }],
+    );
+    openRouterHttpClient.createChatCompletion.mockResolvedValue({
+      content:
+        '{"items":[{"itemId":"1","accountCode":"GASTO-A","confidence":60}]}',
+    });
+    const result = await service.classifyItemTypeAndAccount(
+      'doc-1',
+      'company-1',
+    );
+    expect(result.accountCode).toBe('GASTO-A');
+    expect(
+      siigoAccountsRepository.findTransactionalByCompanyAndIntegration,
+    ).toHaveBeenCalledWith('company-1', 'integration-1');
+    const [messages] = openRouterHttpClient.createChatCompletion.mock.calls[0];
+    expect(messages[1].content).toContain('GASTO-A Servicios contratados');
+    expect(messages[1].content).toContain('TEMP-001');
+  });
 
   it('no consulta el catálogo de productos para Documento soporte — fuerza el prompt "solo cuenta" para que la IA nunca elija Producto', async () => {
     const document = {
@@ -578,10 +654,9 @@ describe('SiigoAiAccountSuggestionService.suggestForDocument', () => {
       expect.objectContaining({
         items: [
           expect.objectContaining({
-            accountMapping: {
-              code: '51953001',
-              description: 'Papelería',
-            },
+            aiSuggestion: expect.objectContaining({
+              account: { code: '51953001', name: 'Papelería' },
+            }),
           }),
         ],
       }),

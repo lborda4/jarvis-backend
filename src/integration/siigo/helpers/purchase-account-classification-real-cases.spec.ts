@@ -1,3 +1,4 @@
+import { summarizeDocumentAiSuggestion } from '../../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
 import { HistorialFacturaFuente } from '../../enums/historial-factura-fuente.enum';
 import { applyItemClassificationToPayload } from '../../../electronic-document/helpers/electronic-document-account-mapping.helper';
 import { resolvePurchaseInvoiceRequiresReview } from '../../../electronic-document/helpers/purchase-invoice-review.helper';
@@ -65,7 +66,9 @@ function reviewFor(lines: ReturnType<typeof classifyAccountLines>) {
     } as ElectronicDocumentPayload,
     {
       itemType: 'Account',
-      accountCode: lines.every((line) => line.accountCode === lines[0].accountCode)
+      accountCode: lines.every(
+        (line) => line.accountCode === lines[0].accountCode,
+      )
         ? lines[0].accountCode
         : null,
       accountName: lines[0].accountName,
@@ -85,30 +88,38 @@ function reviewFor(lines: ReturnType<typeof classifyAccountLines>) {
   return resolvePurchaseInvoiceRequiresReview({
     draft: null,
     payloadItems: payload.items,
-    suggestedAccount: payload.aiSuggestion?.account
-      ? { ...payload.aiSuggestion.account, uses: 1 }
+    suggestedAccount: summarizeDocumentAiSuggestion(payload)?.account
+      ? { ...summarizeDocumentAiSuggestion(payload)!.account!, uses: 1 }
       : null,
     suggestedProduct: null,
     suggestedItemConfig: {
       itemType: 'Account',
-      accountCode: payload.aiSuggestion?.account?.code ?? null,
-      accountName: payload.aiSuggestion?.account?.name ?? null,
+      accountCode:
+        summarizeDocumentAiSuggestion(payload)?.account?.code ?? null,
+      accountName:
+        summarizeDocumentAiSuggestion(payload)?.account?.name ?? null,
       productCode: null,
       productName: null,
       ivaTax: null,
       retefuenteTax: null,
-      paymentMethod: { id: 5056, name: 'Crédito proveedores', type: 'Proveedor' },
+      paymentMethod: {
+        id: 5056,
+        name: 'Crédito proveedores',
+        type: 'Proveedor',
+      },
     },
     itemAccountSuggestions: payload.items.map((item) =>
-      item.accountMapping?.code
+      item.aiSuggestion?.account?.code
         ? {
-            code: item.accountMapping.code,
-            name: item.accountMapping.description ?? item.accountMapping.code,
+            code: item.aiSuggestion!.account!.code,
+            name:
+              item.aiSuggestion!.account!.name ??
+              item.aiSuggestion!.account!.code,
             source: 'fallback' as const,
           }
         : null,
     ),
-    aiConfidence: payload.aiSuggestion?.confidence ?? null,
+    aiConfidence: summarizeDocumentAiSuggestion(payload)?.confidence ?? null,
     aiClassificationAttempted: true,
   });
 }

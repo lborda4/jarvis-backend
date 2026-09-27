@@ -122,7 +122,7 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     });
 
     expect(messages[0].content).toContain('documento soporte');
-    expect(messages[0].content).toContain('A qué se dedica');
+    expect(messages[0].content).toContain('CONTEXTO_EMPRESA');
     expect(messages[1].content).toContain('Documento: Documento soporte');
     expect(messages[1].content).toContain(
       'A qué se dedica: Restaurante de comida rápida.',
@@ -139,8 +139,8 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
 
     expect(messages[0].content).toMatch(/confidence/i);
     expect(messages[0].content).not.toMatch(/rationale/i);
-    expect(messages[0].content).not.toMatch(/IVA/);
-    expect(messages[0].content).not.toMatch(/retenci/i);
+    expect(messages[0].content).toContain('IVA como mayor valor');
+    expect(messages[0].content).toContain('Los impuestos se aplican');
     expect(messages[0].content).not.toContain('itemType');
   });
 
@@ -152,29 +152,16 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
       accounts: [{ code: '51959501', name: 'Diversos' }],
     });
 
+    expect(messages[0].content).toContain('HISTORIAL_FACTURAS_PROVEEDOR');
+    expect(messages[0].content).toContain('BALANCE_TERCERO');
     expect(messages[0].content).toContain(
-      'El histórico de facturas anteriores de ESTE proveedor es tu guía principal',
+      'No inventes significados para siglas',
     );
     expect(messages[0].content).toContain(
-      'preferí una de las cuentas que este proveedor ya usó',
+      'Responde siempre con exactamente un elemento',
     );
-    expect(messages[0].content).toContain(
-      'Clasifica cada ítem considerando su uso en la empresa',
-    );
-    expect(messages[0].content).toContain(
-      'Distintos productos pueden compartir la misma cuenta',
-    );
-    expect(messages[0].content).toContain(
-      'No separes alimentos en cuentas diferentes',
-    );
-    expect(messages[0].content).toContain(
-      'No inventes ni completes significados',
-    );
-    expect(messages[0].content).toContain('tenés que responder SIEMPRE');
-    expect(messages[0].content).toContain('PROHIBIDO devolver null');
-    expect(messages[0].content).toContain(
-      '{"items":[{"itemId":string,"accountCode":string,"confidence":number}]}',
-    );
+    expect(messages[0].content).toContain('No excluyas una cuenta');
+    expect(messages[0].content).toContain('"accountCode":"string"');
   });
 
   it('incluye los ejemplos históricos cuando se proveen', () => {
@@ -226,7 +213,7 @@ describe('buildAccountCodeClassificationPrompt (paso 2a — solo cuentas)', () =
     expect(messages[1].content).toContain('51050601 Aseo');
     expect(messages[1].content).not.toContain('Concepto:');
     expect(messages[1].content).not.toContain('Referencia de balance');
-    expect(messages[0].content).toContain('PROHIBIDO devolver null');
+    expect(messages[0].content).toContain('accountCode debe ser un string');
   });
 
   it('no incluye la sección de ejemplos históricos cuando no se proveen', () => {
@@ -401,5 +388,48 @@ describe('attachCatalogNamesToHistoricalExamples', () => {
     );
 
     expect(example.cuentaNombre).toBe('Elementos de aseo');
+  });
+});
+
+describe('company-specific account classification context', () => {
+  it('separates sources and never reuses another company catalog or blocked list', () => {
+    const first = buildAccountCodeClassificationPrompt({
+      supplierName: 'Proveedor A',
+      ourCompanyName: 'Empresa A',
+      ourCompanyDescription: 'Servicios y reglas A',
+      items: [{ itemId: '17', descripcion: 'Concepto A' }],
+      accounts: [{ code: 'A-001', name: 'Servicio A' }],
+      historicalExamples: [
+        {
+          descripcionItem: 'Concepto anterior',
+          cuentaPuc: 'A-001',
+          cuentaNombre: 'Servicio A',
+        },
+      ],
+      supplierUsedAccounts: [{ code: 'A-002', name: 'Balance A' }],
+      blockedAccounts: ['A-999', 'Cuenta temporal A'],
+    });
+    const second = buildAccountCodeClassificationPrompt({
+      supplierName: 'Proveedor B',
+      ourCompanyName: 'Empresa B',
+      items: [{ itemId: '23', descripcion: 'Concepto B' }],
+      accounts: [{ code: 'B-001', name: 'Servicio B' }],
+    });
+    for (const section of [
+      'CONTEXTO_EMPRESA:',
+      'HISTORIAL_FACTURAS_PROVEEDOR:',
+      'BALANCE_TERCERO:',
+      'CATALOGO_CUENTAS:',
+      'CUENTAS_BLOQUEADAS:',
+    ]) {
+      expect(first[1].content).toContain(section);
+    }
+    expect(first[1].content).toContain('itemId="17"');
+    expect(first[1].content.split('CUENTAS_BLOQUEADAS:')[1]).toContain('A-999');
+    expect(second[1].content).toContain('B-001 Servicio B');
+    expect(second[1].content).not.toContain('A-001');
+    expect(second[1].content).not.toContain('A-999');
+    expect(second[1].content).not.toContain('Concepto anterior');
+    expect(first[0].content).toBe(second[0].content);
   });
 });

@@ -1,3 +1,5 @@
+import { summarizeDocumentAiSuggestion } from '../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
+import { ElectronicDocumentPayload } from '../../electronic-document/interfaces/electronic-document-payload.interface';
 import { BadGatewayException } from '@nestjs/common';
 import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classification.service';
 
@@ -88,8 +90,9 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
 
     expect(electronicDocumentService.updatePayload).toHaveBeenCalledTimes(1);
     const [, payload] = electronicDocumentService.updatePayload.mock
-      .calls[0] as [string, { aiSuggestion: unknown }, string];
-    expect(payload.aiSuggestion).toEqual({
+      .calls[0] as [string, ElectronicDocumentPayload, string];
+    expect(payload).not.toHaveProperty('aiSuggestion');
+    expect(summarizeDocumentAiSuggestion(payload)).toEqual({
       itemType: 'Account',
       account: null,
       product: null,
@@ -122,8 +125,8 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     await service.classifyDocuments(['doc-1'], 'company-1');
 
     const [, payload] = electronicDocumentService.updatePayload.mock
-      .calls[0] as [string, { aiSuggestion: { confidence: unknown } }, string];
-    expect(payload.aiSuggestion.confidence).toBe(0);
+      .calls[0] as [string, ElectronicDocumentPayload, string];
+    expect(summarizeDocumentAiSuggestion(payload)?.confidence).toBe(0);
   });
 
   it('cuando la IA sí encuentra una cuenta, guarda su confidence real (no se fuerza a 0)', async () => {
@@ -141,8 +144,9 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     await service.classifyDocuments(['doc-1'], 'company-1');
 
     const [, payload] = electronicDocumentService.updatePayload.mock
-      .calls[0] as [string, { aiSuggestion: unknown }, string];
-    expect(payload.aiSuggestion).toEqual({
+      .calls[0] as [string, ElectronicDocumentPayload, string];
+    expect(payload).not.toHaveProperty('aiSuggestion');
+    expect(summarizeDocumentAiSuggestion(payload)).toEqual({
       itemType: 'Account',
       account: { code: '5135', name: 'Gastos diversos' },
       product: null,
@@ -166,8 +170,9 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     await service.classifyDocuments(['doc-1'], 'company-1');
 
     const [, payload] = electronicDocumentService.updatePayload.mock
-      .calls[0] as [string, { aiSuggestion: unknown }, string];
-    expect(payload.aiSuggestion).toEqual({
+      .calls[0] as [string, ElectronicDocumentPayload, string];
+    expect(payload).not.toHaveProperty('aiSuggestion');
+    expect(summarizeDocumentAiSuggestion(payload)).toEqual({
       itemType: 'Product',
       account: null,
       product: {
@@ -217,7 +222,7 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     ).toHaveBeenCalled();
   });
 
-  it('escribe la cuenta de cada línea en payload.items[].accountMapping', async () => {
+  it('escribe la cuenta de cada línea en payload.items[].aiSuggestion', async () => {
     const { service, electronicDocumentService } = buildService({
       classification: {
         itemType: 'Account',
@@ -241,15 +246,12 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
     await service.classifyDocuments(['doc-1'], 'company-1');
 
     const [, payload] = electronicDocumentService.updatePayload.mock
-      .calls[0] as [
-      string,
-      { items: Array<{ accountMapping?: { code: string } }> },
-      string,
-    ];
+      .calls[0] as [string, ElectronicDocumentPayload, string];
 
-    expect(payload.items[0].accountMapping).toEqual({
+    expect(payload.items[0]).not.toHaveProperty('accountMapping');
+    expect(payload.items[0].aiSuggestion?.account).toEqual({
       code: '51953001',
-      description: 'Papelería',
+      name: 'Papelería',
     });
   });
 
@@ -310,12 +312,75 @@ it('persists review status when the AI provider fails before resolving the type'
   expect(electronicDocumentService.updatePayload).toHaveBeenCalledWith(
     'doc-1',
     expect.objectContaining({
-      aiSuggestion: expect.objectContaining({
-        confidence: 0,
-        account: null,
-        product: null,
-      }),
+      items: [
+        expect.objectContaining({
+          aiSuggestion: { confidence: 0, account: null, product: null },
+        }),
+      ],
     }),
     'company-1',
   );
+});
+
+it('does not reclassify documents whose items already have suggestions', async () => {
+  const {
+    service,
+    electronicDocumentService,
+    siigoAiAccountSuggestionService,
+  } = buildService({
+    classification: {
+      itemType: 'Account',
+      accountCode: null,
+      accountName: null,
+      productCode: null,
+      productName: null,
+      confidence: null,
+    },
+  });
+  electronicDocumentService.requireById.mockResolvedValue({
+    id: 'doc-1',
+    payload: {
+      supplier: { documentNumber: '900123456' },
+      items: [
+        {
+          descripcion: 'Servicio',
+          aiSuggestion: {
+            account: { code: '5135', name: 'Servicios' },
+            confidence: 80,
+          },
+        },
+      ],
+    },
+  });
+  await service.classifyDocuments(['doc-1', 'doc-1'], 'company-1');
+  expect(
+    siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
+  ).not.toHaveBeenCalled();
+  expect(electronicDocumentService.updatePayload).not.toHaveBeenCalled();
+});
+
+it('does not change a document already sent to Siigo', async () => {
+  const {
+    service,
+    electronicDocumentService,
+    siigoAiAccountSuggestionService,
+  } = buildService({
+    classification: {
+      itemType: null,
+      accountCode: null,
+      accountName: null,
+      productCode: null,
+      productName: null,
+      confidence: null,
+    },
+  });
+  electronicDocumentService.requireById.mockResolvedValue({
+    id: 'doc-1',
+    status: 'PURCHASE_CREATED',
+    payload: { supplier: {}, items: [{ descripcion: 'Servicio' }] },
+  });
+  await service.classifyDocuments(['doc-1'], 'company-1');
+  expect(
+    siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
+  ).not.toHaveBeenCalled();
 });

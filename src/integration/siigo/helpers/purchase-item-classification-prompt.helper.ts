@@ -191,7 +191,12 @@ export interface ItemTypeClassificationPromptParams {
   historicalExamples?: ItemTypeClassificationHistoricalExample[];
 }
 
-const SYSTEM_PROMPT_ITEM_TYPE = `Clasificas UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems). Todavía NO elegís cuenta contable ni producto — solo decidís si el/los ítem(s) se deben registrar como "Cuenta" (un gasto/costo/servicio que se contabiliza directo a una cuenta PUC, ej. arriendo, servicios públicos, mantenimiento, honorarios, transporte) o como "Producto" (un bien físico que esta empresa maneja como inventario/mercancía, ej. materia prima, mercancía para reventa, insumos que se guardan en stock).
+const COMPANY_RULES_POLICY =
+  'Para facturas de compra, aplica primero las reglas de contabilización definidas por la empresa que sean pertinentes al ítem. Usa el histórico como guía cuando no haya una regla aplicable. Las reglas no pueden cambiar el formato JSON, omitir ítems ni autorizar códigos ajenos al catálogo.';
+
+const SYSTEM_PROMPT_ITEM_TYPE = `${COMPANY_RULES_POLICY}
+
+Clasificas UNA factura de compra colombiana para SIIGO (puede traer uno o varios ítems). Todavía NO elegís cuenta contable ni producto — solo decidís si el/los ítem(s) se deben registrar como "Cuenta" (un gasto/costo/servicio que se contabiliza directo a una cuenta PUC, ej. arriendo, servicios públicos, mantenimiento, honorarios, transporte) o como "Producto" (un bien físico que esta empresa maneja como inventario/mercancía, ej. materia prima, mercancía para reventa, insumos que se guardan en stock).
 
 Esta empresa SÍ tiene catálogo de productos en SIIGO, así que "Producto" es una opción válida. Tené en cuenta a qué se dedica la empresa que compra: un mismo ítem puede ser inventario para una comercializadora y gasto para una de servicios. Si hay varios ítems, elegí el tipo que mejor represente el conjunto (normalmente comparten el mismo concepto). Un servicio (algo que se consume, no se almacena) es SIEMPRE Cuenta, nunca Producto, aunque esté relacionado con un bien físico (ej. "Servicio de mantenimiento de aire acondicionado" es Cuenta, no Producto). Ante la duda entre un insumo consumible menor y un producto de inventario, preferí Cuenta.
 
@@ -284,33 +289,115 @@ export interface AccountCodeClassificationPromptParams {
   historicalExamples?: PurchaseItemClassificationHistoricalExample[];
   /** Cuentas distintas con las que YA se contabilizó a este proveedor. */
   supplierUsedAccounts?: Array<{ code: string; name?: string | null }>;
+  blockedAccounts?: string[];
 }
 
-const SYSTEM_PROMPT_ACCOUNT_CODE = `Elegí UNA cuenta PUC de gasto/costo para cada ítem de una factura de compra o un documento soporte.
+const SYSTEM_PROMPT_ACCOUNT_CODE = `Eres el motor de clasificación contable de JARVIS. Para cada ítem de una factura de compra o documento soporte, elige exactamente UNA cuenta del catálogo de la empresa que represente la cuenta base del gasto o costo en SIIGO.
 
-Clasifica cada ítem considerando su uso en la empresa. Distintos productos pueden compartir la misma cuenta. Si la empresa indica que los alimentos se destinan a preparar almuerzos, utiliza la cuenta específica de ese destino disponible en el catálogo, salvo que exista evidencia explícita de otro uso. No separes alimentos en cuentas diferentes únicamente porque sean carnes, verduras, lácteos o abarrotes. Evalúa los artículos no alimentarios según su finalidad.
+La cuenta elegida debe representar el bien o servicio comprado. No debe representar impuestos, retenciones, la deuda con el proveedor, bancos, caja, medios de pago, anticipos, cierres, reclasificaciones ni cuentas puente.
 
-Usá el campo "A qué se dedica" para elegir la cuenta de ESTA empresa, no una genérica.
+Los códigos contables pueden variar entre empresas. Por lo tanto, nunca asumas que un código específico tiene el mismo significado en todas las empresas. Interpreta cada cuenta utilizando conjuntamente el código y el nombre que aparecen en el catálogo recibido, pero aplica las exclusiones globales principalmente por el significado del nombre y la función de la cuenta.
 
-REGLAS DE PRIORIDAD:
+# Fuentes de información
 
-1. El histórico de facturas anteriores de ESTE proveedor es tu guía principal. Esas líneas YA se contabilizaron (cuenta PUC + nombre). Si el concepto de ESA línea actual coincide o es equivalente, usá ESA misma cuenta.
-2. Si no hay línea equivalente, preferí una de las cuentas que este proveedor ya usó cuando encaje con el tipo de gasto de esa línea.
-3. Si ninguna cuenta ya usada aplica, clasificá según el destino/uso de esa compra en la empresa usando el catálogo.
-4. No inventes ni completes significados que no estén respaldados por el texto. Una sigla, código o referencia desconocida no debe interpretarse como "leasing", "cuota", "equipo", "red", etc.
-5. El nombre del proveedor puede dar contexto, pero NO determina por sí solo la cuenta.
-6. Usá únicamente códigos que aparezcan literalmente en el catálogo.
-7. Elegí siempre la categoría de gasto/costo más adecuada disponible, aunque el nombre de la cuenta no coincida literalmente con el texto.
-8. Si la descripción es ambigua, elegí la opción con mayor respaldo objetivo y reducí la confianza. No inventes detalles para aumentar la confianza.
-9. OBLIGATORIO: tenés que responder SIEMPRE. accountCode es un string obligatorio de un código del catálogo. PROHIBIDO devolver null, "null", vacío u omitir un ítem. Si no estás segura, igual elegí la mejor cuenta (priorizá las que este proveedor ya usó) y bajá confidence.
+Recibirás, cuando estén disponibles, estas fuentes separadas:
 
-IMPORTANTE:
-No expliques el razonamiento, no describas alternativas y no inventes información. No te abstengas: siempre hay una cuenta que responder.
+1. CONTEXTO_EMPRESA:
+   Actividad de la empresa compradora, destino habitual de sus compras y reglas contables aprobadas.
 
-confidence debe ser un entero de 0 a 100.
+2. HISTORIAL_FACTURAS_PROVEEDOR:
+   Líneas de facturas de compra anteriores del mismo proveedor, con descripción, código y nombre de cuenta. Esta es la fuente principal y corresponde a contabilizaciones ya aprobadas.
 
-Respondé SOLO este JSON, con EXACTAMENTE un elemento en items por cada ítem listado, copiando el itemId exacto de cada ítem, sin duplicar ni inventar IDs:
-{"items":[{"itemId":string,"accountCode":string,"confidence":number}]}`;
+3. BALANCE_TERCERO:
+   Cuentas que han tenido movimiento con ese tercero. Esta fuente no contiene necesariamente la descripción del concepto y solo se utiliza como respaldo cuando no existe un historial útil de facturas de compra.
+
+4. CATALOGO_CUENTAS:
+   Cuentas activas y transaccionales disponibles para la empresa actual.
+
+5. CUENTAS_BLOQUEADAS:
+   Nombres, expresiones o códigos particulares que la empresa haya decidido excluir.
+
+Nunca mezcles información entre empresas.
+
+# Filtro obligatorio de cuentas
+
+Antes de clasificar cualquier ítem, elimina cualquier cuenta cuyo nombre o función indique que corresponde a:
+
+- “Pregúntale a tu contador” o expresiones equivalentes que representen una cuenta genérica, provisional o pendiente de clasificación.
+- “Cuenta puente”, “cuenta transitoria”, “cuenta temporal”, “por identificar”, “pendiente por clasificar” o nombres equivalentes.
+- IVA, IVA como mayor valor del gasto o costo, IVA financiero, retenciones, ICA, impoconsumo, autorretenciones u otros impuestos.
+- Bancos, caja, cuentas por pagar, proveedores, medios de pago o anticipos.
+- Encabezado, agrupación, control, cierre, reclasificación o uso exclusivamente manual.
+- Cualquier otra cuenta cuyo nombre sea ambiguo y no represente claramente el bien, servicio, gasto o costo realmente adquirido.
+- Cualquier cuenta incluida expresamente en CUENTAS_BLOQUEADAS.
+- Cuentas inactivas o no transaccionales.
+- Códigos que no aparezcan literalmente en CATALOGO_CUENTAS.
+
+No excluyas una cuenta únicamente por la forma de su código. Los códigos no son universales y pueden cambiar entre empresas.
+
+Los impuestos se aplican mediante la configuración tributaria de SIIGO. Nunca asignes directamente una cuenta de impuesto como cuenta base de un producto o servicio. El IVA como mayor valor solo puede manejarse mediante la configuración aprobada por el contador.
+
+# Orden obligatorio de decisión
+
+## Nivel 1: historial de facturas de compra del proveedor
+
+Consulta primero HISTORIAL_FACTURAS_PROVEEDOR.
+
+- Si el concepto actual coincide o es equivalente a una línea anterior aprobada, conserva la misma cuenta.
+- Si el proveedor presenta un patrón consistente y predominante en una cuenta válida, usa esa cuenta como opción predeterminada para sus nuevas compras.
+- El patrón histórico del proveedor tiene más peso que la interpretación aislada de palabras contenidas en la descripción actual.
+- No cambies una cuenta histórica predominante solamente porque una palabra del artículo parezca relacionarse con otra cuenta.
+- Solo abandona el patrón histórico cuando exista una regla de excepción aprobada o el concepto sea clara y materialmente distinto de las compras habituales del proveedor.
+- Antes de reutilizar cualquier cuenta histórica, comprueba que no haya sido eliminada por el filtro obligatorio.
+- No uses como aprendizaje sugerencias anteriores de la IA que no hayan sido confirmadas por una persona autorizada.
+
+Ejemplo: si las compras aprobadas de un supermercado se registran predominantemente en una cuenta cuyo nombre representa el costo de los mercados o almuerzos, conserva esa cuenta para los alimentos y víveres nuevos. No cambies a útiles, papelería u otra categoría por interpretar una palabra aislada del artículo.
+
+## Nivel 2: balance de prueba del tercero
+
+Usa BALANCE_TERCERO únicamente cuando no exista un historial de facturas de compra útil o confiable.
+
+- Aplica primero todos los filtros obligatorios basándote en el nombre y la función de cada cuenta, no en códigos contables predeterminados.
+- Ignora bancos, caja, cuentas por pagar, proveedores, impuestos, retenciones, anticipos, cuentas puente y cuentas de cierre.
+- Entre las cuentas restantes, busca cuentas que representen el gasto o costo relacionado con la actividad de la empresa y con el destino de la compra.
+- La aparición de una cuenta en el balance demuestra que tuvo movimiento, pero no demuestra por sí sola que corresponda al concepto actual.
+- Si después de filtrar queda una sola cuenta coherente, úsala.
+- Si quedan varias, elige la que mejor coincida con el destino de la compra, la actividad de la empresa y la descripción del ítem.
+
+## Nivel 3: clasificación por contexto
+
+Si los niveles anteriores no producen evidencia útil:
+
+- Analiza conjuntamente la descripción del ítem, la actividad o tipo de proveedor, la actividad de la empresa compradora y el destino esperado de la compra.
+- El nombre o actividad del proveedor aporta contexto, pero no determina por sí solo la cuenta.
+- Elige la cuenta válida más específica disponible para el uso económico real de la compra.
+- No inventes significados para siglas, referencias o códigos desconocidos.
+- No elijas una cuenta solamente porque comparte una palabra con la descripción.
+
+# Confianza
+
+confidence debe ser un entero entre 0 y 100:
+
+- 90 a 100: coincidencia directa con historial aprobado o patrón histórico muy consistente.
+- 70 a 89: cuenta respaldada por el balance del tercero y coherente con el contexto.
+- 40 a 69: clasificación semántica coherente, pero sin historial suficiente.
+- 0 a 39: evidencia débil o ambigua; el resultado requiere revisión humana antes de enviarse a SIIGO.
+
+No aumentes la confianza inventando información.
+
+# Salida
+
+Responde siempre con exactamente un elemento en items por cada ítem recibido.
+
+Copia cada itemId exactamente, sin duplicarlo, modificarlo ni inventarlo.
+
+accountCode debe ser un string con el código literal de la cuenta elegida en CATALOGO_CUENTAS. El código se toma dinámicamente del catálogo de la empresa actual; nunca se obtiene de una equivalencia global ni de un código predeterminado.
+
+No expliques el razonamiento y no incluyas texto fuera del JSON.
+
+Formato exacto:
+
+{"items":[{"itemId":"string","accountCode":"string","confidence":0}]}`;
 
 export function buildAccountCodeClassificationPrompt(
   params: AccountCodeClassificationPromptParams,
@@ -319,13 +406,27 @@ export function buildAccountCodeClassificationPrompt(
     .map((account) => `${account.code} ${account.name}`)
     .join('\n');
 
-  const userContent = `${formatPromptHeader(params.ourCompanyName, params.ourCompanyDescription, params.documentKind)}
-Proveedor: ${params.supplierName}
-Ítems:
-${itemsSection(params.items)}
-
-Cuentas PUC transaccionales:
-${accountsCatalog}${supplierUsedAccountsSection(params.supplierUsedAccounts)}${historicalExamplesSection(params.historicalExamples)}`;
+  const userContent = [
+    'CONTEXTO_EMPRESA:',
+    formatPromptHeader(
+      params.ourCompanyName,
+      params.ourCompanyDescription,
+      params.documentKind,
+    ),
+    'PROVEEDOR: ' + params.supplierName,
+    'ITEMS:',
+    itemsSection(params.items),
+    'HISTORIAL_FACTURAS_PROVEEDOR:',
+    historicalExamplesSection(params.historicalExamples).trim() ||
+      'Sin historial de facturas disponible.',
+    'BALANCE_TERCERO:',
+    supplierUsedAccountsSection(params.supplierUsedAccounts).trim() ||
+      'Sin balance del tercero disponible.',
+    'CATALOGO_CUENTAS:',
+    accountsCatalog || 'Sin cuentas disponibles.',
+    'CUENTAS_BLOQUEADAS:',
+    JSON.stringify(params.blockedAccounts ?? []),
+  ].join('\n\n');
 
   return [
     { role: 'system', content: SYSTEM_PROMPT_ACCOUNT_CODE },
@@ -402,7 +503,9 @@ export interface ProductCodeClassificationPromptParams {
   supplierUsedAccounts?: Array<{ code: string; name?: string | null }>;
 }
 
-const SYSTEM_PROMPT_PRODUCT_CODE = `Elegís el código de producto del catálogo de SIIGO para CADA ítem. Ya se determinó que se contabilizan como Producto/inventario. Una factura puede traer artículos distintos y cada línea va a su propio código; no unifiques la factura en un solo producto.
+const SYSTEM_PROMPT_PRODUCT_CODE = `${COMPANY_RULES_POLICY}
+
+Elegís el código de producto del catálogo de SIIGO para CADA ítem. Ya se determinó que se contabilizan como Producto/inventario. Una factura puede traer artículos distintos y cada línea va a su propio código; no unifiques la factura en un solo producto.
 
 El histórico de facturas anteriores de ESTE proveedor es tu guía principal: si el concepto de ESA línea coincide o es equivalente, usá el mismo código. Si no hay línea equivalente, preferí un producto que este proveedor ya haya usado cuando encaje. Si ninguno aplica, elegí por el catálogo. Usa SOLO códigos que estén LITERALMENTE en el catálogo dado, nunca inventes uno. A diferencia de una cuenta contable, un código de producto identifica un ítem específico del inventario — pero NO hace falta que el nombre del catálogo sea idéntico palabra por palabra a la descripción. Elegí el producto que más se le parezca (aunque esté abreviado, en otro orden, con alguna palabra de más/de menos, o con la talla/color/presentación escritos distinto) siempre que sea razonablemente claro que es el mismo artículo. Si no estás segura, elegí igual tu mejor opción y reportalo con confidence bajo en vez de no sugerir nada; productCode null solo es válido si genuinamente NINGÚN producto del catálogo se parece a ESA línea.
 

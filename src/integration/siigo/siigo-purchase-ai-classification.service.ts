@@ -1,4 +1,12 @@
-import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import { BoundedWorkQueue } from '../../common/helpers/bounded-work-queue';
+import { resolveItemAiSuggestion } from '../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
+import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SupplierConfigurationsRepository } from '../repositories/supplier-configurations.repository';
@@ -30,6 +38,7 @@ import { applyItemClassificationToPayload } from '../../electronic-document/help
  */
 @Injectable()
 export class SiigoPurchaseAiClassificationService {
+  private readonly workQueue = new BoundedWorkQueue(4);
   private readonly logger = new Logger(
     SiigoPurchaseAiClassificationService.name,
   );
@@ -47,7 +56,12 @@ export class SiigoPurchaseAiClassificationService {
     documentIds: string[],
     companyId: string,
   ): void {
-    void this.classifyDocuments(documentIds, companyId);
+    void this.classifyDocuments(documentIds, companyId).catch((error) => {
+      this.logger.error(
+        'No se pudo iniciar la clasificacion; el recuperador volvera a intentarlo.',
+        error instanceof Error ? error.stack : String(error),
+      );
+    });
   }
 
   async classifyDocuments(
@@ -74,7 +88,8 @@ export class SiigoPurchaseAiClassificationService {
         companyId,
       );
       integrationId = integration.id;
-    } catch {
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
       console.log(
         `[AI-CLASSIFY] [companyId=${companyId}] Omitido para ${documentIds.join(', ')}: la empresa no tiene integración SIIGO.`,
       );
@@ -89,14 +104,16 @@ export class SiigoPurchaseAiClassificationService {
 
     await Promise.all(
       documentIds.map((documentId) =>
-        this.classifyOne(documentId, companyId, integrationId).catch(
-          (error) => {
+        this.workQueue
+          .run(companyId + ':' + documentId, () =>
+            this.classifyOne(documentId, companyId, integrationId),
+          )
+          .catch((error) => {
             this.logger.error(
               `[documentId=${documentId}] Error en clasificación automática con IA`,
               error instanceof Error ? error.stack : String(error),
             );
-          },
-        ),
+          }),
       ),
     );
   }
@@ -118,20 +135,34 @@ export class SiigoPurchaseAiClassificationService {
       document.payload.supplier.documentNumber ?? '',
     );
 
-    if (!supplierNit) {
-      console.log(
-        `[AI-CLASSIFY] [documentId=${documentId}] Omitido: el documento no tiene NIT de proveedor en el payload.`,
-      );
-
+    if (
+      document.alreadyInSiigo ||
+      [ElectronicDocumentStatus.PURCHASE_CREATED, 'COMPLETED'].includes(
+        document.status,
+      )
+    )
       return;
-    }
+    // Reimports and recovery only need to fill missing lines.
+    if (
+      document.payload.items.length > 0 &&
+      document.payload.items.every((item, index) => {
+        const suggestion = resolveItemAiSuggestion(document.payload, index);
+        return Boolean(
+          item.accountMapping?.code?.trim() ||
+          suggestion?.account?.code?.trim() ||
+          suggestion?.product?.code?.trim(),
+        );
+      })
+    )
+      return;
 
-    const configuration =
-      await this.supplierConfigurationsRepository.findByCompanyIntegrationAndNormalizedSupplierDocument(
-        companyId,
-        integrationId,
-        supplierNit,
-      );
+    const configuration = supplierNit
+      ? await this.supplierConfigurationsRepository.findByCompanyIntegrationAndNormalizedSupplierDocument(
+          companyId,
+          integrationId,
+          supplierNit,
+        )
+      : null;
 
     const needsAi = await this.needsAiClassification(
       document.payload,
@@ -169,20 +200,13 @@ export class SiigoPurchaseAiClassificationService {
             documentId,
             companyId,
           );
-        const previousSuggestion =
-          documentAfterTypeClassification.payload.aiSuggestion;
-
+        const { aiSuggestion: _legacySuggestion, ...payload } =
+          documentAfterTypeClassification.payload;
         await this.electronicDocumentService.updatePayload(
           documentId,
           {
-            ...documentAfterTypeClassification.payload,
-            aiSuggestion: {
-              itemType,
-              account: null,
-              product: null,
-              retentions: previousSuggestion?.retentions ?? [],
-              confidence: null,
-            },
+            ...payload,
+            items: payload.items.map((item) => ({ ...item, itemType })),
           },
           companyId,
         );

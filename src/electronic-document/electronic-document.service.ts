@@ -1,3 +1,4 @@
+import { summarizeDocumentAiSuggestion } from './helpers/electronic-document-ai-suggestion.helper';
 import {
   BadRequestException,
   ForbiddenException,
@@ -1247,7 +1248,16 @@ export class ElectronicDocumentService {
       .filter(Boolean);
     const importStatuses = parseImportStatusFilters(query.importStatuses);
 
+    const documentIds = query.documentIds === undefined
+      ? undefined
+      : [...new Set(String(query.documentIds).split(',').map((id) => id.trim()).filter(Boolean))];
+    if (documentIds && (!documentIds.length || documentIds.length > 100 ||
+      documentIds.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))) {
+      throw new BadRequestException('Envíe entre 1 y 100 IDs de documento válidos.');
+    }
+
     const baseFilters = {
+      documentIds,
       electronicDocumentType,
       status: query.status,
       companyId,
@@ -1324,7 +1334,7 @@ export class ElectronicDocumentService {
           supplierPreferences.products.get(document.id) ?? null,
           supplierPreferences.itemConfigs.get(document.id) ?? null,
           supplierPreferences.itemAccounts.get(document.id) ?? [],
-          document.payload?.aiSuggestion?.confidence ?? null,
+          summarizeDocumentAiSuggestion(document.payload)?.confidence ?? null,
         );
         precomputedRequiresReview!.set(document.id, documentRequiresReview);
 
@@ -1453,7 +1463,7 @@ export class ElectronicDocumentService {
         supplierPreferences.products.get(document.id) ?? null,
         supplierPreferences.itemConfigs.get(document.id) ?? null,
         supplierPreferences.itemAccounts.get(document.id) ?? [],
-        document.payload?.aiSuggestion?.confidence ?? null,
+        summarizeDocumentAiSuggestion(document.payload)?.confidence ?? null,
       );
 
       if (documentRequiresReview) {
@@ -1831,7 +1841,7 @@ export class ElectronicDocumentService {
 
         const accountCodeForPayment =
           suggestedAccount?.code ??
-          document.payload?.aiSuggestion?.account?.code ??
+          summarizeDocumentAiSuggestion(document.payload)?.account?.code ??
           null;
 
         paymentMethods.set(

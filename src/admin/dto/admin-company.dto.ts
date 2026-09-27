@@ -87,6 +87,9 @@ export class AdminCompanyListItemDto {
   })
   description: string | null;
 
+  @ApiPropertyOptional({ type: [String], maxItems: 10 })
+  aiRules?: string[];
+
   @ApiPropertyOptional({ enum: CompanyPersonType, nullable: true })
   personType: CompanyPersonType | null;
 
@@ -296,6 +299,9 @@ export class UpdateCompanyDescriptionRequestDto {
     example: 'Comercializadora de elementos de aseo y cafetería.',
   })
   description: string | null;
+
+  @ApiPropertyOptional({ type: [String], maxItems: 10 })
+  aiRules?: string[];
 }
 
 export class UpdateCompanyDescriptionResponseDto {

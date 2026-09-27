@@ -408,11 +408,21 @@ export class PurchaseInvoiceImportWorkerService
             documentIdsPendingProcessing,
             job.companyId,
           );
-          this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground(
-            documentIdsPendingProcessing,
-            job.companyId,
-          );
         }
+      }
+      const aiDocumentIds = [
+        ...new Set([...documentIdsPendingProcessing, ...documentIdsReused]),
+      ].filter((id) => !documentIdsAlreadyInSiigo.includes(id));
+      if (
+        aiDocumentIds.length &&
+        (await this.electronicDocumentService.resolveDocumentProvider(
+          job.companyId,
+        )) === IntegrationProvider.SIIGO
+      ) {
+        this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground(
+          aiDocumentIds,
+          job.companyId,
+        );
       }
     }
 

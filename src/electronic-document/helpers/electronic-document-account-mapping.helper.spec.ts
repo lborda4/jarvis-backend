@@ -1,163 +1,119 @@
+﻿import { applyItemClassificationToPayload } from './electronic-document-account-mapping.helper';
 import {
-  applyAiClassificationToPayloadItems,
-  applyItemClassificationToPayload,
-} from './electronic-document-account-mapping.helper';
-import { ElectronicDocumentItem } from '../interfaces/electronic-document-item.interface';
+  resolveItemAiSuggestion,
+  summarizeDocumentAiSuggestion,
+} from './electronic-document-ai-suggestion.helper';
 import { ElectronicDocumentPayload } from '../interfaces/electronic-document-payload.interface';
 
-function buildItem(
-  descripcion: string,
-  overrides: Partial<ElectronicDocumentItem> = {},
-): ElectronicDocumentItem {
-  return {
-    descripcion,
-    cantidad: 1,
-    valorUnitario: 1000,
-    total: 1000,
-    ...overrides,
-  };
-}
+const item = {
+  descripcion: 'Servicio',
+  cantidad: 1,
+  valorUnitario: 100,
+  total: 100,
+};
+const classified = {
+  accountCode: '5135',
+  accountName: 'Servicios',
+  productCode: null,
+  productName: null,
+  confidence: 55,
+};
+const classification = {
+  ...classified,
+  itemType: 'Account' as const,
+  items: [classified],
+};
 
-describe('applyAiClassificationToPayloadItems', () => {
-  it('escribe accountMapping e itemType en cada línea, no una sola cuenta para toda la factura', () => {
-    const items = applyAiClassificationToPayloadItems(
-      [
-        buildItem('Resma de papel'),
-        buildItem('Jabón líquido'),
-        buildItem('Mantenimiento aires'),
-      ],
+describe('item AI suggestion storage', () => {
+  it('stores one suggestion per item without copying it to accountMapping or the root', () => {
+    const payload = applyItemClassificationToPayload(
       {
-        itemType: 'Account',
+        items: [item],
+        aiSuggestion: { account: { code: 'old', name: 'Old' }, retentions: [] },
+      } as ElectronicDocumentPayload,
+      classification,
+    );
+    expect(payload).not.toHaveProperty('aiSuggestion');
+    expect(payload.items[0]).not.toHaveProperty('accountMapping');
+    expect(payload.items[0].aiSuggestion).toEqual({
+      account: { code: '5135', name: 'Servicios' },
+      product: null,
+      confidence: 55,
+    });
+    expect(summarizeDocumentAiSuggestion(payload)?.confidence).toBe(55);
+  });
+
+  it('preserves a manually assigned account independently of the AI suggestion', () => {
+    const mapping = { code: '5195', description: 'Manual' };
+    const payload = applyItemClassificationToPayload(
+      {
+        items: [{ ...item, accountMapping: mapping }],
+      } as ElectronicDocumentPayload,
+      classification,
+    );
+    expect(payload.items[0].accountMapping).toEqual(mapping);
+    expect(payload.items[0].aiSuggestion?.account?.code).toBe('5135');
+  });
+
+  it('derives minimum confidence and no document account for differing lines', () => {
+    const payload = applyItemClassificationToPayload(
+      { items: [item, item] } as ElectronicDocumentPayload,
+      {
+        ...classification,
         items: [
-          { accountCode: '51953001', accountName: 'Papelería' },
-          { accountCode: '51050601', accountName: 'Aseo' },
-          { accountCode: '51400501', accountName: 'Mantenimiento' },
+          classified,
+          { ...classified, accountCode: '5195', confidence: 80 },
         ],
       },
     );
-
-    expect(items.map((item) => item.accountMapping?.code)).toEqual([
-      '51953001',
-      '51050601',
-      '51400501',
-    ]);
-    expect(items.every((item) => item.itemType === 'Account')).toBe(true);
+    expect(summarizeDocumentAiSuggestion(payload)).toMatchObject({
+      account: null,
+      confidence: 55,
+      itemType: 'Account',
+    });
   });
 
-  it('no pisa un accountMapping que el contador ya había guardado', () => {
-    const [item] = applyAiClassificationToPayloadItems(
-      [
-        buildItem('Resma de papel', {
-          accountMapping: { code: '51010101', description: 'Elegida a mano' },
-        }),
-      ],
-      {
-        itemType: 'Account',
-        items: [{ accountCode: '51953001', accountName: 'Papelería' }],
-      },
+  it('records failed lines with zero confidence and does not reuse an old root suggestion', () => {
+    const payload = applyItemClassificationToPayload(
+      { items: [item, item] } as ElectronicDocumentPayload,
+      classification,
     );
-
-    expect(item.accountMapping).toEqual({
-      code: '51010101',
-      description: 'Elegida a mano',
+    expect(payload.items[1].aiSuggestion).toEqual({
+      account: null,
+      product: null,
+      confidence: 0,
     });
+    expect(summarizeDocumentAiSuggestion(payload)?.confidence).toBe(0);
+  });
+
+  it('reads legacy suggestions while respecting an explicit per-item null', () => {
+    const legacy = {
+      account: { code: '5135', name: 'Servicios' },
+      confidence: 80,
+      retentions: [],
+    };
+    const payload = {
+      items: [item],
+      aiSuggestion: legacy,
+    } as ElectronicDocumentPayload;
+    expect(resolveItemAiSuggestion(payload, 0)).toEqual(legacy);
+    payload.items = [{ ...item, aiSuggestion: null }];
+    expect(resolveItemAiSuggestion(payload, 0)).toBeNull();
+    expect(summarizeDocumentAiSuggestion(payload)?.account).toBeNull();
   });
 });
 
-describe('applyItemClassificationToPayload', () => {
-  it('escribe accountMapping por línea y el snapshot de aiSuggestion', () => {
-    const payload = applyItemClassificationToPayload(
-      {
-        items: [buildItem('Resma de papel'), buildItem('Jabón líquido')],
-      } as ElectronicDocumentPayload,
-      {
-        itemType: 'Account',
-        accountCode: null,
-        accountName: null,
-        productCode: null,
-        productName: null,
-        confidence: 70,
-        items: [
-          {
-            accountCode: '51953001',
-            accountName: 'Papelería',
-            productCode: null,
-            productName: null,
-            confidence: 80,
-          },
-          {
-            accountCode: '51050601',
-            accountName: 'Aseo',
-            productCode: null,
-            productName: null,
-            confidence: 70,
-          },
-        ],
-      },
-    );
-
-    expect(payload.items.map((item) => item.accountMapping?.code)).toEqual([
-      '51953001',
-      '51050601',
-    ]);
-    expect(
-      payload.items.map((item) => item.aiSuggestion?.account?.code),
-    ).toEqual(['51953001', '51050601']);
-    expect(payload.aiSuggestion).not.toHaveProperty('items');
-    expect(payload.items.map((item) => item.aiSuggestion?.confidence)).toEqual([
-      80, 70,
-    ]);
-    expect(payload.aiSuggestion?.confidence).toBe(70);
-  });
-
-  it('persiste confidence=0 si no hay cuenta ni producto, aunque classification.confidence sea null', () => {
-    const payload = applyItemClassificationToPayload(
-      { items: [buildItem('Ítem nuevo')] } as ElectronicDocumentPayload,
-      {
-        itemType: 'Account',
-        accountCode: null,
-        accountName: null,
-        productCode: null,
-        productName: null,
-        confidence: null,
-        items: [
-          {
-            accountCode: null,
-            accountName: null,
-            productCode: null,
-            productName: null,
-            confidence: null,
-          },
-        ],
-      },
-    );
-
-    expect(payload.aiSuggestion?.confidence).toBe(0);
-  });
-
-  it('persiste confidence=0 si el modelo no mandó confidence, aunque sí haya código', () => {
-    const payload = applyItemClassificationToPayload(
-      { items: [buildItem('Resma de papel')] } as ElectronicDocumentPayload,
-      {
-        itemType: 'Account',
-        accountCode: '51953001',
-        accountName: 'Papelería',
-        productCode: null,
-        productName: null,
-        confidence: null,
-        items: [
-          {
-            accountCode: '51953001',
-            accountName: 'Papelería',
-            productCode: null,
-            productName: null,
-            confidence: null,
-          },
-        ],
-      },
-    );
-
-    expect(payload.aiSuggestion?.account?.code).toBe('51953001');
-    expect(payload.aiSuggestion?.confidence).toBe(0);
-  });
+it('preserves previously resolved lines when a recovery attempt returns no code', () => {
+  const previous = {
+    account: { code: '5135', name: 'Servicios' },
+    product: null,
+    confidence: 85,
+  };
+  const payload = applyItemClassificationToPayload(
+    {
+      items: [{ ...item, aiSuggestion: previous }],
+    } as ElectronicDocumentPayload,
+    { ...classification, items: [] },
+  );
+  expect(payload.items[0].aiSuggestion).toEqual(previous);
 });

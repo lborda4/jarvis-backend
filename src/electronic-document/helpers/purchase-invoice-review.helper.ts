@@ -42,7 +42,7 @@ export interface PurchaseInvoiceReviewInput {
   itemAccountSuggestions: Array<SuggestedItemAccount | null>;
   itemProductSuggestions?: Array<SuggestedProduct | null>;
   aiConfidence: number | null;
-  /** true si ya existe `payload.aiSuggestion`: la clasificación corrió
+  /** true si ya existe una sugerencia de IA por item (o el formato antiguo): la clasificación corrió
    * (o quedó a medias). En ese caso `confidence` null se trata como
    * fallo (<80): un fallback de historial no puede dejar el documento
    * en Pendiente. Sin este flag, null sigue significando "la IA nunca

@@ -1,3 +1,5 @@
+import { SiigoPurchaseAiRecoveryService } from './siigo-purchase-ai-recovery.service';
+import { SiigoCompanyAiContextController } from './siigo-company-ai-context.controller';
 import { Module, forwardRef } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { CompanyModule } from '../../company/company.module';
@@ -49,8 +51,9 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     OpenRouterModule,
     JarvisModule,
   ],
-  controllers: [SiigoController],
+  controllers: [SiigoController, SiigoCompanyAiContextController],
   providers: [
+    SiigoPurchaseAiRecoveryService,
     SiigoHttpClient,
     SiigoAuthService,
     SiigoSupplierService,

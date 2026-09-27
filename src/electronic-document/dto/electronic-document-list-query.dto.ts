@@ -2,6 +2,9 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 
 export class ElectronicDocumentListQueryDto {
+  @ApiPropertyOptional({ description: 'IDs de documentos del lote, separados por coma (máximo 100).' })
+  documentIds?: string;
+
   @ApiPropertyOptional({
     description: 'Filtra por tipo de documento electrónico',
     enum: ElectronicDocumentType,

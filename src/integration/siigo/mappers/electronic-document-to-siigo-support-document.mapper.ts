@@ -1,3 +1,4 @@
+import { resolveItemAiSuggestion } from '../../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
 import { BadRequestException } from '@nestjs/common';
 import { ElectronicDocumentPayload } from '../../../electronic-document/interfaces/electronic-document-payload.interface';
 import { SIIGO_PURCHASE_ITEM_TYPE_ACCOUNT } from '../constants/siigo.constants';
@@ -20,8 +21,10 @@ export function mapElectronicDocumentToSiigoSupportDocument(
   const hasIva = payload.totals.iva > 0;
   const itemTaxes = hasIva ? [{ id: config.defaultTaxId }] : undefined;
 
-  const items = payload.items.map((item) => {
-    const accountCode = item.accountMapping?.code?.trim();
+  const items = payload.items.map((item, index) => {
+    const accountCode =
+      item.accountMapping?.code?.trim() ||
+      resolveItemAiSuggestion(payload, index)?.account?.code?.trim();
 
     if (!accountCode) {
       throw new BadRequestException(

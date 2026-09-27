@@ -1,3 +1,4 @@
+import { readCompanyAiContext, validateCompanyAiContext } from '../company/company-ai-context';
 import {
   BadRequestException,
   ConflictException,
@@ -209,7 +210,7 @@ export class AdminService {
           personType,
           responsible,
           inviteCode: generateCompanyInviteCode(),
-          description: request?.description?.trim() || null,
+          description: validateCompanyAiContext({ description: request?.description ?? '', rules: [] }),
           cityCode: request?.cityCode?.trim() || null,
           cityName: request?.cityName?.trim() || null,
           nextPymeToken: request?.nextPymeToken?.trim() || null,
@@ -361,7 +362,7 @@ export class AdminService {
       throw new NotFoundException('Empresa no encontrada.');
     }
 
-    company.description = request.description?.trim() || null;
+    company.description = validateCompanyAiContext({ description: request.description ?? '', rules: request.aiRules ?? readCompanyAiContext(company.description).rules });
     const saved = await this.companiesRepository.save(company);
 
     return {
@@ -510,7 +511,8 @@ export class AdminService {
       id: company.id,
       nit: company.nit,
       name: company.name,
-      description: company.description,
+      description: readCompanyAiContext(company.description).description || null,
+      aiRules: readCompanyAiContext(company.description).rules,
       personType: company.personType,
       responsible: company.responsible,
       createdAt: company.createdAt.toISOString(),

@@ -13,6 +13,7 @@ import {
 import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
 
 export interface FindElectronicDocumentsFilters {
+  documentIds?: string[];
   electronicDocumentType?: ElectronicDocumentType;
   status?: string;
   companyId?: string;
@@ -70,6 +71,42 @@ export class ElectronicDocumentsRepository {
     });
   }
 
+  /** The document itself is durable pending work, including after a process restart. */
+  findMissingPurchaseAiSuggestions(
+    excludedIds: string[],
+    limit = 100,
+  ): Promise<Array<{ id: string; companyId: string }>> {
+    return this.repository.query(
+      `
+      SELECT d.id, d.company_id AS "companyId"
+      FROM electronic_documents d
+      WHERE d.electronic_document_type = 'PURCHASE_INVOICE'
+        AND d.status NOT IN ('PURCHASE_CREATED', 'COMPLETED')
+        AND d.already_in_siigo = false
+        AND d.created_at < now() - interval '10 seconds'
+        AND NOT (d.id = ANY($1::uuid[]))
+        AND EXISTS (SELECT 1 FROM integrations g WHERE g.company_id = d.company_id AND g.provider = 'SIIGO' AND g.active = true)
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(d.payload->'items') WITH ORDINALITY AS entry(item, position)
+          WHERE coalesce(item->'accountMapping'->>'code', '') = ''
+            AND coalesce(d.draft->'items'->((position - 1)::int)->>'producto', '') = ''
+            AND coalesce((CASE
+              WHEN item ? 'aiSuggestion' THEN item->'aiSuggestion'
+              WHEN d.payload->'aiSuggestion' ? 'items' THEN d.payload->'aiSuggestion'->'items'->((position - 1)::int)
+              ELSE d.payload->'aiSuggestion'
+            END)->'account'->>'code', '') = ''
+            AND coalesce((CASE
+              WHEN item ? 'aiSuggestion' THEN item->'aiSuggestion'
+              WHEN d.payload->'aiSuggestion' ? 'items' THEN d.payload->'aiSuggestion'->'items'->((position - 1)::int)
+              ELSE d.payload->'aiSuggestion'
+            END)->'product'->>'code', '') = ''
+        )
+      ORDER BY d.created_at, d.id LIMIT $2
+    `,
+      [excludedIds, limit],
+    );
+  }
+
   async deleteById(id: string): Promise<void> {
     await this.repository.delete({ id });
   }
@@ -107,9 +144,12 @@ export class ElectronicDocumentsRepository {
       .orderBy('document.createdAt', 'DESC');
 
     if (filters.electronicDocumentType) {
-      query.andWhere('document.electronicDocumentType = :electronicDocumentType', {
-        electronicDocumentType: filters.electronicDocumentType,
-      });
+      query.andWhere(
+        'document.electronicDocumentType = :electronicDocumentType',
+        {
+          electronicDocumentType: filters.electronicDocumentType,
+        },
+      );
     }
 
     if (filters.status?.trim()) {
@@ -121,6 +161,12 @@ export class ElectronicDocumentsRepository {
     if (filters.companyId?.trim()) {
       query.andWhere('document.companyId = :companyId', {
         companyId: filters.companyId.trim(),
+      });
+    }
+
+    if (filters.documentIds?.length) {
+      query.andWhere('document.id IN (:...documentIds)', {
+        documentIds: filters.documentIds,
       });
     }
 
@@ -210,17 +256,17 @@ export class ElectronicDocumentsRepository {
       .where('document.companyId = :companyId', { companyId });
 
     if (electronicDocumentType) {
-      baseQuery.andWhere('document.electronicDocumentType = :electronicDocumentType', {
-        electronicDocumentType,
-      });
+      baseQuery.andWhere(
+        'document.electronicDocumentType = :electronicDocumentType',
+        {
+          electronicDocumentType,
+        },
+      );
     }
 
     const issueDateRows = await baseQuery
       .clone()
-      .select(
-        "DISTINCT document.payload->'invoice'->>'issueDate'",
-        'issueDate',
-      )
+      .select("DISTINCT document.payload->'invoice'->>'issueDate'", 'issueDate')
       .andWhere("document.payload->'invoice'->>'issueDate' IS NOT NULL")
       .andWhere("document.payload->'invoice'->>'issueDate' <> ''")
       .orderBy("document.payload->'invoice'->>'issueDate'", 'ASC')
@@ -308,7 +354,10 @@ export class ElectronicDocumentsRepository {
   > {
     const rows = await this.repository
       .createQueryBuilder('document')
-      .distinctOn(['document.documentNumberThird', 'document.documentTypeThird'])
+      .distinctOn([
+        'document.documentNumberThird',
+        'document.documentTypeThird',
+      ])
       .select('document.id', 'documentId')
       .addSelect('document.documentNumberThird', 'documentNumberThird')
       .addSelect('document.documentTypeThird', 'documentTypeThird')
@@ -320,7 +369,10 @@ export class ElectronicDocumentsRepository {
         new Brackets((qb) => {
           qb.where('document.supplierExistsInSiigo = false').orWhere(
             'document.status = :supplierNotFoundStatus',
-            { supplierNotFoundStatus: ElectronicDocumentStatus.SUPPLIER_NOT_FOUND },
+            {
+              supplierNotFoundStatus:
+                ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
+            },
           );
         }),
       )

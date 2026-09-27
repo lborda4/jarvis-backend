@@ -1,54 +1,6 @@
+import { resolveItemAiSuggestion } from './electronic-document-ai-suggestion.helper';
 import { ElectronicDocumentPayload } from '../interfaces/electronic-document-payload.interface';
-import { ElectronicDocumentItem } from '../interfaces/electronic-document-item.interface';
 import { normalizeItemDescription } from '../../integration/helpers/supplier-item-account-mapping.helper';
-
-export interface AiClassificationForPayloadItems {
-  itemType: 'Account' | 'Product' | null;
-  items: Array<{
-    accountCode: string | null;
-    accountName: string | null;
-    productCode?: string | null;
-  }>;
-}
-
-/** Escribe en CADA línea del payload la cuenta (o tipo Producto) que eligió
- * la clasificación automática — no deja la sugerencia solo en
- * aiSuggestion.account a nivel documento. No pisa un accountMapping que el
- * contador ya hubiera guardado. */
-export function applyAiClassificationToPayloadItems(
-  items: ElectronicDocumentItem[],
-  classification: AiClassificationForPayloadItems,
-): ElectronicDocumentItem[] {
-  return items.map((item, index) => {
-    const classified = classification.items[index];
-    const itemType = classification.itemType ?? undefined;
-
-    if (itemType === 'Account' && classified?.accountCode?.trim()) {
-      if (item.accountMapping?.code?.trim()) {
-        return { ...item, itemType: 'Account' };
-      }
-
-      return {
-        ...item,
-        itemType: 'Account',
-        accountMapping: {
-          code: classified.accountCode.trim(),
-          description:
-            classified.accountName?.trim() || classified.accountCode.trim(),
-        },
-      };
-    }
-
-    if (itemType === 'Product') {
-      return {
-        ...item,
-        itemType: 'Product',
-      };
-    }
-
-    return item;
-  });
-}
 
 export function applyItemClassificationToPayload(
   payload: ElectronicDocumentPayload,
@@ -68,21 +20,29 @@ export function applyItemClassificationToPayload(
     }>;
   },
 ): ElectronicDocumentPayload {
-  const classifiedItems = classification.items ?? [];
-  const foundNothing =
-    !classification.accountCode &&
-    !classification.productCode &&
-    !classifiedItems.some((item) => item.accountCode || item.productCode);
-
+  const { aiSuggestion: _legacySuggestion, ...rest } = payload;
   return {
-    ...payload,
-    items: applyAiClassificationToPayloadItems(payload.items ?? [], {
-      itemType: classification.itemType,
-      items: classifiedItems,
-    }).map((item, index) => {
-      const suggestion = classifiedItems[index];
+    ...rest,
+    items: payload.items.map((item, index) => {
+      // A document-wide answer is only unambiguous for a single item.
+      const suggestion =
+        classification.items?.[index] ??
+        (classification.items === undefined && payload.items.length === 1
+          ? classification
+          : undefined);
+      const previous = resolveItemAiSuggestion(payload, index);
+      if (
+        !suggestion?.accountCode &&
+        !suggestion?.productCode &&
+        (previous?.account?.code || previous?.product?.code)
+      ) {
+        return { ...item, aiSuggestion: previous };
+      }
       return {
         ...item,
+        ...(classification.itemType
+          ? { itemType: classification.itemType }
+          : {}),
         aiSuggestion: {
           account: suggestion?.accountCode
             ? {
@@ -96,30 +56,13 @@ export function applyItemClassificationToPayload(
                 name: suggestion.productName ?? suggestion.productCode,
               }
             : null,
-          confidence: suggestion?.confidence ?? 0,
+          confidence:
+            suggestion?.accountCode || suggestion?.productCode
+              ? (suggestion.confidence ?? 0)
+              : 0,
         },
       };
     }),
-    aiSuggestion: {
-      itemType: classification.itemType,
-      account: classification.accountCode
-        ? {
-            code: classification.accountCode,
-            name: classification.accountName ?? classification.accountCode,
-          }
-        : null,
-      product: classification.productCode
-        ? {
-            code: classification.productCode,
-            name: classification.productName ?? classification.productCode,
-          }
-        : null,
-      retentions: [],
-      confidence:
-        foundNothing || classification.confidence == null
-          ? 0
-          : classification.confidence,
-    },
   };
 }
 
