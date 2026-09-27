@@ -44,8 +44,11 @@ export interface ElectronicDocumentSupplier {
   checkDigit?: string;
   address?: string;
   countryCode?: string;
+  countryName?: string;
   stateCode?: string;
+  stateName?: string;
   cityCode?: string;
+  cityName?: string;
   postalCode?: string;
   phone?: string;
   email?: string;
@@ -63,6 +66,8 @@ export interface ElectronicDocumentInvoice {
   /** Días de plazo explícitos del emisor (payment_form.duration_measure) —
    * fuente más confiable que derivar dueDate - issueDate cuando está presente. */
   durationMeasure?: number;
+  /** Código DIAN del medio de pago (tabla 13.3.4.2). */
+  paymentMethodCode?: string;
   currency: string;
 }
 
@@ -81,10 +86,14 @@ export interface ElectronicDocumentTax {
 export interface ElectronicDocumentWithholding {
   dianTaxCode: string;
   percentage: number;
+  /** Valor certificado de la retención, si NextPyme/DIAN lo mandó. */
+  amount?: number;
 }
 
 export interface ElectronicDocumentPayload {
   supplier: ElectronicDocumentSupplier;
+  /** Adquiriente certificado en la factura; si falta, la descarga usa la empresa Jarvis. */
+  buyer?: ElectronicDocumentSupplier;
   invoice: ElectronicDocumentInvoice;
   items: ElectronicDocumentItem[];
   taxes: ElectronicDocumentTax[];

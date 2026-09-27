@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Put,
   Query,
@@ -28,6 +29,7 @@ import {
   SaveElectronicDocumentDraftRequestDto,
   SaveElectronicDocumentDraftResponseDto,
 } from './dto/save-electronic-document-draft.dto';
+import { PurchaseInvoiceDownloadDto } from './dto/purchase-invoice-download.dto';
 
 @ApiTags('electronic-documents')
 @Controller('electronic-documents')
@@ -76,6 +78,22 @@ export class ElectronicDocumentController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ElectronicDocumentCompanyOptionDto[]> {
     return this.electronicDocumentService.listCompanyOptions(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('download/:documentId')
+  @ApiOperation({
+    summary: 'Datos para descargar la representación gráfica de una factura de compra',
+    description:
+      'Lee electronic_documents.payload de la factura (ítems, totales, emisor, CUFE) y el NIT/nombre de la empresa adquirente. El frontend arma el PDF. No incluye borrador de contabilización ni sugerencias de IA.',
+  })
+  getPurchaseInvoiceDownload(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ): Promise<PurchaseInvoiceDownloadDto> {
+    return this.electronicDocumentService.getPurchaseInvoiceDownload(
+      documentId,
       getAuthenticatedCompanyId(user),
     );
   }

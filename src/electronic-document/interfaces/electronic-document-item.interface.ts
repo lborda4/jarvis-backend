@@ -20,4 +20,6 @@ export interface ElectronicDocumentItem {
   ivaPercentage?: number;
   /** Descuento propio de la línea (DIAN allowance_charges), si trae. */
   discount?: number;
+  /** Recargo propio de la línea (allowance_charges con charge_indicator). */
+  surcharge?: number;
 }

@@ -1,6 +1,7 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ElectronicDocumentService } from './electronic-document.service';
 import { ElectronicDocumentStatus } from './enums/electronic-document-status.enum';
+import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
 
 function buildQueryRunnerStub() {
   return {
@@ -294,5 +295,140 @@ describe('ElectronicDocumentService.runExclusiveForDocumentCreation', () => {
 
     expect(result).toEqual({ ok: true });
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+function buildDownloadService(document: Record<string, unknown> | null) {
+  const electronicDocumentsRepository = {
+    findById: jest.fn().mockResolvedValue(document),
+  };
+  const companiesRepository = {
+    findById: jest.fn().mockResolvedValue(
+      document && 'company' in document ? document.company : null,
+    ),
+  };
+  const service = new ElectronicDocumentService(
+    {
+      createQueryRunner: jest.fn().mockReturnValue(buildQueryRunnerStub()),
+    } as never,
+    electronicDocumentsRepository as never,
+    companiesRepository as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  return { service, electronicDocumentsRepository };
+}
+
+function buildPurchaseDocument(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: 'doc-download',
+    companyId: 'company-1',
+    cufe: 'cufe-123',
+    documentNumberThird: '902086460',
+    documentTypeThird: 'NIT',
+    electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE,
+    payload: {
+      supplier: {
+        documentNumber: '902086460',
+        documentType: 'NIT',
+        name: 'Proveedor S.A.S',
+      },
+      invoice: {
+        cufe: 'cufe-123',
+        number: 'SETP1',
+        issueDate: '2026-07-21',
+        currency: 'COP',
+      },
+      items: [
+        {
+          descripcion: 'Ítem',
+          cantidad: 1,
+          valorUnitario: 10000,
+          total: 10000,
+        },
+      ],
+      taxes: [],
+      totals: { subtotal: 10000, iva: 0, total: 10000 },
+    },
+    company: {
+      id: 'company-1',
+      nit: '900123456',
+      name: 'Compradora S.A.S',
+      cityName: 'Medellín',
+    },
+    ...overrides,
+  };
+}
+
+describe('ElectronicDocumentService.getPurchaseInvoiceDownload', () => {
+  it('devuelve el DTO visual de una factura de compra con CUFE', async () => {
+    const { service } = buildDownloadService(buildPurchaseDocument());
+
+    const dto = await service.getPurchaseInvoiceDownload(
+      'doc-download',
+      'company-1',
+    );
+
+    expect(dto.cufe).toBe('cufe-123');
+    expect(dto.invoiceNumber).toBe('SETP1');
+    expect(dto.buyer.documentNumber).toBe('900123456');
+    expect(dto.dianQrText).toContain('CUFE: cufe-123');
+  });
+
+  it('rechaza un documento soporte', async () => {
+    const { service } = buildDownloadService(
+      buildPurchaseDocument({
+        electronicDocumentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      }),
+    );
+
+    await expect(
+      service.getPurchaseInvoiceDownload('doc-download', 'company-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rechaza una factura de compra sin CUFE', async () => {
+    const { service } = buildDownloadService(
+      buildPurchaseDocument({
+        cufe: null,
+        payload: {
+          supplier: {
+            documentNumber: '1',
+            documentType: 'NIT',
+            name: 'Proveedor',
+          },
+          invoice: { cufe: '', number: 'FE1', issueDate: '2026-01-01', currency: 'COP' },
+          items: [],
+          taxes: [],
+          totals: { subtotal: 0, iva: 0, total: 0 },
+        },
+      }),
+    );
+
+    await expect(
+      service.getPurchaseInvoiceDownload('doc-download', 'company-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rechaza un documento de otra empresa', async () => {
+    const { service } = buildDownloadService(
+      buildPurchaseDocument({ companyId: 'company-other' }),
+    );
+
+    await expect(
+      service.getPurchaseInvoiceDownload('doc-download', 'company-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

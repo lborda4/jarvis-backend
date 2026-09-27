@@ -24,6 +24,8 @@ export interface DianInvoiceTotals {
   iva: number;
   /** Descuento general a nivel de documento (allowance_total_amount), no atribuible a una línea puntual. */
   discount?: number;
+  /** Recargo general a nivel de documento (charge_total_amount). */
+  surcharge?: number;
 }
 
 export interface DianInvoiceResult {
