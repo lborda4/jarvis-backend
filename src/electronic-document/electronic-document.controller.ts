@@ -86,7 +86,7 @@ export class ElectronicDocumentController {
   @ApiOperation({
     summary: 'Datos para descargar la representación gráfica de una factura de compra',
     description:
-      'Lee electronic_documents.payload de la factura (ítems, totales, emisor, CUFE) y el NIT/nombre de la empresa adquirente. El frontend arma el PDF. No incluye borrador de contabilización ni sugerencias de IA.',
+      'Consulta el XML original en NextPyme por CUFE y extrae los datos y QR para generar el PDF en el frontend. Valida la pertenencia a la empresa; no usa el payload ni el borrador contable.',
   })
   getPurchaseInvoiceDownload(
     @CurrentUser() user: AuthenticatedUser,

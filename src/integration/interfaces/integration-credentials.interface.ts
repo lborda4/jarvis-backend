@@ -72,4 +72,8 @@ export interface JarvisCredentials {
   };
 }
 
-export type IntegrationCredentials = SiigoCredentials | JarvisCredentials;
+export interface BoldCredentials {
+  identity_key?: string;
+  secret_key?: string;
+}
+export type IntegrationCredentials = SiigoCredentials | JarvisCredentials | BoldCredentials;

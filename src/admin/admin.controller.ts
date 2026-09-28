@@ -1,3 +1,4 @@
+import { SaveAdminBoldCredentialsDto } from './dto/admin-bold-credentials.dto';
 import {
   Body,
   Controller,
@@ -46,6 +47,18 @@ export class AdminController {
     private readonly adminService: AdminService,
     private readonly rutParserService: RutParserService,
   ) {}
+
+  @Get('companies/:companyId/bold/credentials')
+  @ApiOperation({ summary: 'Consultar configuración de llaves Bold sin devolver la llave secreta' })
+  getBoldCredentials(@Param('companyId') companyId: string) {
+    return this.adminService.getBoldCredentials(companyId);
+  }
+
+  @Patch('companies/:companyId/bold/credentials')
+  @ApiOperation({ summary: 'Guardar llaves Bold de la empresa' })
+  saveBoldCredentials(@Param('companyId') companyId: string, @Body() request: SaveAdminBoldCredentialsDto) {
+    return this.adminService.saveBoldCredentials(companyId, request);
+  }
 
   @Get('plans')
   @ApiOperation({

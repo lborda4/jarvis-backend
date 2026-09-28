@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SiigoBoldCashRegister } from '../entities/siigo-bold-cash-register.entity';
@@ -24,24 +24,41 @@ export class SiigoBoldCashRegistersRepository {
     });
   }
 
-  /** Crea el mapeo si no existe, o actualiza nombre/terminal si ya
-   * existía — la clave de identidad es (empresa, sucursal, caja). */
+  /** Edita por ID interno o vincula una caja por su nombre dentro de la empresa. */
   async upsert(data: {
     companyId: string;
-    branchOfficeId: number;
-    cashRegisterId: string;
+    id?: string;
+    branchOfficeId?: number;
+    cashRegisterId?: string;
     cashRegisterName: string;
     boldTerminalId: string;
   }): Promise<SiigoBoldCashRegister> {
-    const existing = await this.findOneByKey(
-      data.companyId,
-      data.branchOfficeId,
-      data.cashRegisterId,
-    );
+    const existing = data.id
+      ? await this.repository.findOne({
+          where: { id: data.id, companyId: data.companyId },
+        })
+      : data.branchOfficeId != null && data.cashRegisterId
+        ? await this.findOneByKey(
+            data.companyId,
+            data.branchOfficeId,
+            data.cashRegisterId,
+          )
+        : await this.repository.findOne({
+            where: {
+              companyId: data.companyId,
+              cashRegisterName: data.cashRegisterName,
+            },
+          });
+    if (data.id && !existing) {
+      throw new NotFoundException('No se encontró la caja para esta empresa.');
+    }
+    const { id: _id, ...values } = data;
 
     const entity = this.repository.create({
+      branchOfficeId: null,
+      cashRegisterId: null,
       ...existing,
-      ...data,
+      ...values,
     });
 
     return this.repository.save(entity);

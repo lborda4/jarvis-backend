@@ -78,28 +78,20 @@ export class BoldHttpClient {
     }
   }
 
-  /**
-   * A diferencia de getPaymentMethods, la llave (`apiKey`) NO sale de la
-   * configuración global — cada empresa tiene su propia cuenta Bold, y por
-   * ahora el admin la ingresa a mano en el panel en vez de guardarla en BD
-   * (ver ensureBoldIntegration). `baseUrl` sí sigue siendo global: es la
-   * misma API de Bold para todas las empresas, solo cambia la llave.
-   */
+  /** Consulta con la llave de identidad persistida para la empresa. */
   async getBindedTerminals(
     apiKey: string,
   ): Promise<BoldBindedTerminalsResponseDto> {
     const config = this.configService.get('bold', { infer: true });
 
-    if (!config.baseUrl) {
-      throw new BadGatewayException(
-        'La integración con Bold no está configurada (falta BOLD_API_BASE_URL).',
-      );
-    }
+    const baseUrl = (
+      config.baseUrl || 'https://integrations.api.bold.co'
+    ).replace(/\/$/, '');
 
     try {
       const response = await firstValueFrom(
         this.httpService.get<BoldBindedTerminalsResponseDto>(
-          `${config.baseUrl}/payments/binded-terminals`,
+          `${baseUrl}/payments/binded-terminals`,
           {
             headers: {
               Authorization: `x-api-key ${apiKey}`,
@@ -119,6 +111,15 @@ export class BoldHttpClient {
         );
       }
 
+      if (
+        (Array.isArray(response.data?.errors) &&
+          response.data.errors.length > 0) ||
+        !Array.isArray(response.data?.payload?.available_terminals)
+      ) {
+        throw new BadGatewayException(
+          'Bold no devolvió una lista válida de datáfonos.',
+        );
+      }
       return response.data;
     } catch (error) {
       if (error instanceof BadGatewayException) {

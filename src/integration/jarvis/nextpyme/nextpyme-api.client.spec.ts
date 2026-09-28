@@ -244,3 +244,43 @@ describe('NextPymeApiClient.listResolutions', () => {
     ]);
   });
 });
+
+describe('NextPymeApiClient.getInvoiceXmlByCufe', () => {
+  it.each(['', '   '])('never falls back to the global token when the company token is missing', async companyToken => {
+    const { client, httpService } = buildClient({ 'nextPyme.apiToken': 'global-token' });
+    await expect(client.getInvoiceXmlByCufe('cufe', companyToken)).rejects.toThrow('La empresa no tiene un token');
+    expect(httpService.request).not.toHaveBeenCalled();
+  });
+  it('works with a company token even without a global token', async () => {
+    const { client, httpService } = buildClient({ 'nextPyme.apiToken': undefined });
+    httpService.request.mockReturnValue(of({ status: 200, data: '<Invoice/>' }));
+    await expect(client.getInvoiceXmlByCufe('cufe', ' company-token ')).resolves.toBe('<Invoice/>');
+    expect(httpService.request).toHaveBeenCalledWith(expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-token' }) }));
+  });
+
+  it.each([
+    '<Invoice/>',
+    { xml: '<Invoice/>' },
+    { data: { xml: Buffer.from('<Invoice/>').toString('base64') } },
+  ])('extracts raw or encoded XML and sends an authenticated POST', async (data) => {
+    const { client, httpService } = buildClient();
+    httpService.request.mockReturnValue(of({ status: 200, data }));
+    await expect(client.getInvoiceXmlByCufe('cufe-123', 'company-token')).resolves.toBe('<Invoice/>');
+    expect(httpService.request).toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', url: 'https://nextpyme.example/xml/document/cufe-123', headers: expect.objectContaining({ Authorization: 'Bearer company-token', Accept: 'application/json' }), timeout: 30000 }));
+  });
+  it.each([401, 402, 404, 500])('reports upstream HTTP %s without using saved invoice data', async status => {
+    const { client, httpService } = buildClient();
+    httpService.request.mockReturnValue(of({ status, data: {} }));
+    await expect(client.getInvoiceXmlByCufe('cufe', 'company-token')).rejects.toThrow(`HTTP ${status}`);
+  });
+  it('rejects a successful JSON response with no XML', async () => {
+    const { client, httpService } = buildClient();
+    httpService.request.mockReturnValue(of({ status: 200, data: { success: false } }));
+    await expect(client.getInvoiceXmlByCufe('cufe', 'company-token')).rejects.toThrow('XML');
+  });
+  it('reports network failure without leaking credentials', async () => {
+    const { client, httpService } = buildClient();
+    httpService.request.mockReturnValue(throwError(() => new Error('secret')));
+    await expect(client.getInvoiceXmlByCufe('cufe', 'company-token')).rejects.toThrow('No se pudo obtener el XML');
+  });
+});

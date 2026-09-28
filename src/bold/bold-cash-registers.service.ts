@@ -1,3 +1,4 @@
+import { BoldTerminalsService } from './bold-terminals.service';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { SiigoBoldCashRegister } from './entities/siigo-bold-cash-register.entity';
 import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash-registers.repository';
@@ -19,6 +20,7 @@ function mapToDto(entity: SiigoBoldCashRegister): BoldCashRegisterDto {
 @Injectable()
 export class BoldCashRegistersService {
   constructor(
+    private readonly boldTerminalsService: BoldTerminalsService,
     private readonly cashRegistersRepository: SiigoBoldCashRegistersRepository,
   ) {}
 
@@ -48,16 +50,12 @@ export class BoldCashRegistersService {
       throw new BadRequestException('El companyId es obligatorio.');
     }
 
-    if (!Number.isFinite(branchOfficeId) || branchOfficeId <= 0) {
-      throw new BadRequestException(
-        'La sucursal (branchOfficeId) debe ser un número válido.',
-      );
+    if (
+      request.branchOfficeId != null &&
+      (!Number.isInteger(branchOfficeId) || branchOfficeId <= 0)
+    ) {
+      throw new BadRequestException('La sucursal debe ser un número válido.');
     }
-
-    if (!cashRegisterId) {
-      throw new BadRequestException('El id de la caja es obligatorio.');
-    }
-
     if (!cashRegisterName) {
       throw new BadRequestException('El nombre de la caja es obligatorio.');
     }
@@ -66,10 +64,25 @@ export class BoldCashRegistersService {
       throw new BadRequestException('Debe seleccionar un datáfono.');
     }
 
+    const { payload } =
+      await this.boldTerminalsService.getBindedTerminals(companyId);
+    if (
+      !payload.available_terminals.some(
+        (terminal) =>
+          terminal.terminal_serial === boldTerminalId &&
+          terminal.status === 'BINDED',
+      )
+    ) {
+      throw new BadRequestException(
+        'El datáfono no está vinculado a la cuenta Bold de esta empresa.',
+      );
+    }
+
     const entity = await this.cashRegistersRepository.upsert({
+      ...(request.id ? { id: request.id } : {}),
       companyId,
-      branchOfficeId,
-      cashRegisterId,
+      ...(request.branchOfficeId != null ? { branchOfficeId } : {}),
+      ...(cashRegisterId ? { cashRegisterId } : {}),
       cashRegisterName,
       boldTerminalId,
     });

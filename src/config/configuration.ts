@@ -96,6 +96,8 @@ export interface OpenRouterConfig {
  * sin `apiKey`, BoldHttpClient.isConfigured() es false y los llamadores
  * caen a datos mock en vez de intentar pegarle a la API real. */
 export interface BoldConfig {
+  identity?: string;
+  key?: string;
   apiKey?: string;
   baseUrl: string;
 }
@@ -220,6 +222,8 @@ export default (): AppConfiguration => ({
     enabled: parseBoolean(process.env.AI_CLASSIFICATION_ENABLED, true),
   },
   bold: {
+    identity: trimOptional(process.env.BOLD_IDENTITY),
+    key: trimOptional(process.env.BOLD_KEY),
     apiKey: trimOptional(process.env.BOLD_API_KEY),
     // Sin URL real confirmada todavía (esperando documentación/credenciales
     // de Bold) — se deja configurable por env en vez de adivinar un

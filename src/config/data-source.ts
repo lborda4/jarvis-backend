@@ -1,3 +1,4 @@
+import { SiigoBoldCashRegister } from '../bold/entities/siigo-bold-cash-register.entity';
 import { DataSource } from 'typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
 import { User } from '../auth/entities/user.entity';
@@ -35,6 +36,7 @@ export default new DataSource({
   url: databaseUrl,
   ssl: { rejectUnauthorized: false },
   entities: [
+    SiigoBoldCashRegister,
     Integration,
     Company,
     Plan,

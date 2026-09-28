@@ -397,3 +397,24 @@ describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, ví
     );
   });
 });
+
+describe('idle import worker without queued Excel jobs', () => {
+  it('does not read historical documents or call NextPyme/AI while idle', async () => {
+    jest.useFakeTimers();
+    const { service, electronicDocumentService, nextPymeApiClient, siigoPurchaseAiClassificationService } = buildService({
+      jobsRepository: { findPendingOrRunning: jest.fn().mockResolvedValue([]) },
+      jobRowsRepository: { recoverAbandonedRows: jest.fn().mockResolvedValue(0) },
+    });
+    try {
+      service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(60000);
+      expect(electronicDocumentService.createFromPurchaseInvoiceRows).not.toHaveBeenCalled();
+      expect(electronicDocumentService.resolveDocumentProvider).not.toHaveBeenCalled();
+      expect(nextPymeApiClient.getInvoiceByCufe).not.toHaveBeenCalled();
+      expect(siigoPurchaseAiClassificationService.classifyDocumentsInBackground).not.toHaveBeenCalled();
+    } finally {
+      service.onApplicationShutdown();
+      jest.useRealTimers();
+    }
+  });
+});

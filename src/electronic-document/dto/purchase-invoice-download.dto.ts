@@ -1,4 +1,9 @@
 export class PurchaseInvoiceDownloadPartyDto {
+  contributorType?: string | null;
+  fiscalRegime?: string | null;
+  taxResponsibility?: string | null;
+  economicActivity?: string | null;
+
   name: string | null;
   tradeName: string | null;
   documentType: string | null;
@@ -13,6 +18,10 @@ export class PurchaseInvoiceDownloadPartyDto {
 }
 
 export class PurchaseInvoiceDownloadItemDto {
+  unitCode?: string | null;
+  incAmount?: number | null;
+  incPercentage?: number | null;
+
   description: string;
   code: string | null;
   quantity: number;
@@ -37,6 +46,28 @@ export class PurchaseInvoiceDownloadWithholdingDto {
 }
 
 export class PurchaseInvoiceDownloadDto {
+  issueTime?: string | null;
+  operationType?: string | null;
+  orderNumber?: string | null;
+  orderDate?: string | null;
+  exchangeRate?: number | null;
+  prepaidAmount?: number | null;
+  taxExclusiveAmount?: number | null;
+  taxInclusiveAmount?: number | null;
+  technologyProviderId?: string | null;
+  references?: Array<{
+    type: string;
+    number: string | null;
+    date: string | null;
+  }>;
+  authorization?: {
+    number: string | null;
+    from: string | null;
+    to: string | null;
+    startDate: string | null;
+    endDate: string | null;
+  };
+
   id: string;
   cufe: string;
   invoiceNumber: string | null;

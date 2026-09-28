@@ -2,7 +2,7 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
+  Query,
   Param,
   Post,
   UseGuards,
@@ -34,19 +34,13 @@ export class BoldController {
     return this.boldPaymentsService.getPaymentMethods();
   }
 
-  /**
-   * Datáfonos vinculados a la cuenta Bold de una empresa — solo panel de
-   * admin por ahora. La llave de identidad (x-api-key) no está persistida
-   * todavía (ver ensureBoldIntegration), así que viaja en cada llamada
-   * desde el frontend en este header en vez de resolverse del lado del
-   * servidor.
-   */
+  /** Consulta Bold con la llave guardada de la empresa. */
   @UseGuards(AdminGuard)
   @Get('payments/binded-terminals')
   getBindedTerminals(
-    @Headers('x-bold-api-key') apiKey?: string,
+    @Query('companyId') companyId: string,
   ): Promise<BoldBindedTerminalsResponseDto> {
-    return this.boldTerminalsService.getBindedTerminals(apiKey);
+    return this.boldTerminalsService.getBindedTerminals(companyId);
   }
 
   /** Cajas SIIGO ya mapeadas a un datáfono Bold para esta empresa — mismos

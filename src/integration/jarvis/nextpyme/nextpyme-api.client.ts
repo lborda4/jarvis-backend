@@ -1,3 +1,4 @@
+import { extractNextPymeInvoiceXml } from './nextpyme-invoice-xml.helper';
 import {
   BadGatewayException,
   Injectable,
@@ -603,6 +604,60 @@ export class NextPymeApiClient {
 
       throw new BadGatewayException(
         `No fue posible crear ${documentLabelForErrors}. Intenta nuevamente.`,
+      );
+    }
+  }
+
+  /** XML downloads must authenticate with the owning company's stored token. */
+  async getInvoiceXmlByCufe(
+    cufe: string,
+    companyToken: string,
+  ): Promise<string> {
+    const token = companyToken?.trim();
+    if (!token) {
+      throw new ServiceUnavailableException(
+        'La empresa no tiene un token de NextPyme configurado para consultar el XML de la factura.',
+      );
+    }
+    try {
+      const response = await firstValueFrom(
+        this.httpService.request<unknown>({
+          method: 'POST',
+          url:
+            this.getBaseUrl() +
+            '/xml/document/' +
+            encodeURIComponent(cufe.trim()),
+          headers: this.buildAuthHeaders(token),
+          timeout: 30000,
+          maxContentLength: 10 * 1024 * 1024,
+          maxRedirects: 0,
+          validateStatus: () => true,
+        }),
+      );
+      // Log the upstream body before extraction so unexpected envelopes are visible.
+      // Never log the Axios request/config, which contains the company credential.
+      const responseBody =
+        typeof response.data === 'string'
+          ? response.data
+          : JSON.stringify(response.data);
+      this.logger.log(
+        '[xml/document] cufe=' + cufe.trim() +
+          ' status=' + response.status +
+          ' contentType=' + (response.headers?.['content-type'] ?? 'desconocido') +
+          ' respuesta=' + (responseBody ?? '').split(token).join('[REDACTED]'),
+      );
+      if (response.status < 200 || response.status >= 300) {
+        throw new BadGatewayException(
+          'NextPyme no permitio descargar el XML (HTTP ' +
+            response.status +
+            '). Intenta de nuevo o revisa la integracion de la empresa.',
+        );
+      }
+      return extractNextPymeInvoiceXml(response.data);
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException(
+        'No se pudo obtener el XML de NextPyme. Intenta descargar la factura nuevamente.',
       );
     }
   }

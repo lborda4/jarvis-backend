@@ -46,7 +46,8 @@ import {
   SaveElectronicDocumentDraftResponseDto,
 } from './dto/save-electronic-document-draft.dto';
 import { PurchaseInvoiceDownloadDto } from './dto/purchase-invoice-download.dto';
-import { mapElectronicDocumentToPurchaseInvoiceDownload } from './mappers/electronic-document-to-purchase-invoice-download.mapper';
+import { mapInvoiceXmlToPurchaseInvoiceDownload } from './mappers/invoice-xml-to-purchase-invoice-download.mapper';
+import { NextPymeApiClient } from '../integration/jarvis/nextpyme/nextpyme-api.client';
 import { SupplierItemAccountMapping } from '../integration/entities/supplier-item-account-mapping.entity';
 import { SupplierItemAccountMappingsRepository } from '../integration/repositories/supplier-item-account-mappings.repository';
 import {
@@ -193,6 +194,7 @@ export class ElectronicDocumentService {
     private readonly siigoPaymentTypesCatalogService: SiigoPaymentTypesCatalogService,
     private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
+    private readonly nextPymeApiClient: NextPymeApiClient,
   ) {}
 
   async requireById(
@@ -223,50 +225,46 @@ export class ElectronicDocumentService {
     return document;
   }
 
-  /**
-   * Datos visuales de una factura de compra para que el frontend arme la
-   * representación gráfica (PDF + QR DIAN). Usa el payload certificado, no
-   * el borrador de contabilización.
-   */
+  /** Fetch original UBL for the existing PDF renderer; DB supplies ownership and CUFE only. */
   async getPurchaseInvoiceDownload(
     documentId: string,
     companyId: string,
   ): Promise<PurchaseInvoiceDownloadDto> {
-    const document = await this.requireById(documentId, companyId);
-
+    const document =
+      await this.electronicDocumentsRepository.findDownloadContext(
+        documentId.trim(),
+      );
+    if (!document)
+      throw new BadRequestException('No se encontro la factura solicitada.');
+    if (document.companyId !== companyId.trim()) {
+      throw new ForbiddenException(
+        'El documento no pertenece a la empresa activa del usuario.',
+      );
+    }
     if (
       document.electronicDocumentType !==
       ElectronicDocumentType.PURCHASE_INVOICE
     ) {
       throw new BadRequestException(
-        'Solo se puede descargar la representación de una factura de compra.',
+        'Solo se puede descargar la representacion de una factura de compra.',
       );
     }
-
-    const cufe =
-      document.cufe?.trim() || document.payload?.invoice?.cufe?.trim() || '';
-
-    if (!cufe) {
+    const cufe = document.cufe?.trim();
+    if (!cufe)
       throw new BadRequestException(
-        'La factura no tiene CUFE; no se puede generar la representación gráfica.',
+        'La factura no tiene CUFE; no se puede descargar su XML.',
       );
-    }
-
-    const company =
-      document.company ??
-      (await this.companiesRepository.findById(companyId.trim()));
-
-    if (!company) {
+    const companyToken = document.company?.nextPymeToken?.trim();
+    if (!companyToken) {
       throw new BadRequestException(
-        `No se encontró la empresa con id ${companyId}.`,
+        'La empresa no tiene un token de NextPyme guardado. Configuralo para descargar el XML de la factura.',
       );
     }
-
-    this.logger.log(
-      `Descarga de factura leída desde electronic_documents.payload (id=${document.id}, cufe=${cufe}, items=${document.payload?.items?.length ?? 0})`,
+    const xml = await this.nextPymeApiClient.getInvoiceXmlByCufe(
+      cufe,
+      companyToken,
     );
-
-    return mapElectronicDocumentToPurchaseInvoiceDownload(document, company);
+    return mapInvoiceXmlToPurchaseInvoiceDownload(xml, document.id, cufe);
   }
 
   async updateStatus(

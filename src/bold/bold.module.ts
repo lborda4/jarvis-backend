@@ -1,3 +1,4 @@
+import { IntegrationModule } from '../integration/integration.module';
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -16,6 +17,7 @@ import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash
   // el rol admin.
   imports: [
     HttpModule,
+    IntegrationModule,
     AuthModule,
     TypeOrmModule.forFeature([SiigoBoldCashRegister]),
   ],

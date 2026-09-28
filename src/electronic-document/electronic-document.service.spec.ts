@@ -1,3 +1,4 @@
+import { DOWNLOAD_XML } from './mappers/invoice-xml-download.fixture';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ElectronicDocumentService } from './electronic-document.service';
 import { ElectronicDocumentStatus } from './enums/electronic-document-status.enum';
@@ -43,6 +44,7 @@ function buildService(document: {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   return { service, electronicDocumentsRepository };
@@ -60,6 +62,7 @@ function buildDeleteBatchService(documents: Array<{ id: string; status: Electron
   const service = new ElectronicDocumentService(
     dataSource as never,
     electronicDocumentsRepository as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,
@@ -154,6 +157,7 @@ function buildAlreadyInSiigoService() {
     {} as never,
     {} as never,
     historialFacturasRepository as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,
@@ -300,13 +304,14 @@ describe('ElectronicDocumentService.runExclusiveForDocumentCreation', () => {
 
 function buildDownloadService(document: Record<string, unknown> | null) {
   const electronicDocumentsRepository = {
-    findById: jest.fn().mockResolvedValue(document),
+    findDownloadContext: jest.fn().mockResolvedValue(document),
   };
   const companiesRepository = {
     findById: jest.fn().mockResolvedValue(
       document && 'company' in document ? document.company : null,
     ),
   };
+  const nextPymeApiClient = { getInvoiceXmlByCufe: jest.fn().mockResolvedValue(DOWNLOAD_XML) };
   const service = new ElectronicDocumentService(
     {
       createQueryRunner: jest.fn().mockReturnValue(buildQueryRunnerStub()),
@@ -324,9 +329,10 @@ function buildDownloadService(document: Record<string, unknown> | null) {
     {} as never,
     {} as never,
     {} as never,
+    nextPymeApiClient as never,
   );
 
-  return { service, electronicDocumentsRepository };
+  return { service, electronicDocumentsRepository, nextPymeApiClient };
 }
 
 function buildPurchaseDocument(
@@ -364,6 +370,7 @@ function buildPurchaseDocument(
     },
     company: {
       id: 'company-1',
+      nextPymeToken: 'company-token',
       nit: '900123456',
       name: 'Compradora S.A.S',
       cityName: 'Medellín',
@@ -373,6 +380,39 @@ function buildPurchaseDocument(
 }
 
 describe('ElectronicDocumentService.getPurchaseInvoiceDownload', () => {
+  it.each([undefined, { nextPymeToken: null }, { nextPymeToken: '   ' }])('requires the token of the owning company before requesting XML', async company => {
+    const { service, nextPymeApiClient } = buildDownloadService(buildPurchaseDocument({ company }));
+    await expect(service.getPurchaseInvoiceDownload('doc-download', 'company-1')).rejects.toThrow('La empresa no tiene un token');
+    expect(nextPymeApiClient.getInvoiceXmlByCufe).not.toHaveBeenCalled();
+  });
+
+  it('uses company authentication and XML values even when payload differs', async () => {
+    const document = buildPurchaseDocument({ company: { nextPymeToken: 'company-token' } });
+    const { service, nextPymeApiClient, electronicDocumentsRepository } = buildDownloadService(document);
+    const dto = await service.getPurchaseInvoiceDownload('doc-download', 'company-1');
+    expect(nextPymeApiClient.getInvoiceXmlByCufe).toHaveBeenCalledWith('cufe-123', 'company-token');
+    expect(electronicDocumentsRepository.findDownloadContext).toHaveBeenCalledWith('doc-download');
+    expect(dto.total).toBe(238);
+    expect(dto.issuer.name).toBe('Proveedor XML');
+  });
+
+  it('does not contact NextPyme for another company', async () => {
+    const { service, nextPymeApiClient } = buildDownloadService(buildPurchaseDocument({ companyId: 'other' }));
+    await expect(service.getPurchaseInvoiceDownload('doc-download', 'company-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(nextPymeApiClient.getInvoiceXmlByCufe).not.toHaveBeenCalled();
+  });
+
+  it('propagates upstream failure without falling back to the saved payload', async () => {
+    const { service, nextPymeApiClient } = buildDownloadService(buildPurchaseDocument());
+    nextPymeApiClient.getInvoiceXmlByCufe.mockRejectedValue(new Error('NextPyme unavailable'));
+    await expect(service.getPurchaseInvoiceDownload('doc-download', 'company-1')).rejects.toThrow('NextPyme unavailable');
+  });
+
+  it('works with download metadata only, without loading payload or draft', async () => {
+    const { service } = buildDownloadService(buildPurchaseDocument({ payload: undefined }));
+    await expect(service.getPurchaseInvoiceDownload('doc-download', 'company-1')).resolves.toMatchObject({ total: 238 });
+  });
+
   it('devuelve el DTO visual de una factura de compra con CUFE', async () => {
     const { service } = buildDownloadService(buildPurchaseDocument());
 
@@ -382,7 +422,7 @@ describe('ElectronicDocumentService.getPurchaseInvoiceDownload', () => {
     );
 
     expect(dto.cufe).toBe('cufe-123');
-    expect(dto.invoiceNumber).toBe('SETP1');
+    expect(dto.invoiceNumber).toBe('XML1');
     expect(dto.buyer.documentNumber).toBe('900123456');
     expect(dto.dianQrText).toContain('CUFE: cufe-123');
   });

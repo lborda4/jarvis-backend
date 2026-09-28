@@ -1,3 +1,5 @@
+import type { BoldCredentials } from '../integration/interfaces/integration-credentials.interface';
+import { SaveAdminBoldCredentialsDto, AdminBoldCredentialsStatusDto } from './dto/admin-bold-credentials.dto';
 import { readCompanyAiContext, validateCompanyAiContext } from '../company/company-ai-context';
 import {
   BadRequestException,
@@ -75,6 +77,41 @@ export class AdminService {
    * ni token propio en este punto). Nunca lanza: si falla o no encuentra
    * nada, devuelve name: null y el admin lo llena a mano, igual que hoy.
    */
+  async getBoldCredentials(companyId: string): Promise<AdminBoldCredentialsStatusDto> {
+    const integration = await this.requireBoldIntegration(companyId);
+    const credentials = integration.credentials as BoldCredentials;
+    return {
+      identityKey: credentials.identity_key ?? '',
+      hasSecretKey: Boolean(credentials.secret_key),
+    };
+  }
+
+  async saveBoldCredentials(companyId: string, request: SaveAdminBoldCredentialsDto): Promise<AdminBoldCredentialsStatusDto> {
+    if (typeof request?.identityKey !== 'string' || !request.identityKey.trim() || request.identityKey.trim().length > 4096) {
+      throw new BadRequestException('Ingrese una llave de identidad válida.');
+    }
+    if (request.secretKey !== undefined && (typeof request.secretKey !== 'string' || request.secretKey.trim().length > 4096)) {
+      throw new BadRequestException('Ingrese una llave secreta válida.');
+    }
+    const integration = await this.requireBoldIntegration(companyId);
+    const current = integration.credentials as BoldCredentials;
+    const secretKey = request.secretKey?.trim() || current.secret_key;
+    if (!secretKey) throw new BadRequestException('Ingrese la llave secreta para configurar Bold.');
+    integration.credentials = {
+      ...integration.credentials,
+      identity_key: request.identityKey.trim(),
+      secret_key: secretKey,
+    };
+    await this.integrationsRepository.save(integration);
+    return { identityKey: request.identityKey.trim(), hasSecretKey: true };
+  }
+
+  private async requireBoldIntegration(companyId: string): Promise<Integration> {
+    const integration = await this.integrationsRepository.findByCompanyAndProvider(companyId, IntegrationProvider.BOLD);
+    if (!integration) throw new NotFoundException('La empresa no tiene una integración Bold activa.');
+    return integration;
+  }
+
   async lookupCompanyName(
     nit: string,
   ): Promise<LookupAdminCompanyNameResponseDto> {

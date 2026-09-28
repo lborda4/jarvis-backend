@@ -64,6 +64,21 @@ export class ElectronicDocumentsRepository {
     return this.repository.save(document);
   }
 
+  /** Do not load invoice payload/draft for PDF downloads. */
+  findDownloadContext(id: string): Promise<ElectronicDocument | null> {
+    return this.repository.findOne({
+      where: { id },
+      select: {
+        id: true,
+        companyId: true,
+        cufe: true,
+        electronicDocumentType: true,
+        company: { id: true, nextPymeToken: true },
+      },
+      relations: { company: true },
+    });
+  }
+
   findById(id: string): Promise<ElectronicDocument | null> {
     return this.repository.findOne({
       where: { id },

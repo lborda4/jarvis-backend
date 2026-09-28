@@ -31,13 +31,13 @@ export class SiigoBoldCashRegister {
 
   /** Sucursal de SIIGO (branch_office) — mismo campo numérico que usa el
    * resto de la integración con SIIGO (ver siigo-api.interface.ts). */
-  @Column({ name: 'branch_office_id', type: 'integer' })
-  branchOfficeId: number;
+  @Column({ name: 'branch_office_id', type: 'integer', nullable: true })
+  branchOfficeId: number | null;
 
   /** Identificador de la caja en Siigo POS — se lee del DOM/estado de la
    * página, formato todavía no confirmado con Siigo, por eso texto libre. */
-  @Column({ name: 'cash_register_id', type: 'varchar' })
-  cashRegisterId: string;
+  @Column({ name: 'cash_register_id', type: 'varchar', nullable: true })
+  cashRegisterId: string | null;
 
   @Column({ name: 'cash_register_name', type: 'varchar' })
   cashRegisterName: string;
