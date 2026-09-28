@@ -22,10 +22,11 @@ export function mapElectronicDocumentToSiigoPurchase(
     payload.supplier.documentNumber,
   ).identification;
   const providerInvoice = parseProviderInvoiceNumber(payload.invoice.number);
-  const hasIva = payload.totals.iva > 0;
-  const itemTaxes = hasIva ? [{ id: config.defaultTaxId }] : undefined;
 
   const items = payload.items.map((item, index) => {
+    const itemTaxes = (item.ivaPercentage ?? 0) > 0
+      ? [{ id: config.defaultTaxId }]
+      : undefined;
     const accountCode =
       item.accountMapping?.code?.trim() ||
       resolveItemAiSuggestion(payload, index)?.account?.code?.trim();

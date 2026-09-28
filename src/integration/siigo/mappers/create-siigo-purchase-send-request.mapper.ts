@@ -17,8 +17,6 @@ export function mapCreatePurchaseSendRequestToSiigo(
   request: CreateSiigoPurchaseSendRequestDto,
   siigoDocumentTypeId: number,
   taxesCatalog: SiigoTaxCatalogItemDto[],
-  defaultTaxId?: number,
-  hasIva = false,
 ): SiigoPurchaseRequestDto {
   validateCreatePurchaseSendRequest(request);
 
@@ -40,25 +38,13 @@ export function mapCreatePurchaseSendRequestToSiigo(
   const retentions = retentionPlacement.documentRetentions.length
     ? retentionPlacement.documentRetentions
     : undefined;
-  const itemTaxes =
-    hasIva && defaultTaxId && defaultTaxId > 0
-      ? [{ id: defaultTaxId }]
-      : undefined;
-  const items = request.items.map((item) => {
-    const mappedItem = mapSiigoDocumentSendItem(
+  // Una línea sin IVA debe conservarse así aunque las demás tengan impuesto.
+  const items = request.items.map((item) =>
+    mapSiigoDocumentSendItem(
       item,
       retentionPlacement.itemRetentionIds,
-    );
-
-    if (itemTaxes && !(mappedItem.taxes?.length ?? 0)) {
-      return {
-        ...mappedItem,
-        taxes: itemTaxes,
-      };
-    }
-
-    return mappedItem;
-  });
+    ),
+  );
   const calculatedPaymentValue = calculateSiigoSupportDocumentPaymentValue(
     items,
     taxesCatalog,

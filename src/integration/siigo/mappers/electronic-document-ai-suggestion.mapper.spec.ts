@@ -37,6 +37,17 @@ const payload = (): ElectronicDocumentPayload => ({
   totals: { subtotal: 1000, iva: 0, total: 1000 },
 });
 
+it('el envío directo de compra no aplica el IVA del total a una línea sin IVA', () => {
+  const document = payload();
+  document.items = Array.from({ length: 10 }, (_, index) => ({
+    ...document.items[0], ivaPercentage: index < 9 ? 19 : undefined,
+  }));
+  document.totals = { subtotal: 10000, iva: 1710, total: 11710 };
+  const result = mapElectronicDocumentToSiigoPurchase(document, config);
+  expect(result.items.slice(0, 9).every((item) => item.taxes?.[0]?.id === 1)).toBe(true);
+  expect(result.items[9].taxes).toBeUndefined();
+});
+
 describe.each([
   mapElectronicDocumentToSiigoPurchase,
   mapElectronicDocumentToSiigoSupportDocument,

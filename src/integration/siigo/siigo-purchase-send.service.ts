@@ -24,7 +24,6 @@ import {
   areItemPricesTaxInclusive,
   convertTaxInclusiveUnitPrice,
 } from './helpers/siigo-purchase-total.helper';
-import { resolveFallbackIvaTaxId, resolveInvoiceIvaRate } from './helpers/siigo-item-tax-suggestion.helper';
 import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
 import { SiigoPurchaseRequestDto } from './dto/siigo-purchase-request.dto';
 import { SiigoPurchaseResponse } from './interfaces/siigo-api.interface';
@@ -110,25 +109,11 @@ export class SiigoPurchaseSendService {
     );
 
     const payload = electronicDocument.payload;
-    const hasIva = (payload?.totals?.iva ?? 0) > 0;
-    const invoiceIvaRate = resolveInvoiceIvaRate(
-      payload?.items.map((item) => item.ivaPercentage),
-      payload?.totals?.subtotal,
-      payload?.totals?.iva,
-    );
-    const fallbackIvaTaxId = resolveFallbackIvaTaxId({
-      itemIvaPercentages: payload?.items.map((item) => item.ivaPercentage),
-      subtotal: payload?.totals?.subtotal,
-      ivaAmount: payload?.totals?.iva,
-      taxesCatalog,
-    });
-    convertInclusiveRequestPricesIfNeeded(request, payload, invoiceIvaRate);
+    convertInclusiveRequestPricesIfNeeded(request, payload, taxesCatalog);
     const siigoPayload = mapCreatePurchaseSendRequestToSiigo(
       request,
       purchaseConfig.documentId,
       taxesCatalog,
-      fallbackIvaTaxId ?? undefined,
-      hasIva,
     );
     applyPayloadItemDescriptions(siigoPayload.items, payload?.items);
 
@@ -430,12 +415,8 @@ function convertInclusiveRequestPricesIfNeeded(
         totals?: { subtotal?: number; total?: number };
       }
     | undefined,
-  taxRate: number | null,
+  taxesCatalog: Array<{ id: number; type: string; percentage: number }>,
 ): void {
-  if (!taxRate || taxRate <= 0) {
-    return;
-  }
-
   const itemsGross = request.items.reduce((sum, item) => {
     const quantity = item.quantity > 0 ? item.quantity : 1;
     const discount = item.discount && item.discount > 0 ? item.discount : 0;
@@ -453,7 +434,13 @@ function convertInclusiveRequestPricesIfNeeded(
   }
 
   for (const item of request.items) {
-    item.price = convertTaxInclusiveUnitPrice(item.price, taxRate);
+    const taxRate = taxesCatalog.find(
+      (tax) => tax.type.trim().toLowerCase() === 'iva' &&
+        item.taxes?.some((selected) => selected.id === tax.id),
+    )?.percentage;
+    if (taxRate && taxRate > 0) {
+      item.price = convertTaxInclusiveUnitPrice(item.price, taxRate);
+    }
   }
 }
 

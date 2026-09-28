@@ -9,6 +9,8 @@ export class ElectronicDocumentListItemItemDto {
   quantity: number;
   unitValue: number;
   total: number;
+  /** Tarifa de IVA de esta línea; no se hereda del total de la factura. */
+  ivaPercentage?: number;
   /** Código del producto/ítem tal como viene en la factura original (DIAN/NextPyme). */
   code?: string;
   /** Cuenta que el contador asignó y guardó en payload.items.accountMapping. */

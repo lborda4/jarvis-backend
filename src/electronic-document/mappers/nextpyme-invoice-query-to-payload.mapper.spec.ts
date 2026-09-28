@@ -32,6 +32,22 @@ function buildResult(
 }
 
 describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
+  it('conserva el IVA de cada una de diez líneas al importar y listar', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(buildResult({
+      tax_totals: [{ tax_code: '01', tax_amount: '171', percent: '19' }],
+      invoice_lines: Array.from({ length: 10 }, (_, index) => ({
+        invoiced_quantity: 1, price_amount: 100, line_extension_amount: 100,
+        tax_totals: index < 9 ? [{ tax_code: '01', percent: '19', tax_amount: '19' }] : [],
+      })),
+    }), 'cufe-mixto');
+    const result = mapElectronicDocumentToListItem({
+      payload, createdAt: new Date(), updatedAt: new Date(),
+    } as ElectronicDocument);
+    expect(result.items.slice(0, 9).map((item) => item.ivaPercentage)).toEqual(Array(9).fill(19));
+    expect(result.items[9].ivaPercentage).toBeUndefined();
+    expect(result.items[9].suggestedTax).toBeNull();
+  });
+
   const consumptionTax = {
     tax_code: '04',
     tax_name: 'INC',

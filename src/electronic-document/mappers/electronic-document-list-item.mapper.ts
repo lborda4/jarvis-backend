@@ -159,6 +159,7 @@ function mapDocumentItems(
     quantity: item.cantidad > 0 ? item.cantidad : 1,
     unitValue: item.valorUnitario > 0 ? item.valorUnitario : item.total,
     total: item.total,
+    ivaPercentage: item.ivaPercentage,
     ...(item.codigo?.trim() ? { code: item.codigo.trim() } : {}),
     ...(item.accountMapping?.code?.trim()
       ? {

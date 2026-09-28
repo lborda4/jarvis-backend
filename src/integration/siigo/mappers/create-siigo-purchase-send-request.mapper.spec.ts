@@ -3,6 +3,26 @@ import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import { mapCreatePurchaseSendRequestToSiigo } from './create-siigo-purchase-send-request.mapper';
 
 describe('mapCreatePurchaseSendRequestToSiigo', () => {
+  it('conserva nueve líneas con IVA y una sin IVA al enviar', () => {
+    const request: CreateSiigoPurchaseSendRequestDto = {
+      documentId: 'doc-mixto',
+      date: '2026-09-28',
+      supplier: { identification: '900123456' },
+      provider_invoice: { prefix: 'FE', number: '123' },
+      items: Array.from({ length: 10 }, (_, index) => ({
+        code: '5105', quantity: 1, price: 100,
+        ...(index < 9 ? { taxes: [{ id: 19 }] } : {}),
+      })),
+      payments: [{ id: 1, value: 1171 }],
+    };
+    const result = mapCreatePurchaseSendRequestToSiigo(request, 1, [
+      { id: 19, name: 'IVA 19%', type: 'IVA', percentage: 19, active: true },
+    ]);
+    expect(result.items.slice(0, 9).every((item) => item.taxes?.[0]?.id === 19)).toBe(true);
+    expect(result.items[9].taxes ?? []).toEqual([]);
+    expect(result.payments[0].value).toBe(1171);
+  });
+
   it('redondea payments[0].value a pesos enteros aunque el precio del ítem tenga decimales reales', () => {
     // Mismo caso reportado en producción: item.price = 105882.33 con IVA
     // 5% da 111176.45 con redondeo a centavos, pero SIIGO valida
