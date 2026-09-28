@@ -1,5 +1,6 @@
 import {
   NextPymeInvoiceQueryParty,
+  NextPymeInvoiceQueryLineTax,
   NextPymeInvoiceQueryResult,
 } from '../../integration/jarvis/nextpyme/nextpyme-api.client';
 import { resolveCountryName } from '../helpers/dian-location.helper';
@@ -7,6 +8,15 @@ import {
   ElectronicDocumentPayload,
   ElectronicDocumentSupplier,
 } from '../interfaces/electronic-document-payload.interface';
+
+function resolveTaxType(tax: NextPymeInvoiceQueryLineTax): string {
+  const code = tax.tax_code?.trim();
+  if (code) {
+    return code === '04' ? 'INC' : code === '01' ? 'IVA' : code;
+  }
+  // Compatibilidad con respuestas anteriores sin tax_code/tax_name.
+  return tax.tax_name?.trim().toUpperCase() || 'IVA';
+}
 
 function toNumber(value: string | number | undefined): number {
   if (value === undefined || value === null || value === '') {
@@ -212,20 +222,24 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       : lineExtension > 0
         ? lineExtension
         : payable;
-  // El IVA sale de la suma de tax_totals a nivel de factura (no por línea,
+  // El IVA sale de sus entradas en tax_totals a nivel de factura (no por línea,
   // para no duplicar cuando hay varias líneas) — es el dato certificado por
   // la DIAN. Si el proveedor no lo envía, se cae al cálculo anterior
   // (tax_inclusive - tax_exclusive) como respaldo: no se usa payable - subtotal
   // porque payable ya tiene el descuento general restado, y esa resta se
   // "comía" el descuento como si fuera parte del IVA.
   const invoiceTaxTotals = result.tax_totals ?? [];
-  const taxTotalsSum = invoiceTaxTotals.reduce(
-    (sum, tax) => sum + toNumber(tax.tax_amount),
-    0,
-  );
+  const taxesByType = new Map<string, number>();
+  for (const tax of invoiceTaxTotals) {
+    const type = resolveTaxType(tax);
+    taxesByType.set(
+      type,
+      (taxesByType.get(type) ?? 0) + toNumber(tax.tax_amount),
+    );
+  }
   const iva =
     invoiceTaxTotals.length > 0
-      ? taxTotalsSum
+      ? toNumber(taxesByType.get('IVA'))
       : taxExclusive > 0 && taxInclusive > taxExclusive
         ? taxInclusive - taxExclusive
         : Math.max(payable + discount - subtotal, 0);
@@ -274,9 +288,10 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
         const quantity = toNumber(line.invoiced_quantity);
         const price = toNumber(line.price_amount);
         const total = toNumber(line.line_extension_amount);
-        // Se toma el primer impuesto de la línea como IVA — en Documento
-        // Soporte/Factura de compra las retenciones no vienen por ítem acá.
-        const firstTax = line.tax_totals?.[0];
+        // INC puede aparecer antes del IVA o ser el único impuesto de la línea.
+        const firstTax = line.tax_totals?.find(
+          (tax) => resolveTaxType(tax) === 'IVA',
+        );
         const ivaPercentage =
           firstTax?.percent !== undefined
             ? toNumber(firstTax.percent)
@@ -328,7 +343,15 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       currency: 'COP',
     },
     items,
-    taxes: iva > 0 ? [{ type: 'IVA', amount: iva }] : [],
+    taxes:
+      invoiceTaxTotals.length > 0
+        ? Array.from(taxesByType, ([type, amount]) => ({
+            type,
+            amount: toNumber(amount),
+          })).filter((tax) => tax.amount > 0)
+        : iva > 0
+          ? [{ type: 'IVA', amount: iva }]
+          : [],
     totals: {
       subtotal,
       total: payable,

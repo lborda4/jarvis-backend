@@ -254,9 +254,10 @@ export class SiigoController {
   })
   syncCatalogs(
     @CurrentUser() user: AuthenticatedUser,
+    @Query('force') force?: string,
   ): Promise<{ synced: true }> {
     return this.siigoCatalogSyncService
-      .syncCatalogs(getAuthenticatedCompanyId(user))
+      .syncCatalogs(getAuthenticatedCompanyId(user), force === 'true')
       .then(() => ({ synced: true }));
   }
 

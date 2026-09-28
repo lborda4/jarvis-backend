@@ -1,5 +1,7 @@
 import { NextPymeInvoiceQueryResult } from '../../integration/jarvis/nextpyme/nextpyme-api.client';
 import { mapNextPymeInvoiceQueryToElectronicDocumentPayload } from './nextpyme-invoice-query-to-payload.mapper';
+import { mapElectronicDocumentToListItem } from './electronic-document-list-item.mapper';
+import { ElectronicDocument } from '../entities/electronic-document.entity';
 
 function buildResult(
   overrides: Partial<NextPymeInvoiceQueryResult> = {},
@@ -30,6 +32,83 @@ function buildResult(
 }
 
 describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
+  const consumptionTax = {
+    tax_code: '04',
+    tax_name: 'INC',
+    tax_amount: '128.07',
+    percent: '4.00',
+    amount: '3201.75',
+  };
+
+  it('preserves INC separately through the stored JSON payload and list response', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        legal_monetary_totals: {
+          tax_exclusive_amount: '3201.75',
+          tax_inclusive_amount: '3938.15',
+          payable_amount: '3938.15',
+        },
+        tax_totals: [consumptionTax, {
+          tax_code: '01', tax_name: 'IVA', tax_amount: '608.33', percent: '19',
+        }],
+        invoice_lines: [{ tax_totals: [consumptionTax, { tax_code: '01', percent: '19' }] }],
+      }),
+      'cufe-inc',
+    );
+    expect(payload.taxes).toEqual([
+      { type: 'INC', amount: 128.07 },
+      { type: 'IVA', amount: 608.33 },
+    ]);
+    expect(payload.totals).toEqual({ subtotal: 3201.75, total: 3938.15, iva: 608.33 });
+    expect(payload.items[0].ivaPercentage).toBe(19);
+    const document = {
+      payload: JSON.parse(JSON.stringify(payload)),
+      createdAt: new Date('2026-09-28T00:00:00Z'),
+      updatedAt: new Date('2026-09-28T00:00:00Z'),
+    } as ElectronicDocument;
+    const dto = mapElectronicDocumentToListItem(document);
+    expect(dto.documentConsumptionTax).toBe(128.07);
+    expect(dto.documentIva).toBe(608.33);
+    expect(dto.total).toBe(3938.15);
+  });
+
+  it('does not treat INC as IVA when it is the only tax', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        tax_totals: [consumptionTax],
+        invoice_lines: [{ tax_totals: [consumptionTax] }],
+      }), 'cufe-inc',
+    );
+    expect(payload.totals.iva).toBe(0);
+    expect(payload.items[0].ivaPercentage).toBeUndefined();
+    expect(payload.taxes).toEqual([{ type: 'INC', amount: 128.07 }]);
+  });
+
+  it('aggregates consumption tax at document level without counting line taxes again', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        tax_totals: [consumptionTax, { ...consumptionTax, tax_amount: '0.03' }],
+        invoice_lines: [{ tax_totals: [consumptionTax] }],
+      }), 'cufe-inc',
+    );
+    expect(payload.taxes).toEqual([{ type: 'INC', amount: 128.1 }]);
+  });
+
+  it.each([undefined, [{ ...consumptionTax, tax_amount: '0' }]])(
+    'returns zero consumption tax when absent or zero', (tax_totals) => {
+      const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+        buildResult({ tax_totals }), 'cufe-no-inc',
+      );
+      expect(payload.taxes.find((tax) => tax.type === 'INC')).toBeUndefined();
+      const document = {
+        payload,
+        createdAt: new Date('2026-09-28T00:00:00Z'),
+        updatedAt: new Date('2026-09-28T00:00:00Z'),
+      } as ElectronicDocument;
+      expect(mapElectronicDocumentToListItem(document).documentConsumptionTax).toBe(0);
+    },
+  );
+
   it('maps totals, items and supplier from a well-formed response', () => {
     const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       buildResult(),

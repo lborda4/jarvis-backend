@@ -229,6 +229,10 @@ export interface NextPymeInvoiceQueryParty {
 
 export interface NextPymeInvoiceQueryLineTax {
   tax_id?: number;
+  tax_code?: string;
+  tax_name?: string;
+  /** Base gravable; el valor del impuesto viene en tax_amount. */
+  amount?: string | number;
   tax_amount?: string | number;
   taxable_amount?: string | number;
   percent?: string | number;

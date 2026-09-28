@@ -11,9 +11,9 @@ export class SiigoCatalogSyncService {
     private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
   ) {}
 
-  async syncCatalogs(companyId: string): Promise<void> {
+  async syncCatalogs(companyId: string, force = false): Promise<void> {
     await this.siigoConfigurationCacheService.syncCatalogs(companyId);
-    await this.siigoCostCentersCatalogService.listCostCenters(companyId);
-    await this.siigoProductsCatalogService.listProducts(companyId);
+    await this.siigoCostCentersCatalogService.listCostCenters(companyId, force);
+    await this.siigoProductsCatalogService.listProducts(companyId, force);
   }
 }

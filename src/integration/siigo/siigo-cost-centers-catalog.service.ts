@@ -63,10 +63,12 @@ export class SiigoCostCentersCatalogService {
 
   async listCostCenters(
     companyId: string,
+    force = false,
   ): Promise<SiigoCostCenterCatalogItemDto[]> {
     const cached = this.memoryCacheByCompany.get(companyId);
 
     if (
+      !force &&
       cached &&
       Date.now() - cached.fetchedAt < SIIGO_COST_CENTERS_CACHE_TTL_MS
     ) {

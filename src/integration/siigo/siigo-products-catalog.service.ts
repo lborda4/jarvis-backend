@@ -31,10 +31,10 @@ export class SiigoProductsCatalogService {
     private readonly siigoHttpClient: SiigoHttpClient,
   ) {}
 
-  async listProducts(companyId: string): Promise<SiigoProductCatalogItemDto[]> {
+  async listProducts(companyId: string, force = false): Promise<SiigoProductCatalogItemDto[]> {
     const cached = this.memoryCacheByCompany.get(companyId);
 
-    if (cached && Date.now() - cached.fetchedAt < SIIGO_PRODUCTS_CACHE_TTL_MS) {
+    if (!force && cached && Date.now() - cached.fetchedAt < SIIGO_PRODUCTS_CACHE_TTL_MS) {
       return cached.items;
     }
 

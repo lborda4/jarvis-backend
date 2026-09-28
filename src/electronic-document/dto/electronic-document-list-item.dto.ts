@@ -30,6 +30,8 @@ export class ElectronicDocumentListItemDto {
   documentSubtotal: number;
   /** IVA certificado por la DIAN (suma de tax_totals de factura) — no recalcular desde items. */
   documentIva: number;
+  /** Impuesto al consumo certificado, ya incluido en total. */
+  documentConsumptionTax: number;
   total: number;
   status: string;
   electronicDocumentType: string | null;

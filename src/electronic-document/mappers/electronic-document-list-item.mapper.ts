@@ -111,6 +111,11 @@ export function mapElectronicDocumentToListItem(
       null,
     documentSubtotal: Number(document.payload?.totals?.subtotal ?? 0),
     documentIva: Number(document.payload?.totals?.iva ?? 0),
+    documentConsumptionTax: Math.round(
+      (document.payload?.taxes ?? [])
+        .filter((tax) => tax.type === 'INC')
+        .reduce((sum, tax) => sum + Number(tax.amount || 0), 0) * 100,
+    ) / 100,
     total: Number(document.payload?.totals?.total ?? 0),
     status: document.status,
     electronicDocumentType: document.electronicDocumentType,
