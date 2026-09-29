@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { getAuthenticatedCompanyId } from '../auth/helpers/authenticated-company.helper';
@@ -95,6 +95,21 @@ export class ProductsController {
     return this.productsService.listUnitMeasures(
       getAuthenticatedCompanyId(user),
     );
+  }
+
+  @Delete(':id')
+  removeProduct(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.productsService.remove(id, getAuthenticatedCompanyId(user));
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Actualiza un producto de la empresa.' })
+  updateProduct(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() request: CreateProductRequestDto,
+  ): Promise<CreateProductResponseDto> {
+    return this.productsService.update(id, request, getAuthenticatedCompanyId(user));
   }
 
   @Post()

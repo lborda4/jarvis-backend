@@ -297,8 +297,8 @@ export class InvoicesService {
       }),
     );
 
-    // Sin filas para procesar (Excel vacío o sin ninguna fila "Factura
-    // electrónica"/"Recibido"): se marca COMPLETED acá mismo, en la misma
+    // Sin filas para procesar (Excel vacío o sin documentos de los tipos
+    // admitidos del grupo "Recibido"): se marca COMPLETED acá mismo, en la misma
     // request, en vez de dejarlo en PENDING a la espera de que el worker en
     // segundo plano lo descubra en su próximo tick. Antes esto quedaba
     // PENDING con 0 filas — el frontend mostraba "0 de 0" mientras esperaba

@@ -6,6 +6,7 @@ import { resolveSupportDocumentRetentionPlacement } from '../helpers/siigo-suppo
 import { truncateSiigoObservations } from '../helpers/siigo-observations.helper';
 import {
   calculateSiigoSupportDocumentPaymentValue,
+  roundMoney,
   roundSiigoAmount,
 } from '../helpers/siigo-purchase-total.helper';
 import {
@@ -50,12 +51,18 @@ export function mapCreatePurchaseSendRequestToSiigo(
     taxesCatalog,
     {
       retentionIds: allRetentionIds,
-      // SIIGO valida /v1/purchases contra un total en pesos enteros.
-      roundAmount: roundSiigoAmount,
+      taxIncluded: request.tax_included === true,
+      // Los descuentos por línea requieren conservar sus bases a centavos.
+      // Mantener el comportamiento existente para compras sin descuentos.
+      roundAmount: request.tax_included === true || items.some((item) => (item.discount ?? 0) > 0)
+        ? roundMoney
+        : roundSiigoAmount,
     },
   );
 
   return {
+    discount_type: 'Value',
+    tax_included: request.tax_included === true,
     document: { id: siigoDocumentTypeId },
     date: request.date.trim(),
     supplier: {

@@ -20,6 +20,9 @@ import {
 } from './dto/bold-cash-register.dto';
 import { BoldPaymentMethodsResponseDto } from './dto/bold-payment-methods.dto';
 import { BoldBindedTerminalsResponseDto } from './dto/bold-terminals.dto';
+import { ConfigService } from '@nestjs/config';
+import { AppConfiguration } from '../config/configuration';
+import { BoldCheckoutService } from './bold-checkout.service';
 
 @Controller('bold')
 export class BoldController {
@@ -27,6 +30,8 @@ export class BoldController {
     private readonly boldPaymentsService: BoldPaymentsService,
     private readonly boldTerminalsService: BoldTerminalsService,
     private readonly boldCashRegistersService: BoldCashRegistersService,
+    private readonly boldCheckoutService: BoldCheckoutService,
+    private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
   @Get('payments/payment-methods')
@@ -70,21 +75,13 @@ export class BoldController {
     return { item };
   }
 
-  /**
-   * Endpoint de prueba para confirmar que la extensión de Chrome (content
-   * script en Siigo POS) puede llegar hasta este backend — sin esto, no
-   * hay forma de distinguir "el backend no responde" de "el content
-   * script nunca llegó a intentar el fetch". @Public() porque quien llama
-   * es la extensión, no un usuario logueado en JARVIS con JWT.
-   */
+  /** Recepción pública de la extensión para la primera empresa integrada.
+   * Conserva la ruta existente; ahora solicita el cobro al datáfono Bold. */
   @Public()
   @Post('jarvis/test')
-  testJarvis(@Body() body: unknown) {
-    console.log('🤖 JARVIS recibió:', body);
-
-    return {
-      success: true,
-      received: body,
-    };
+  async testJarvis(@Body() body: unknown) {
+    const { userEmail } = this.configService.get('bold', { infer: true });
+    const result = await this.boldCheckoutService.createFromExtension(body, userEmail ?? '');
+    return { success: true, message: 'Solicitud de cobro enviada a Bold.', ...result };
   }
 }

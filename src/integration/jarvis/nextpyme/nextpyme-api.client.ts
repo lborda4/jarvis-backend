@@ -136,6 +136,7 @@ export interface NextPymeSupportDocumentCreatePayload {
 export interface NextPymeInvoiceCreatePayload {
   type_document_id: number;
   number: number;
+  resolution_number?: string;
   date?: string;
   time?: string;
   prefix?: string;
@@ -196,8 +197,6 @@ export interface NextPymeInvoiceCreatePayload {
     type_item_identification_id: number;
     price_amount: number | string;
     base_quantity: number | string;
-    type_generation_transmition_id?: number;
-    start_date?: string;
     tax_totals?: Array<{
       tax_id: number;
       tax_amount: string;
@@ -350,6 +349,44 @@ export class NextPymeApiClient {
     private readonly httpService: HttpService,
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
+
+  /** Cambia únicamente el ambiente de la empresa identificada por su token. */
+  async configureProductionEnvironment(companyToken: string): Promise<void> {
+    const token = companyToken?.trim();
+    if (!token) {
+      throw new ServiceUnavailableException(
+        'La empresa no tiene un token de NextPyme configurado.',
+      );
+    }
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.put<unknown>(
+          `${this.getBaseUrl()}/config/environment`,
+          { type_environment_id: 1 },
+          {
+            headers: this.buildAuthHeaders(token),
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        ),
+      );
+      const data = response.data as { success?: boolean } | null;
+      if (response.status < 200 || response.status >= 300 || data?.success === false) {
+        throw new BadGatewayException(
+          'NextPyme no permitió activar el ambiente de producción. Verifica el token de la empresa y vuelve a guardar la configuración.',
+        );
+      }
+    } catch (error) {
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
+      // No exponer errores Axios: pueden incluir Authorization y el token.
+      throw new BadGatewayException(
+        'No fue posible activar el ambiente de producción en NextPyme. Intenta guardar la configuración nuevamente.',
+      );
+    }
+  }
 
   async fetchMasterTable(
     table: string,
@@ -514,18 +551,29 @@ export class NextPymeApiClient {
 
   async createSupportDocument(
     payload: NextPymeSupportDocumentCreatePayload,
+    companyToken?: string,
   ): Promise<UnknownRecord> {
+    if (companyToken !== undefined && !companyToken.trim()) throw new ServiceUnavailableException("La empresa no tiene un token de NextPyme configurado.");
     return this.postDianUblDocument(
       'support-document',
       payload,
       'el documento soporte',
+      companyToken?.trim() ?? this.requireToken(),
+      companyToken !== undefined,
     );
   }
 
   async createInvoice(
     payload: NextPymeInvoiceCreatePayload,
+    companyToken: string,
   ): Promise<UnknownRecord> {
-    return this.postDianUblDocument('invoice', payload, 'la factura de venta');
+    const token = companyToken?.trim();
+    if (!token) {
+      throw new ServiceUnavailableException(
+        'La empresa no tiene un token de NextPyme configurado para emitir facturas de venta.',
+      );
+    }
+    return this.postDianUblDocument('invoice', payload, 'la factura de venta', token);
   }
 
   /**
@@ -541,8 +589,9 @@ export class NextPymeApiClient {
     endpointPath: string,
     payload: unknown,
     documentLabelForErrors: string,
+    token: string,
+    requireDianConfirmation = false,
   ): Promise<UnknownRecord> {
-    const token = this.requireToken();
     const baseUrl = this.getBaseUrl();
 
     this.logger.log(
@@ -554,6 +603,9 @@ export class NextPymeApiClient {
     );
 
     try {
+      if (endpointPath === 'invoice') {
+        console.log('[NextPyme invoice] Body antes de enviar:', JSON.stringify(payload, null, 2));
+      }
       const response = await firstValueFrom(
         this.httpService.post<unknown>(`${baseUrl}/${endpointPath}`, payload, {
           headers: this.buildAuthHeaders(token),
@@ -562,11 +614,18 @@ export class NextPymeApiClient {
         }),
       );
 
-      this.logger.log(
-        `[${endpointPath}] status=${response.status} respuesta=${this.preview(
-          response.data,
-        )}`,
-      );
+      if (endpointPath === 'invoice') {
+        console.log(
+          `[NextPyme invoice] Respuesta HTTP ${response.status}:`,
+          JSON.stringify(response.data, null, 2),
+        );
+      } else {
+        this.logger.log(
+          `[${endpointPath}] status=${response.status} respuesta=${this.preview(
+            response.data,
+          )}`,
+        );
+      }
 
       if (response.status < 200 || response.status >= 300) {
         const detail = this.extractErrorMessage(response.data);
@@ -577,6 +636,11 @@ export class NextPymeApiClient {
       }
 
       const data = (response.data as UnknownRecord) ?? {};
+      if ((endpointPath === 'invoice' || requireDianConfirmation) && data.success === false) {
+        throw new BadGatewayException(
+          this.extractErrorMessage(data) || `NextPyme rechazó ${documentLabelForErrors}.`,
+        );
+      }
       const dianValidation = parseDianValidationResult(data);
 
       if (dianValidation?.isValid === false) {
@@ -594,6 +658,12 @@ export class NextPymeApiClient {
 
         throw new BadGatewayException(
           `La DIAN rechazó ${documentLabelForErrors}: ${reason}`,
+        );
+      }
+
+      if ((endpointPath === 'invoice' || requireDianConfirmation) && dianValidation?.isValid !== true) {
+        throw new BadGatewayException(
+          `Hubo un error al crear ${documentLabelForErrors}: NextPyme no confirmó IsValid=true en la respuesta de la DIAN.`,
         );
       }
 

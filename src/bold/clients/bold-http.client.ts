@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { AppConfiguration } from '../../config/configuration';
 import { BoldPaymentMethodsResponseDto } from '../dto/bold-payment-methods.dto';
 import { BoldBindedTerminalsResponseDto } from '../dto/bold-terminals.dto';
+import { BoldCheckoutPayload, BoldCheckoutResponse } from '../dto/bold-checkout.dto';
 
 const BOLD_HTTP_TIMEOUT_MS = 15_000;
 
@@ -16,6 +17,34 @@ export class BoldHttpClient {
     private readonly httpService: HttpService,
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
+
+  async createCheckout(apiKey: string, payload: BoldCheckoutPayload): Promise<BoldCheckoutResponse> {
+    if (!apiKey?.trim()) {
+      throw new BadGatewayException('La empresa no tiene una llave Bold configurada.');
+    }
+    const config = this.configService.get('bold', { infer: true });
+    const baseUrl = (config.baseUrl || 'https://integrations.api.bold.co').replace(/\/$/, '');
+    try {
+      const response = await firstValueFrom(this.httpService.post<BoldCheckoutResponse>(
+        `${baseUrl}/payments/app-checkout`, payload, {
+          headers: { Authorization: `x-api-key ${apiKey.trim()}` },
+          timeout: BOLD_HTTP_TIMEOUT_MS,
+          validateStatus: () => true,
+        },
+      ));
+      if (response.status < 200 || response.status >= 300 ||
+          response.data?.success === false ||
+          (Array.isArray(response.data?.errors) && response.data.errors.length > 0) ||
+          !response.data || typeof response.data !== 'object') {
+        throw new BadGatewayException('Bold no aceptó la solicitud de cobro.');
+      }
+      return response.data;
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      // No reintentar: una respuesta perdida no implica que Bold no recibió el cobro.
+      throw new BadGatewayException('No se pudo confirmar la solicitud de cobro en Bold. Verifique el datáfono antes de volver a enviarla.');
+    }
+  }
 
   /** true solo cuando hay API key Y base URL configuradas — mientras Bold
    * no nos dé credenciales, los llamadores (BoldPaymentsService) usan esto

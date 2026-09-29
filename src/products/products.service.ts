@@ -117,11 +117,30 @@ export class ProductsService {
     return { sku: `${prefix}${next}` };
   }
 
-  async create(
+  async remove(id: string, companyId: string): Promise<{ success: boolean }> {
+    const result = await this.productsRepository.deleteByIdAndCompany(id, this.requireCompanyId(companyId));
+    if (!result.affected) throw new NotFoundException('El producto no existe para esta empresa.');
+    return { success: true };
+  }
+
+  async update(id: string, request: CreateProductRequestDto, companyId: string): Promise<CreateProductResponseDto> {
+    return this.saveProduct(request, companyId, id);
+  }
+
+  async create(request: CreateProductRequestDto, companyId: string): Promise<CreateProductResponseDto> {
+    return this.saveProduct(request, companyId);
+  }
+
+  private async saveProduct(
     request: CreateProductRequestDto,
     companyId: string,
+    productId?: string,
   ): Promise<CreateProductResponseDto> {
     const trimmedCompanyId = this.requireCompanyId(companyId);
+    if (productId !== undefined) {
+      const target = await this.productsRepository.findByIdAndCompany(productId, trimmedCompanyId);
+      if (!target) throw new NotFoundException('El producto no existe para esta empresa.');
+    }
 
     const sku = request.sku?.trim();
     if (!sku) {
@@ -165,13 +184,14 @@ export class ProductsService {
       trimmedCompanyId,
       sku,
     );
-    if (existing) {
+    if (existing && existing.id !== productId) {
       throw new ConflictException('Ya existe un producto con ese código / SKU.');
     }
 
     const priceLists = this.buildPriceLists(request);
 
     const product = this.productsRepository.create({
+      ...(productId !== undefined ? { id: productId } : {}),
       companyId: trimmedCompanyId,
       categoryId,
       sku,
@@ -184,7 +204,9 @@ export class ProductsService {
       priceLists,
     });
 
-    const saved = await this.productsRepository.save(product);
+    const saved = productId !== undefined
+      ? await this.productsRepository.replace(product)
+      : await this.productsRepository.save(product);
     const full =
       (await this.productsRepository.findByIdAndCompany(
         saved.id,

@@ -3,6 +3,7 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ElectronicDocumentService } from './electronic-document.service';
 import { ElectronicDocumentStatus } from './enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
+import { mapElectronicDocumentToListItem } from './mappers/electronic-document-list-item.mapper';
 
 function buildQueryRunnerStub() {
   return {
@@ -79,6 +80,49 @@ function buildDeleteBatchService(documents: Array<{ id: string; status: Electron
 
   return { service, electronicDocumentsRepository };
 }
+
+it('guarda el producto SIIGO separado del código original y lo expone al recargar', async () => {
+  const { service, electronicDocumentsRepository } = buildService({
+    id: 'doc-product', companyId: 'company-1',
+    status: ElectronicDocumentStatus.PENDING, siigoPurchaseId: null,
+  });
+  electronicDocumentsRepository.findById.mockResolvedValue({
+    id: 'doc-product', companyId: 'company-1', status: ElectronicDocumentStatus.PENDING,
+    createdAt: new Date(), updatedAt: new Date(),
+    payload: { invoice: {}, items: [{
+      descripcion: 'Artículo proveedor', codigo: 'SKU-PROVEEDOR',
+      cantidad: 1, valorUnitario: 100, total: 100, itemType: 'Product',
+      aiSuggestion: { product: { code: 'SIIGO-1', name: 'Producto SIIGO' }, confidence: 90 },
+    }] },
+  });
+  await service.saveDraft('doc-product', 'company-1', {
+    items: [{ tipo: 'Product', producto: 'SIIGO-1', description: 'Artículo proveedor',
+      quantity: 1, unitValue: 100, discount: 0 }], retentionTaxIds: [],
+  });
+  const saved = electronicDocumentsRepository.save.mock.calls[0][0];
+  expect(saved.payload.items[0].codigo).toBe('SKU-PROVEEDOR');
+  expect(saved.payload.items[0].productMapping).toEqual({ code: 'SIIGO-1' });
+  const response = mapElectronicDocumentToListItem(saved);
+  expect(response.items[0].code).toBe('SKU-PROVEEDOR');
+  expect(response.items[0].productMapping).toEqual({ code: 'SIIGO-1' });
+});
+
+it('conserva precios y descuentos originales al guardar cambios monetarios en el borrador', async () => {
+  const { service, electronicDocumentsRepository } = buildService({
+    id: 'doc-discount', companyId: 'company-1', status: ElectronicDocumentStatus.PENDING, siigoPurchaseId: null,
+  });
+  electronicDocumentsRepository.findById.mockResolvedValue({
+    id: 'doc-discount', companyId: 'company-1', status: ElectronicDocumentStatus.PENDING,
+    createdAt: new Date(), updatedAt: new Date(),
+    payload: { invoice: {}, items: [{ descripcion: 'Producto', cantidad: 1, valorUnitario: 39900, discount: 3990, total: 30176.47, ivaPercentage: 19 }] },
+  });
+  await service.saveDraft('doc-discount', 'company-1', {
+    items: [{ tipo: 'Account', producto: '5105', description: 'Producto', quantity: 2, unitValue: 10000, discount: 0 }], retentionTaxIds: [],
+  });
+  const saved = electronicDocumentsRepository.save.mock.calls[0][0];
+  expect(saved.payload.items[0]).toMatchObject({ cantidad: 1, valorUnitario: 39900, discount: 3990, total: 30176.47, ivaPercentage: 19 });
+  expect(saved.draft.items[0]).toMatchObject({ quantity: 2, unitValue: 10000, discount: 0 });
+});
 
 describe('ElectronicDocumentService.deleteLocalDocuments', () => {
   it('borra en un solo lote los documentos que no están en estado lista y omite los ya creados en SIIGO', async () => {

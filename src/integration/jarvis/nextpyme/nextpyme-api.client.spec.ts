@@ -18,7 +18,7 @@ function buildClient(configOverrides: Record<string, unknown> = {}) {
     ...configOverrides,
   };
 
-  const httpService = { request: jest.fn() };
+  const httpService = { request: jest.fn(), put: jest.fn(), post: jest.fn() };
   const configService = {
     get: jest.fn((key: string) => config[key]),
   };
@@ -30,6 +30,107 @@ function buildClient(configOverrides: Record<string, unknown> = {}) {
 
   return { client, httpService };
 }
+
+describe('NextPymeApiClient.configureProductionEnvironment', () => {
+  it('activa producción usando únicamente el Bearer de la empresa', async () => {
+    const { client, httpService } = buildClient({
+      'nextPyme.baseUrl': 'https://api.nextpyme.plus/api/ubl2.1/',
+    });
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: true } }));
+    await client.configureProductionEnvironment(' company-token ');
+    expect(httpService.put).toHaveBeenCalledWith(
+      'https://api.nextpyme.plus/api/ubl2.1/config/environment',
+      { type_environment_id: 1 },
+      expect.objectContaining({
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer company-token',
+        },
+        timeout: 30000,
+      }),
+    );
+  });
+
+  it('no usa el token global si falta el de la empresa', async () => {
+    const { client, httpService } = buildClient();
+    await expect(client.configureProductionEnvironment(' ')).rejects.toThrow('token');
+    expect(httpService.put).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 422, 500])('rechaza HTTP %s sin exponer el cuerpo de respuesta', async (status) => {
+    const { client, httpService } = buildClient();
+    httpService.put.mockReturnValue(of({ status, data: { message: 'private-token' } }));
+    await expect(client.configureProductionEnvironment('private-token')).rejects.toThrow(
+      'NextPyme no permitió activar el ambiente de producción.',
+    );
+  });
+
+  it('rechaza una respuesta de negocio fallida aunque sea HTTP 200', async () => {
+    const { client, httpService } = buildClient();
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: false } }));
+    await expect(client.configureProductionEnvironment('company-token')).rejects.toThrow('no permitió');
+  });
+
+  it('reporta errores de conexión sin exponer credenciales', async () => {
+    const { client, httpService } = buildClient();
+    httpService.put.mockReturnValue(throwError(() => new Error('Bearer private-token')));
+    await expect(client.configureProductionEnvironment('private-token')).rejects.toThrow(
+      'No fue posible activar el ambiente de producción en NextPyme.',
+    );
+  });
+});
+
+describe('NextPymeApiClient.createInvoice', () => {
+  const payload = { number: 1, type_document_id: 1, invoice_lines: [] } as any;
+  let consoleSpy: jest.SpyInstance;
+  beforeEach(() => { consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined); });
+  afterEach(() => { consoleSpy.mockRestore(); });
+
+  it('usa el token de cada empresa sin reemplazarlo por el global', async () => {
+    const { client, httpService } = buildClient();
+    const data = { success: true, ResponseDian: { IsValid: 'true' } };
+    httpService.post.mockReturnValue(of({ status: 200, data }));
+    await client.createInvoice(payload, ' company-a ');
+    await client.createInvoice(payload, 'company-b');
+    expect(httpService.post.mock.calls.map((call) => call[2].headers.Authorization))
+      .toEqual(['Bearer company-a', 'Bearer company-b']);
+    expect(httpService.post.mock.calls[0][0]).toBe('https://nextpyme.example/invoice');
+    expect(consoleSpy).toHaveBeenCalledWith('[NextPyme invoice] Body antes de enviar:', JSON.stringify(payload, null, 2));
+    expect(consoleSpy).toHaveBeenCalledWith('[NextPyme invoice] Respuesta HTTP 200:', JSON.stringify(data, null, 2));
+    expect(JSON.stringify(consoleSpy.mock.calls)).not.toContain('company-a');
+  });
+
+  it.each([true, 'true'])('acepta únicamente validación positiva (%s)', async (isValid) => {
+    const { client, httpService } = buildClient();
+    const data = { success: true, ResponseDian: { Envelope: { Body: { SendBillSyncResponse: { SendBillSyncResult: { isValid } } } } } };
+    httpService.post.mockReturnValue(of({ status: 200, data }));
+    await expect(client.createInvoice(payload, 'company-token')).resolves.toEqual(data);
+  });
+
+  it.each([false, 'false', undefined, null, 'unknown', 1])('rechaza éxito HTTP sin validación positiva (%s)', async (IsValid) => {
+    const { client, httpService } = buildClient();
+    const data = { success: true, ResponseDian: { IsValid, ErrorMessage: { string: 'Regla: ZB01, Rechazo: Fallo en el Schema XML' } } };
+    httpService.post.mockReturnValue(of({ status: 200, data }));
+    await expect(client.createInvoice(payload, 'company-token')).rejects.toThrow(
+      IsValid === false || IsValid === 'false' ? 'Regla: ZB01' : 'no confirmó IsValid=true',
+    );
+  });
+
+  it('no hace una llamada con el token global cuando falta el token propio', async () => {
+    const { client, httpService } = buildClient();
+    await expect(client.createInvoice(payload, ' ')).rejects.toThrow('token');
+    expect(httpService.post).not.toHaveBeenCalled();
+  });
+
+  it.each([200, 403])('registra la respuesta de membresía y propaga el error HTTP %s', async (status) => {
+    const { client, httpService } = buildClient();
+    const data = { success: false, message: 'La empresa ha llegado al limite de tiempo/documentos del plan' };
+    httpService.post.mockReturnValue(of({ status, data }));
+    await expect(client.createInvoice(payload, 'company-token')).rejects.toThrow(data.message);
+    expect(consoleSpy).toHaveBeenCalledWith(`[NextPyme invoice] Respuesta HTTP ${status}:`, JSON.stringify(data, null, 2));
+  });
+});
 
 /** Corre `getInvoiceByCufe` con fake timers para no esperar en tiempo real
  * los backoffs (1s/3s/9s...) entre reintentos. */
@@ -282,5 +383,31 @@ describe('NextPymeApiClient.getInvoiceXmlByCufe', () => {
     const { client, httpService } = buildClient();
     httpService.request.mockReturnValue(throwError(() => new Error('secret')));
     await expect(client.getInvoiceXmlByCufe('cufe', 'company-token')).rejects.toThrow('No se pudo obtener el XML');
+  });
+});
+
+describe('NextPymeApiClient.createSupportDocument con token de empresa', () => {
+  const payload = { number: 1, type_document_id: 11, invoice_lines: [] } as any;
+  it('usa support-document y el token de la empresa, sin el token global', async () => {
+    const { client, httpService } = buildClient();
+    const data = { success: true, ResponseDian: { IsValid: 'true' }, cuds: 'support-code' };
+    httpService.post.mockReturnValue(of({ status: 200, data }));
+    await expect(client.createSupportDocument(payload, ' company-a ')).resolves.toEqual(data);
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/support-document', payload, expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-a' }) }));
+  });
+  it.each([false, 'false', undefined])('no acepta un documento sin validacion positiva (%s)', async (IsValid) => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { success: true, ResponseDian: { IsValid } } }));
+    await expect(client.createSupportDocument(payload, 'company-a')).rejects.toThrow();
+  });
+  it('no envia con un token vacio ni lo reemplaza por el global', async () => {
+    const { client, httpService } = buildClient();
+    await expect(client.createSupportDocument(payload, ' ')).rejects.toThrow('token');
+    expect(httpService.post).not.toHaveBeenCalled();
+  });
+  it('rechaza success false aunque el servidor responda HTTP 200', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { success: false } }));
+    await expect(client.createSupportDocument(payload, 'company-a')).rejects.toThrow();
   });
 });

@@ -155,7 +155,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'Configurar token de NextPyme de la empresa',
     description:
-      'Guarda el token Bearer propio de NextPyme para esta empresa (usado al consultar factura de compra por CUFE). Vacío/null para volver a usar el token global.',
+      'Activa el ambiente de producción en NextPyme con el token propio de la empresa y lo guarda. Vacío/null elimina el token propio sin cambiar el ambiente del token global.',
   })
   updateNextPymeToken(
     @CurrentUser() user: AuthenticatedUser,

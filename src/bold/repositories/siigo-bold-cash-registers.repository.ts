@@ -14,6 +14,14 @@ export class SiigoBoldCashRegistersRepository {
     return this.repository.find({ where: { companyId } });
   }
 
+  findByCompanyAndName(companyId: string, cashRegisterName: string): Promise<SiigoBoldCashRegister[]> {
+    return this.repository.find({ where: { companyId, cashRegisterName } });
+  }
+
+  findByName(cashRegisterName: string): Promise<SiigoBoldCashRegister[]> {
+    return this.repository.find({ where: { cashRegisterName } });
+  }
+
   findOneByKey(
     companyId: string,
     branchOfficeId: number,

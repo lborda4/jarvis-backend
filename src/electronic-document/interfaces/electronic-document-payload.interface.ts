@@ -20,6 +20,11 @@ export interface AiSuggestionItemSnapshot {
 }
 
 export interface AiSuggestionSnapshot {
+  /** Costo acumulado de las peticiones del documento, en USD. */
+  totalCost?: number;
+  currency?: 'USD';
+  /** Costo por aiRequestId: permite reemplazar el costo definitivo sin duplicarlo. */
+  costsByRequest?: Record<string, number>;
   /** Tipo elegido en el paso 1 de la clasificación automática. */
   itemType?: 'Account' | 'Product' | null;
   account?: { code: string; name: string } | null;
@@ -108,7 +113,8 @@ export interface ElectronicDocumentPayload {
    * opcional. */
   costCenterCode?: string;
   siigoSendConfiguration?: SupplierPreferenceSnapshot | null;
-  /** @deprecated Read-only compatibility. New AI suggestions live in items[].aiSuggestion. */
+  /** Costos de IA del documento y compatibilidad con sugerencias antiguas.
+   * Las cuentas/productos nuevos viven en items[].aiSuggestion. */
   aiSuggestion?: AiSuggestionSnapshot | null;
   /** Retenciones sugeridas por el vendedor, certificadas en la factura DIAN
    * original — ver ElectronicDocumentWithholding. Usado como ÚLTIMO

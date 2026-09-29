@@ -1,0 +1,313 @@
+{
+  "legal_monetary_totals": {
+    "line_extension_amount": "407823.53",
+    "tax_exclusive_amount": "407823.53",
+    "tax_inclusive_amount": "485310.00",
+    "allowance_total_amount": "0.00",
+    "charge_total_amount": "0.00",
+    "payable_amount": "485310.00"
+  },
+  "tax_totals": [
+    {
+      "tax_code": "01",
+      "tax_name": "IVA",
+      "tax_amount": "77486.47",
+      "percent": "19.00",
+      "amount": "407823.53"
+    }
+  ],
+  "invoice_lines": [
+    {
+      "description": "Item 1",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "30176.47",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "3990.00",
+          "base_amount": "39900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5733.53",
+          "percent": "19.00",
+          "amount": "30176.47"
+        }
+      ],
+      "price_amount": "39900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 2",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "30176.47",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "3990.00",
+          "base_amount": "39900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5733.53",
+          "percent": "19.00",
+          "amount": "30176.47"
+        }
+      ],
+      "price_amount": "39900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 3",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "30176.47",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "3990.00",
+          "base_amount": "39900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5733.53",
+          "percent": "19.00",
+          "amount": "30176.47"
+        }
+      ],
+      "price_amount": "39900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 4",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "30176.47",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "3990.00",
+          "base_amount": "39900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5733.53",
+          "percent": "19.00",
+          "amount": "30176.47"
+        }
+      ],
+      "price_amount": "39900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 5",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "52865.55",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "6990.00",
+          "base_amount": "69900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "10044.45",
+          "percent": "19.00",
+          "amount": "52865.55"
+        }
+      ],
+      "price_amount": "69900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 6",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "45302.52",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "5990.00",
+          "base_amount": "59900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "8607.48",
+          "percent": "19.00",
+          "amount": "45302.52"
+        }
+      ],
+      "price_amount": "59900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 7",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "30176.47",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "3990.00",
+          "base_amount": "39900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5733.53",
+          "percent": "19.00",
+          "amount": "30176.47"
+        }
+      ],
+      "price_amount": "39900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 8",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "60428.57",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "7990.00",
+          "base_amount": "79900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "11481.43",
+          "percent": "19.00",
+          "amount": "60428.57"
+        }
+      ],
+      "price_amount": "79900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 9",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "45302.52",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "5990.00",
+          "base_amount": "59900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "8607.48",
+          "percent": "19.00",
+          "amount": "45302.52"
+        }
+      ],
+      "price_amount": "59900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 10",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "22613.45",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "2990.00",
+          "base_amount": "29900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "4296.55",
+          "percent": "19.00",
+          "amount": "22613.45"
+        }
+      ],
+      "price_amount": "29900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 11",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "30176.47",
+      "allowance_charges": [
+        {
+          "discount_id": null,
+          "charge_indicator": "false",
+          "allowance_charge_reason": "0",
+          "amount": "3990.00",
+          "base_amount": "39900.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5733.53",
+          "percent": "19.00",
+          "amount": "30176.47"
+        }
+      ],
+      "price_amount": "39900.00",
+      "base_quantity": "1"
+    },
+    {
+      "description": "Item 12",
+      "invoiced_quantity": "1",
+      "line_extension_amount": "252.10",
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "47.90",
+          "percent": "19.00",
+          "amount": "252.10"
+        }
+      ],
+      "price_amount": "300.00",
+      "base_quantity": "1"
+    }
+  ]
+}

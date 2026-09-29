@@ -61,6 +61,14 @@ export class JarvisTercerosRepository {
     return this.repository.create(data);
   }
 
+  findByIdAndCompany(id: string, companyId: string): Promise<JarvisTercero | null> {
+    return this.repository.findOne({ where: { id, companyId } });
+  }
+
+  deleteByIdAndCompany(id: string, companyId: string) {
+    return this.repository.delete({ id, companyId });
+  }
+
   save(tercero: JarvisTercero): Promise<JarvisTercero> {
     return this.repository.save(tercero);
   }

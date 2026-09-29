@@ -1,5 +1,6 @@
 import { BoundedWorkQueue } from '../../common/helpers/bounded-work-queue';
 import { resolveItemAiSuggestion } from '../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
+import { readAiCost } from '../../electronic-document/helpers/electronic-document-ai-cost.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import {
   BadGatewayException,
@@ -202,10 +203,12 @@ export class SiigoPurchaseAiClassificationService {
           );
         const { aiSuggestion: _legacySuggestion, ...payload } =
           documentAfterTypeClassification.payload;
+        const cost = readAiCost(_legacySuggestion);
         await this.electronicDocumentService.updatePayload(
           documentId,
           {
             ...payload,
+            ...(cost ? { aiSuggestion: { retentions: [], ...cost } } : {}),
             items: payload.items.map((item) => ({ ...item, itemType })),
           },
           companyId,

@@ -6,6 +6,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BoldCashRegistersService } from './bold-cash-registers.service';
 import { BoldController } from './bold.controller';
 import { BoldPaymentsService } from './bold-payments.service';
+import { BoldCheckoutService } from './bold-checkout.service';
 import { BoldTerminalsService } from './bold-terminals.service';
 import { BoldHttpClient } from './clients/bold-http.client';
 import { SiigoBoldCashRegister } from './entities/siigo-bold-cash-register.entity';
@@ -23,6 +24,7 @@ import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash
   ],
   controllers: [BoldController],
   providers: [
+    BoldCheckoutService,
     BoldPaymentsService,
     BoldTerminalsService,
     BoldCashRegistersService,

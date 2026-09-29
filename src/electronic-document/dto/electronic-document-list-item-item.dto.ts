@@ -13,6 +13,8 @@ export class ElectronicDocumentListItemItemDto {
   ivaPercentage?: number;
   /** Código del producto/ítem tal como viene en la factura original (DIAN/NextPyme). */
   code?: string;
+  /** Producto SIIGO confirmado; no es el código del proveedor. */
+  productMapping?: { code: string };
   /** Cuenta que el contador asignó y guardó en payload.items.accountMapping. */
   accountMapping?: { code: string; description?: string } | null;
   /** Tipo SIIGO guardado en el borrador (Account / Product / FixedAsset). */

@@ -13,6 +13,7 @@ export class CreateSiigoPurchaseSendProviderInvoiceDto {
 }
 
 export class CreateSiigoPurchaseSendRequestDto {
+  tax_included?: boolean;
   documentId: string;
   date: string;
   supplier: CreateSiigoSupportDocumentSupplierDto;

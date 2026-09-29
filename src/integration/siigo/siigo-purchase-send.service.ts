@@ -21,8 +21,6 @@ import {
 } from './helpers/siigo-error.helper';
 import {
   applySiigoCorrectedPaymentsTotal,
-  areItemPricesTaxInclusive,
-  convertTaxInclusiveUnitPrice,
 } from './helpers/siigo-purchase-total.helper';
 import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
 import { SiigoPurchaseRequestDto } from './dto/siigo-purchase-request.dto';
@@ -109,7 +107,8 @@ export class SiigoPurchaseSendService {
     );
 
     const payload = electronicDocument.payload;
-    convertInclusiveRequestPricesIfNeeded(request, payload, taxesCatalog);
+    // El formulario indica explícitamente si envía precios con IVA incluido.
+    // Cada línea conserva su impuesto; no inferirlo con el total del documento.
     const siigoPayload = mapCreatePurchaseSendRequestToSiigo(
       request,
       purchaseConfig.documentId,
@@ -407,42 +406,6 @@ export class SiigoPurchaseSendService {
 }
 
 const GENERIC_ITEM_DESCRIPTION = 'Ítem importado';
-
-function convertInclusiveRequestPricesIfNeeded(
-  request: CreateSiigoPurchaseSendRequestDto,
-  payload:
-    | {
-        totals?: { subtotal?: number; total?: number };
-      }
-    | undefined,
-  taxesCatalog: Array<{ id: number; type: string; percentage: number }>,
-): void {
-  const itemsGross = request.items.reduce((sum, item) => {
-    const quantity = item.quantity > 0 ? item.quantity : 1;
-    const discount = item.discount && item.discount > 0 ? item.discount : 0;
-    return sum + quantity * item.price - discount;
-  }, 0);
-
-  if (
-    !areItemPricesTaxInclusive({
-      itemsGross,
-      subtotal: payload?.totals?.subtotal ?? 0,
-      total: payload?.totals?.total ?? 0,
-    })
-  ) {
-    return;
-  }
-
-  for (const item of request.items) {
-    const taxRate = taxesCatalog.find(
-      (tax) => tax.type.trim().toLowerCase() === 'iva' &&
-        item.taxes?.some((selected) => selected.id === tax.id),
-    )?.percentage;
-    if (taxRate && taxRate > 0) {
-      item.price = convertTaxInclusiveUnitPrice(item.price, taxRate);
-    }
-  }
-}
 
 function applyPayloadItemDescriptions(
   siigoItems: SiigoPurchaseRequestDto['items'],

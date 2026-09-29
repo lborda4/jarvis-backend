@@ -14,6 +14,8 @@ export interface ElectronicDocumentItem {
   /** Sugerencia de IA de esta línea; independiente de la asignación contable. */
   aiSuggestion?: AiSuggestionItemSnapshot | null;
   accountMapping?: ElectronicDocumentItemAccountMapping;
+  /** Producto SIIGO confirmado en el borrador; independiente del SKU original. */
+  productMapping?: { code: string };
   /** Tipo SIIGO que eligió el contador al guardar el borrador. */
   itemType?: 'Product' | 'FixedAsset' | 'Account';
   /** % de IVA del ítem tal como viene en la factura original (DIAN/NextPyme). */

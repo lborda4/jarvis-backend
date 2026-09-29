@@ -21,6 +21,7 @@ export interface SiigoLineItemForTotal {
 }
 
 export interface CalculateSiigoDocumentTotalOptions {
+  taxIncluded?: boolean;
   discountType?: SiigoDiscountType;
   globalDiscount?: number;
   taxesById?: Map<
@@ -175,7 +176,16 @@ function calculateSiigoLineBreakdown(
     discountType,
     roundAmount,
   );
-  const baseValue = roundAmount(lineGross - lineDiscount);
+  let baseValue = roundAmount(lineGross - lineDiscount);
+  if (options.taxIncluded && options.taxesById) {
+    const rate = (item.taxes ?? []).reduce((sum, ref) => {
+      const tax = options.taxesById!.get(ref.id);
+      return tax && !isRetentionTaxType(tax.type) && tax.percentage > 0 ? sum + tax.percentage : sum;
+    }, 0);
+    const lineTotal = baseValue;
+    baseValue = roundAmount(lineTotal / (1 + rate / 100));
+    return { baseValue, taxTotal: roundAmount(lineTotal - baseValue), lineTotal };
+  }
   const taxRate = resolveSiigoTaxRate(options);
   let taxTotal = 0;
 
@@ -352,7 +362,7 @@ export function calculateSiigoPurchasePaymentValue(
 
 export interface CalculateSiigoSupportDocumentTotalOptions extends Pick<
   CalculateSiigoDocumentTotalOptions,
-  'discountType' | 'globalDiscount' | 'taxRate' | 'subtotal' | 'taxAmount'
+  'discountType' | 'globalDiscount' | 'taxRate' | 'subtotal' | 'taxAmount' | 'taxIncluded'
 > {
   retentionIds?: number[];
   /**

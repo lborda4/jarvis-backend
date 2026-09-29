@@ -24,6 +24,10 @@ export function summarizeDocumentAiSuggestion(
 ): AiSuggestionSnapshot | null {
   if (!payload) return null;
   const items = payload.items ?? [];
+  const root = payload.aiSuggestion;
+  if (!items.some((item) => item.aiSuggestion !== undefined) &&
+      root?.costsByRequest && root.confidence == null && !root.account &&
+      !root.product && !root.itemType && !root.items) return null;
   if (!items.some((item) => item.aiSuggestion !== undefined))
     return payload.aiSuggestion ?? null;
   const suggestions = items.map((_, index) =>

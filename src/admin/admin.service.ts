@@ -23,6 +23,7 @@ import { buildJarvisCredentialsSeed } from '../integration/jarvis/helpers/jarvis
 import { JarvisDocumentType } from '../integration/jarvis/enums/jarvis-document-type.enum';
 import { NextPymeMasterCatalogService } from '../integration/jarvis/nextpyme/nextpyme-master-catalog.service';
 import { NextPymeRutService } from '../integration/jarvis/nextpyme-rut.service';
+import { NextPymeApiClient } from '../integration/jarvis/nextpyme/nextpyme-api.client';
 import { IntegrationsRepository } from '../integration/repositories/integrations.repository';
 import { Plan } from '../plan/entities/plan.entity';
 import { SubscriptionStatus } from '../plan/enums/subscription-status.enum';
@@ -68,6 +69,7 @@ export class AdminService {
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
     private readonly nextPymeRutService: NextPymeRutService,
+    private readonly nextPymeApiClient: NextPymeApiClient,
   ) {}
 
   /**
@@ -235,6 +237,11 @@ export class AdminService {
       throw new ConflictException(`Ya existe una empresa con el NIT ${nit}.`);
     }
 
+    const nextPymeToken = request?.nextPymeToken?.trim() || null;
+    if (nextPymeToken) {
+      await this.nextPymeApiClient.configureProductionEnvironment(nextPymeToken);
+    }
+
     const company = await this.dataSource.transaction(async (manager) => {
       const companiesRepository = manager.getRepository(Company);
       const userCompaniesRepository = manager.getRepository(UserCompany);
@@ -250,7 +257,7 @@ export class AdminService {
           description: validateCompanyAiContext({ description: request?.description ?? '', rules: [] }),
           cityCode: request?.cityCode?.trim() || null,
           cityName: request?.cityName?.trim() || null,
-          nextPymeToken: request?.nextPymeToken?.trim() || null,
+          nextPymeToken,
         }),
       );
 
@@ -360,7 +367,11 @@ export class AdminService {
       throw new NotFoundException('Empresa no encontrada.');
     }
 
-    company.nextPymeToken = request.nextPymeToken?.trim() || null;
+    const nextPymeToken = request.nextPymeToken?.trim() || null;
+    if (nextPymeToken) {
+      await this.nextPymeApiClient.configureProductionEnvironment(nextPymeToken);
+    }
+    company.nextPymeToken = nextPymeToken;
     const saved = await this.companiesRepository.save(company);
 
     return {

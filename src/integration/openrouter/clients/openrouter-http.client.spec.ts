@@ -3,17 +3,19 @@ import { OpenRouterHttpClient } from './openrouter-http.client';
 
 describe('OpenRouterHttpClient response validation', () => {
   const context = { purpose: 'test' };
-  function setup(content: string, finishReason = 'stop') {
+  function setup(content: string, finishReason = 'stop', cost?: number) {
     const logs = {
       createPending: jest.fn().mockResolvedValue(undefined),
       markCompleted: jest.fn().mockResolvedValue(undefined),
       markFailed: jest.fn().mockResolvedValue(undefined),
+      recordCost: jest.fn().mockResolvedValue(undefined),
     };
     const http = {
       post: jest.fn().mockReturnValue(
         of({
           status: 200,
           data: {
+            usage: { cost },
             choices: [{ finish_reason: finishReason, message: { content } }],
           },
         }),
@@ -55,5 +57,13 @@ describe('OpenRouterHttpClient response validation', () => {
     ).resolves.toMatchObject({ content: '{"itemType":"Account"}' });
     expect(logs.markCompleted).toHaveBeenCalledTimes(1);
     expect(logs.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('guarda el cargo incluso si la respuesta no es un JSON utilizable', async () => {
+    const { client, logs } = setup('invalid', 'stop', 0.00001234);
+    await expect(client.createChatCompletion([], {
+      context: { purpose: 'test', aiRequestId: 'req-1', documentId: 'doc-1', companyId: 'company-1' },
+    })).rejects.toThrow();
+    expect(logs.recordCost).toHaveBeenCalledWith('req-1', 0.00001234);
   });
 });

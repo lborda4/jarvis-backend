@@ -1,7 +1,10 @@
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { JarvisTercerosService } from './jarvis-terceros.service';
 import { JarvisDocumentType } from './enums/jarvis-document-type.enum';
 
 function buildService(overrides: {
+  findByIdAndCompany?: jest.Mock;
+  deleteByIdAndCompany?: jest.Mock;
   findPendingSupplierCandidates?: jest.Mock;
   lookupDocument?: jest.Mock;
   findByCompanyAndDocument?: jest.Mock;
@@ -18,6 +21,8 @@ function buildService(overrides: {
       jest.fn().mockResolvedValue({ id: 'integration-1', credentials: null }),
   };
   const jarvisTercerosRepository = {
+    findByIdAndCompany: overrides.findByIdAndCompany ?? jest.fn().mockResolvedValue(null),
+    deleteByIdAndCompany: overrides.deleteByIdAndCompany ?? jest.fn().mockResolvedValue({ affected: 0 }),
     findByCompanyAndDocument:
       overrides.findByCompanyAndDocument ?? jest.fn().mockResolvedValue(null),
     save: overrides.save ?? jest.fn().mockImplementation((entity) => entity),
@@ -399,5 +404,44 @@ describe('JarvisTercerosService.lookupNit', () => {
       '900123456',
       undefined,
     );
+  });
+});
+
+describe('JarvisTercerosService edit and delete', () => {
+  const request = { document_type: JarvisDocumentType.CC, document_number: '1016100663', name: 'Nombre actualizado' };
+  const target = () => ({ id: 'third-1', companyId: 'company-1', createdAt: new Date(), updatedAt: new Date(), email: 'old@example.com' });
+  it('actualiza el tercero existente, conserva su identidad y permite vaciar contacto', async () => {
+    const { service, jarvisTercerosRepository } = buildService({
+      findByIdAndCompany: jest.fn().mockResolvedValue(target()),
+      findByCompanyAndDocument: jest.fn().mockResolvedValue({ id: 'third-1' }),
+    });
+    const result = await service.update('third-1', request, 'company-1');
+    expect(result.tercero).toMatchObject({ id: 'third-1', name: request.name, email: null });
+    expect(jarvisTercerosRepository.create).not.toHaveBeenCalled();
+    expect(jarvisTercerosRepository.findByIdAndCompany).toHaveBeenCalledWith('third-1', 'company-1');
+  });
+  it('no modifica un tercero ajeno o inexistente', async () => {
+    const { service, jarvisTercerosRepository } = buildService({});
+    await expect(service.update('foreign', request, 'company-1')).rejects.toBeInstanceOf(NotFoundException);
+    expect(jarvisTercerosRepository.save).not.toHaveBeenCalled();
+  });
+  it('rechaza un documento que ya tiene otro tercero', async () => {
+    const { service, jarvisTercerosRepository } = buildService({
+      findByIdAndCompany: jest.fn().mockResolvedValue(target()),
+      findByCompanyAndDocument: jest.fn().mockResolvedValue({ id: 'other' }),
+    });
+    await expect(service.update('third-1', request, 'company-1')).rejects.toBeInstanceOf(ConflictException);
+    expect(jarvisTercerosRepository.save).not.toHaveBeenCalled();
+  });
+  it('elimina usando el id y la empresa activa', async () => {
+    const { service, jarvisTercerosRepository } = buildService({
+      deleteByIdAndCompany: jest.fn().mockResolvedValue({ affected: 1 }),
+    });
+    await expect(service.remove('third-1', 'company-1')).resolves.toEqual({ success: true });
+    expect(jarvisTercerosRepository.deleteByIdAndCompany).toHaveBeenCalledWith('third-1', 'company-1');
+  });
+  it('no informa exito al eliminar un tercero ajeno o inexistente', async () => {
+    const { service } = buildService({});
+    await expect(service.remove('foreign', 'company-1')).rejects.toBeInstanceOf(NotFoundException);
   });
 });

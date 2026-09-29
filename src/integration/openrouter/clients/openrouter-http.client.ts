@@ -199,6 +199,13 @@ export class OpenRouterHttpClient {
 
       const data = response.data;
       const usage = data.usage;
+      // Una respuesta incompleta también puede tener un cargo real.
+      if (usage?.cost != null) {
+        await this.aiGenerationLogsRepository.recordCost(aiRequestId, usage.cost);
+      }
+      if (data.id) {
+        void this.enrichGenerationStats(aiRequestId, data.id, logTags);
+      }
       const reasoningTokens =
         usage?.completion_tokens_details?.reasoning_tokens ?? null;
       const finishReason = data.choices?.[0]?.finish_reason ?? null;
@@ -224,15 +231,7 @@ export class OpenRouterHttpClient {
         completionTokens: usage?.completion_tokens ?? null,
         reasoningTokens,
         finishReason,
-        totalCost: usage?.cost ?? null,
       });
-
-      if (data.id) {
-        // No bloquea al llamador: proveedor real/costo definitivo/latencia
-        // solo se conocen vía esta consulta aparte (ver docstring de la
-        // clase), y no son necesarios para que la clasificación funcione.
-        void this.enrichGenerationStats(aiRequestId, data.id, logTags);
-      }
 
       return {
         content,

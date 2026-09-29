@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   DIAN_RECEIVED_GROUP,
-  DIAN_SALES_INVOICE_DOCUMENT_TYPE,
+  DIAN_PURCHASE_INVOICE_DOCUMENT_TYPES,
   EXCEL_COLUMNS,
 } from '../../common/constants/excel.constants';
 import {
@@ -39,6 +39,8 @@ function normalizeHeader(value: unknown): string {
 
 function normalizeCompare(value: string): string {
   return value
+    .replace(/\s+/g, ' ')
+    .replace(/\s*[-\u2010-\u2015]\s*/g, '-')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
@@ -91,10 +93,12 @@ export function normalizeDianDate(value: string): string {
 function isSalesInvoiceReceived(row: DianSalesInvoiceRow): boolean {
   const documentType = normalizeCompare(row.documentType);
   const group = normalizeCompare(row.group);
-  const expectedType = normalizeCompare(DIAN_SALES_INVOICE_DOCUMENT_TYPE);
+  const isSupportedType = DIAN_PURCHASE_INVOICE_DOCUMENT_TYPES.some(
+    (type) => normalizeCompare(type) === documentType,
+  );
   const expectedGroup = normalizeCompare(DIAN_RECEIVED_GROUP);
 
-  return documentType === expectedType && group === expectedGroup;
+  return isSupportedType && group === expectedGroup;
 }
 
 function buildColumnIndex(headers: string[]): Map<string, number> {

@@ -1,3 +1,4 @@
+import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import {
   Body,
   Controller,
@@ -60,6 +61,7 @@ import {
   UpdateJarvisTaxResponseDto,
 } from './dto/jarvis-tax.dto';
 import { JarvisDocumentPreparationService } from './jarvis-document-preparation.service';
+import { JarvisInvoiceHistoryService } from './jarvis-invoice-history.service';
 import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 import { JarvisResolutionParserService } from './jarvis-resolution-parser.service';
 import { JarvisSetupService } from './jarvis-setup.service';
@@ -75,6 +77,7 @@ export class JarvisController {
     private readonly jarvisTercerosService: JarvisTercerosService,
     private readonly jarvisSupportDocumentSendService: JarvisSupportDocumentSendService,
     private readonly jarvisInvoiceSendService: JarvisInvoiceSendService,
+    private readonly jarvisInvoiceHistoryService: JarvisInvoiceHistoryService,
     private readonly jarvisDocumentPreparationService: JarvisDocumentPreparationService,
     private readonly jarvisResolutionParserService: JarvisResolutionParserService,
     private readonly jarvisTaxesService: JarvisTaxesService,
@@ -258,6 +261,16 @@ export class JarvisController {
     );
   }
 
+  @Patch('terceros/:id')
+  updateTercero(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() request: CreateJarvisTerceroRequestDto) {
+    return this.jarvisTercerosService.update(id, request, getAuthenticatedCompanyId(user));
+  }
+
+  @Delete('terceros/:id')
+  removeTercero(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.jarvisTercerosService.remove(id, getAuthenticatedCompanyId(user));
+  }
+
   @Post('terceros')
   @ApiOperation({
     summary: 'Crear tercero Jarvis',
@@ -304,6 +317,24 @@ export class JarvisController {
       request,
       getAuthenticatedCompanyId(user),
     );
+  }
+
+  @Get('support-documents')
+  @ApiOperation({ summary: 'Historial de documentos soporte enviados de la empresa activa.' })
+  listSupportDocuments(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
+    return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page }, JarvisResolutionKind.SUPPORT_DOCUMENT);
+  }
+
+  @Post('support-documents/issue')
+  @ApiOperation({ summary: 'Crear y enviar documento soporte individual.' })
+  issueSupportDocument(@CurrentUser() user: AuthenticatedUser, @Body() request: CreateJarvisInvoiceRequestDto): Promise<CreateJarvisInvoiceResponseDto> {
+    return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.SUPPORT_DOCUMENT);
+  }
+
+  @Get('invoices')
+  @ApiOperation({ summary: 'Historial de facturas de venta enviadas de la empresa activa.' })
+  listInvoices(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
+    return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page });
   }
 
   @Post('invoices')

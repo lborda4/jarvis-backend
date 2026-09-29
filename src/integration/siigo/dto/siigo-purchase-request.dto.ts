@@ -12,6 +12,7 @@ export class SiigoPurchaseItemDto {
   description?: string;
   quantity: number;
   price: number;
+  discount?: number;
   taxes?: SiigoPurchaseItemTaxDto[];
 }
 
@@ -22,6 +23,8 @@ export class SiigoPurchasePaymentDto {
 }
 
 export class SiigoPurchaseRequestDto {
+  discount_type?: 'Value' | 'Percentage';
+  tax_included?: boolean;
   document: { id: number };
   number?: number;
   date: string;

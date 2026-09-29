@@ -6,6 +6,8 @@ import { CompanyModule } from '../../company/company.module';
 import { ElectronicDocumentModule } from '../../electronic-document/electronic-document.module';
 import { PlanModule } from '../../plan/plan.module';
 import { IntegrationModule } from '../integration.module';
+import { JarvisSalesInvoice } from './entities/jarvis-sales-invoice.entity';
+import { JarvisInvoiceHistoryService } from './jarvis-invoice-history.service';
 import { JarvisTax } from './entities/jarvis-tax.entity';
 import { JarvisTercero } from './entities/jarvis-tercero.entity';
 import { JarvisController } from './jarvis.controller';
@@ -30,10 +32,11 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     IntegrationModule,
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),
-    TypeOrmModule.forFeature([JarvisTercero, JarvisTax]),
+    TypeOrmModule.forFeature([JarvisTercero, JarvisTax, JarvisSalesInvoice]),
   ],
   controllers: [JarvisController],
   providers: [
+    JarvisInvoiceHistoryService,
     JarvisSetupService,
     JarvisTercerosService,
     JarvisTaxesService,

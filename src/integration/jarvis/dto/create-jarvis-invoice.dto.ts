@@ -23,6 +23,9 @@ export class CreateJarvisInvoiceItemDto {
   })
   taxAmount?: number;
 
+  @ApiPropertyOptional({ description: 'ID del tipo de impuesto en el catálogo de facturación; por defecto IVA.' })
+  taxId?: number;
+
   @ApiPropertyOptional({ example: 'COMISION' })
   code?: string;
 

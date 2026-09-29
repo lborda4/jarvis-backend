@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 import { Product } from '../entities/product.entity';
+import { ProductPriceList } from '../entities/product-price-list.entity';
 
 @Injectable()
 export class ProductsRepository {
@@ -60,6 +61,23 @@ export class ProductsRepository {
 
   create(data: Partial<Product>): Product {
     return this.repository.create(data);
+  }
+
+  replace(product: Product): Promise<Product> {
+    return this.repository.manager.transaction(async (manager) => {
+      const target = await manager.findOne(Product, {
+        where: { id: product.id, companyId: product.companyId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!target) throw new NotFoundException('El producto no existe para esta empresa.');
+      // Reemplaza las listas dentro de la misma transaccion, sin dejar precios antiguos.
+      await manager.delete(ProductPriceList, { productId: product.id });
+      return manager.save(Product, product);
+    });
+  }
+
+  deleteByIdAndCompany(id: string, companyId: string) {
+    return this.repository.delete({ id, companyId });
   }
 
   save(product: Product): Promise<Product> {

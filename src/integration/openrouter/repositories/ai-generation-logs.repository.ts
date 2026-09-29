@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiGenerationLog } from '../entities/ai-generation-log.entity';
+import { ElectronicDocument } from '../../../electronic-document/entities/electronic-document.entity';
+import { addAiRequestCost } from '../../../electronic-document/helpers/electronic-document-ai-cost.helper';
 
 export interface CreatePendingAiGenerationLogInput {
   aiRequestId: string;
@@ -78,10 +80,10 @@ export class AiGenerationLogsRepository {
           completionTokens: input.completionTokens ?? null,
           reasoningTokens: input.reasoningTokens ?? null,
           finishReason: input.finishReason ?? null,
-          totalCost: input.totalCost ?? null,
           completedAt: new Date(),
         },
       );
+      await this.recordCost(aiRequestId, input.totalCost);
     } catch (error) {
       this.logger.warn(
         `[aiRequestId=${aiRequestId}] No se pudo registrar la respuesta de OpenRouter.`,
@@ -108,6 +110,32 @@ export class AiGenerationLogsRepository {
     }
   }
 
+  /** El costo vive en el documento; la tabla conserva solo la trazabilidad. */
+  async recordCost(aiRequestId: string, cost?: number | null): Promise<void> {
+    if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) return;
+    try {
+      const log = await this.repository.findOne({ where: { aiRequestId } });
+      if (!log?.documentId || !log.companyId) return;
+      await this.repository.manager.transaction(async (manager) => {
+        const documents = manager.getRepository(ElectronicDocument);
+        const document = await documents.findOne({
+          where: { id: log.documentId!, companyId: log.companyId! },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!document) return;
+        document.payload.aiSuggestion = addAiRequestCost(
+          document.payload.aiSuggestion, aiRequestId, cost,
+        );
+        await documents.update(document.id, { payload: document.payload });
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[aiRequestId=${aiRequestId}] No se pudo guardar el costo de IA en el documento.`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   /** Enriquecimiento en segundo plano vía GET /api/v1/generation — ver
    * OpenRouterHttpClient.fetchGenerationStats. Se aplica aparte de
    * markCompleted porque estos datos (proveedor real, costo definitivo)
@@ -123,12 +151,12 @@ export class AiGenerationLogsRepository {
         {
           openRouterRequestId: input.openRouterRequestId ?? null,
           providerName: input.providerName ?? null,
-          ...(input.totalCost != null ? { totalCost: input.totalCost } : {}),
           nativeFinishReason: input.nativeFinishReason ?? null,
           generationTimeMs: input.generationTimeMs ?? null,
           latencyMs: input.latencyMs ?? null,
         },
       );
+      await this.recordCost(aiRequestId, input.totalCost);
     } catch (error) {
       this.logger.warn(
         `[aiRequestId=${aiRequestId}] No se pudo enriquecer con GET /generation.`,

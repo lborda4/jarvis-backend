@@ -150,12 +150,34 @@ export class JarvisTercerosService {
     };
   }
 
-  async create(
+  async remove(id: string, companyId: string): Promise<{ success: boolean }> {
+    const company = this.requireCompanyId(companyId);
+    await this.requireJarvisIntegration(company);
+    const result = await this.jarvisTercerosRepository.deleteByIdAndCompany(id, company);
+    if (!result.affected) throw new NotFoundException('El tercero no existe para esta empresa.');
+    return { success: true };
+  }
+
+  async update(id: string, request: CreateJarvisTerceroRequestDto, companyId: string): Promise<CreateJarvisTerceroResponseDto> {
+    return this.saveTercero(request, companyId, id);
+  }
+
+  async create(request: CreateJarvisTerceroRequestDto, companyId: string): Promise<CreateJarvisTerceroResponseDto> {
+    return this.saveTercero(request, companyId);
+  }
+
+  private async saveTercero(
     request: CreateJarvisTerceroRequestDto,
     companyId: string,
+    terceroId?: string,
   ): Promise<CreateJarvisTerceroResponseDto> {
     const trimmedCompanyId = this.requireCompanyId(companyId);
     const integration = await this.requireJarvisIntegration(trimmedCompanyId);
+
+    const target = terceroId !== undefined
+      ? await this.jarvisTercerosRepository.findByIdAndCompany(terceroId, trimmedCompanyId)
+      : null;
+    if (terceroId !== undefined && !target) throw new NotFoundException('El tercero no existe para esta empresa.');
 
     const documentType = normalizeSupportDocumentType(request.document_type);
     if (!VALID_DOCUMENT_TYPES.has(documentType)) {
@@ -200,14 +222,13 @@ export class JarvisTercerosService {
         documentNumber,
       );
 
-    if (existing) {
+    if (existing && (terceroId === undefined || existing.id !== terceroId)) {
       throw new ConflictException(
         'Ya existe un tercero con ese tipo y número de documento.',
       );
     }
 
-    const tercero = await this.jarvisTercerosRepository.save(
-      this.jarvisTercerosRepository.create({
+    const data = {
         companyId: trimmedCompanyId,
         integrationId: integration.id,
         documentType,
@@ -222,7 +243,9 @@ export class JarvisTercerosService {
         address: request.address?.trim() || null,
         municipalityId,
         typeRegimeId,
-      }),
+      };
+    const tercero = await this.jarvisTercerosRepository.save(
+      target ? Object.assign(target, data) : this.jarvisTercerosRepository.create(data),
     );
 
     // Este create() se usa tanto desde el botón "Crear tercero" de una fila

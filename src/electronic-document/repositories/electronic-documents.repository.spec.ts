@@ -1,4 +1,28 @@
 import { ElectronicDocumentsRepository } from './electronic-documents.repository';
+import { ElectronicDocument } from '../entities/electronic-document.entity';
+
+it('conserva costos definitivos al guardar un payload leído antes del enriquecimiento', async () => {
+  const aiSuggestion = {
+    retentions: [], currency: 'USD', totalCost: 0.00015,
+    costsByRequest: { 'req-1': 0.00015 },
+  };
+  const documents = {
+    findOne: jest.fn().mockResolvedValue({ payload: { aiSuggestion } }),
+    save: jest.fn(async (value) => value),
+  };
+  const repository = new ElectronicDocumentsRepository({
+    manager: { transaction: async (work) => work({ getRepository: () => documents }) },
+  } as never);
+  const saved = await repository.save({
+    id: 'doc-1', companyId: 'company-1',
+    payload: { items: [{ descripcion: 'Actualizado' }] },
+  } as ElectronicDocument);
+  expect(saved.payload.aiSuggestion).toEqual(aiSuggestion);
+  expect(saved.payload.items[0].descripcion).toBe('Actualizado');
+  expect(documents.findOne).toHaveBeenCalledWith({
+    where: { id: 'doc-1', companyId: 'company-1' }, lock: { mode: 'pessimistic_write' },
+  });
+});
 describe('import batch document filters', () => {
   it('combines exact document IDs with authenticated company scope', async () => {
     const query = {

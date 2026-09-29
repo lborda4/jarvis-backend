@@ -86,6 +86,7 @@ export class AiGenerationLog {
   @Column({ name: 'reasoning_tokens', type: 'integer', nullable: true })
   reasoningTokens: number | null;
 
+  /** Histórico: nuevos costos en electronic_documents.payload.aiSuggestion. */
   @Column({
     name: 'total_cost',
     type: 'numeric',

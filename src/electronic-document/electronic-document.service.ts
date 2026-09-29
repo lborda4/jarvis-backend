@@ -155,21 +155,23 @@ function applyDraftCodesToPayloadItems(
     const code = saved.producto?.trim() || '';
 
     return {
+      ...existing,
       descripcion: saved.description?.trim() || existing?.descripcion || '',
-      cantidad: saved.quantity > 0 ? saved.quantity : (existing?.cantidad ?? 1),
-      valorUnitario:
-        saved.unitValue > 0 ? saved.unitValue : (existing?.valorUnitario ?? 0),
+      // El borrador conserva las ediciones; el payload conserva la evidencia
+      // monetaria original para distinguir precios base de precios con IVA.
+      cantidad: existing?.cantidad ?? saved.quantity,
+      valorUnitario: existing?.valorUnitario ?? saved.unitValue,
       total: existing?.total ?? saved.quantity * saved.unitValue,
       codigo: existing?.codigo,
       aiSuggestion: existing?.aiSuggestion,
       ivaPercentage: existing?.ivaPercentage,
-      discount: saved.discount > 0 ? saved.discount : existing?.discount,
+      discount: existing ? existing.discount : saved.discount,
       itemType: saved.tipo,
       accountMapping:
         saved.tipo === 'Account' && code
           ? { code, description: existing?.accountMapping?.description }
           : undefined,
-      ...(saved.tipo === 'Product' && code ? { codigo: code } : {}),
+      productMapping: saved.tipo === 'Product' && code ? { code } : undefined,
     };
   });
 }
@@ -831,7 +833,7 @@ export class ElectronicDocumentService {
   }> {
     if (!rows.length) {
       throw new BadRequestException(
-        'No se encontraron facturas electrónicas recibidas para importar. Solo se procesan filas con Tipo de documento "Factura electrónica" y Grupo "Recibido".',
+        'No se encontraron documentos recibidos de los tipos admitidos para importar como facturas de compra.',
       );
     }
 

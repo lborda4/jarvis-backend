@@ -1,3 +1,4 @@
+import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
 import { SiigoBoldCashRegister } from '../bold/entities/siigo-bold-cash-register.entity';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
@@ -30,6 +31,7 @@ export function buildTypeOrmConfig(
     url: configService.get('database.url', { infer: true }),
     ssl: { rejectUnauthorized: false },
     entities: [
+      JarvisSalesInvoice,
       SiigoBoldCashRegister,
       Integration,
       Company,

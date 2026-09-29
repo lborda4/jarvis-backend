@@ -11,6 +11,7 @@ import {
   ImportRowStatusFilter,
 } from '../helpers/import-status-filter.helper';
 import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
+import { readAiCost } from '../helpers/electronic-document-ai-cost.helper';
 
 export interface FindElectronicDocumentsFilters {
   documentIds?: string[];
@@ -60,8 +61,24 @@ export class ElectronicDocumentsRepository {
     return this.repository.create(data);
   }
 
-  save(document: ElectronicDocument): Promise<ElectronicDocument> {
-    return this.repository.save(document);
+  async save(document: ElectronicDocument): Promise<ElectronicDocument> {
+    if (!document.id) return this.repository.save(document);
+    return this.repository.manager.transaction(async (manager) => {
+      const documents = manager.getRepository(ElectronicDocument);
+      const current = await documents.findOne({
+        where: { id: document.id, companyId: document.companyId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      // GET /generation puede terminar mientras el contador o la IA guardan
+      // una copia anterior del payload. El costo vigente siempre se conserva.
+      const cost = readAiCost(current?.payload?.aiSuggestion);
+      if (cost && document.payload) {
+        document.payload.aiSuggestion = {
+          retentions: [], ...document.payload.aiSuggestion, ...cost,
+        };
+      }
+      return documents.save(document);
+    });
   }
 
   /** Do not load invoice payload/draft for PDF downloads. */

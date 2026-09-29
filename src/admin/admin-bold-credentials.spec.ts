@@ -19,6 +19,7 @@ describe('Admin Bold credentials', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     return { service, repository, integration };
   }

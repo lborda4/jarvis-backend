@@ -1,4 +1,5 @@
 import { resolveItemAiSuggestion } from './electronic-document-ai-suggestion.helper';
+import { readAiCost } from './electronic-document-ai-cost.helper';
 import { ElectronicDocumentPayload } from '../interfaces/electronic-document-payload.interface';
 import { normalizeItemDescription } from '../../integration/helpers/supplier-item-account-mapping.helper';
 
@@ -21,8 +22,10 @@ export function applyItemClassificationToPayload(
   },
 ): ElectronicDocumentPayload {
   const { aiSuggestion: _legacySuggestion, ...rest } = payload;
+  const cost = readAiCost(_legacySuggestion);
   return {
     ...rest,
+    ...(cost ? { aiSuggestion: { retentions: [], ...cost } } : {}),
     items: payload.items.map((item, index) => {
       // A document-wide answer is only unambiguous for a single item.
       const suggestion =

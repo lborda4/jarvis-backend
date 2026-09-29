@@ -35,9 +35,12 @@ import {
   CreateJarvisInvoiceRequestDto,
   CreateJarvisInvoiceResponseDto,
 } from './dto/create-jarvis-invoice.dto';
+import { JarvisInvoiceHistoryService } from './jarvis-invoice-history.service';
 import { JarvisSetupService } from './jarvis-setup.service';
 import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
+
+import { buildJarvisInvoiceChargeTaxTotals } from './helpers/jarvis-invoice-tax.helper';
 
 const DOCUMENT_TYPE_IDENTIFICATION_FALLBACK: Record<string, number> = {
   [JarvisDocumentType.CC]: 3,
@@ -46,16 +49,7 @@ const DOCUMENT_TYPE_IDENTIFICATION_FALLBACK: Record<string, number> = {
   [JarvisDocumentType.PA]: 7,
 };
 
-/**
- * Emite una Factura de venta electrónica directo contra NextPyme/DIAN —
- * llenar y enviar de una vez, sin pasar por el modelo de ElectronicDocument
- * (a diferencia de Documento Soporte, que se guarda como borrador primero).
- * Decisión explícita del usuario: alcance simple, sin listado/borrador
- * propios. Por lo mismo, esta emisión NO pasa por
- * PlanSubscriptionService.assertCanCreateDocuments — ElectronicDocumentType
- * no tiene un valor para factura de venta, así que no hay contra qué
- * contarla en los límites del plan todavía.
- */
+/** Emite facturas de venta y registra los envios aceptados en el historial de la empresa. */
 @Injectable()
 export class JarvisInvoiceSendService {
   private readonly logger = new Logger(JarvisInvoiceSendService.name);
@@ -68,12 +62,16 @@ export class JarvisInvoiceSendService {
     private readonly nextPymeApiClient: NextPymeApiClient,
     private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
     private readonly jarvisSetupService: JarvisSetupService,
+    private readonly invoiceHistory: JarvisInvoiceHistoryService,
   ) {}
 
   async createAndSendInvoice(
     request: CreateJarvisInvoiceRequestDto,
     companyId: string,
+    kind = JarvisResolutionKind.ELECTRONIC_INVOICE,
   ): Promise<CreateJarvisInvoiceResponseDto> {
+    const isSupport = kind === JarvisResolutionKind.SUPPORT_DOCUMENT;
+    const documentLabel = isSupport ? "documento soporte" : "factura de venta";
     const issueDate = request.issueDate?.trim();
     const customerIdentification = normalizeJarvisDocumentNumber(
       request.customerIdentification ?? '',
@@ -86,7 +84,7 @@ export class JarvisInvoiceSendService {
     }
 
     if (!customerIdentification) {
-      throw new BadRequestException('Debe seleccionar un cliente.');
+      throw new BadRequestException(isSupport ? "Debe seleccionar un proveedor." : "Debe seleccionar un cliente.");
     }
 
     if (items.length === 0) {
@@ -120,12 +118,26 @@ export class JarvisInvoiceSendService {
 
     if (!tercero) {
       throw new BadRequestException(
-        'Debe crear el cliente en Jarvis antes de enviar la factura de venta.',
+        `Debe crear el tercero en Jarvis antes de enviar el documento.`,
       );
     }
 
     const company = await this.companiesRepository.findById(companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    const companyToken = company.nextPymeToken?.trim();
+    if (!companyToken) {
+      throw new BadRequestException(
+        `Configura el token de NextPyme de esta empresa antes de emitir ${documentLabel}.`,
+      );
+    }
     const credentials = normalizeJarvisCredentials(integration.credentials);
+
+    const defaultTaxId = this.nextPymeMasterCatalogService.getIvaTaxId();
+    const allowedTaxIds = new Set([defaultTaxId]);
+    if (items.some((item) => item.taxId != null && item.taxId !== defaultTaxId)) {
+      const catalogTaxes = await this.nextPymeMasterCatalogService.getTaxes();
+      for (const tax of catalogTaxes) allowedTaxIds.add(tax.id);
+    }
 
     const parsedItems = items.map((item, index) => {
       const description = item.description?.trim();
@@ -140,6 +152,10 @@ export class JarvisInvoiceSendService {
       const unitValue = Number(item.unitValue);
       const discount = Math.max(0, Number(item.discount ?? 0));
       const taxAmount = Math.max(0, Number(item.taxAmount ?? 0));
+      const taxId = item.taxId ?? defaultTaxId;
+      if (!Number.isSafeInteger(taxId) || !allowedTaxIds.has(taxId)) {
+        throw new BadRequestException(`El impuesto del ítem ${index + 1} no está disponible en el catálogo de facturación.`);
+      }
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new BadRequestException(
@@ -159,12 +175,13 @@ export class JarvisInvoiceSendService {
         unitValue,
         discount,
         taxAmount,
+        taxId,
         code: item.code?.trim() || `ITEM-${index + 1}`,
         notes: item.notes?.trim(),
       };
     });
 
-    const resolutionLockKey = `jarvis-resolution:${companyId}:${JarvisResolutionKind.ELECTRONIC_INVOICE}`;
+    const resolutionLockKey = `jarvis-resolution:${companyId}:${kind}`;
 
     try {
       return await withPostgresAdvisoryLock(
@@ -174,7 +191,7 @@ export class JarvisInvoiceSendService {
           const numbering =
             await this.jarvisSetupService.allocateResolutionNumber(
               companyId,
-              JarvisResolutionKind.ELECTRONIC_INVOICE,
+              kind,
             );
 
           const municipalityId =
@@ -203,7 +220,7 @@ export class JarvisInvoiceSendService {
             await this.nextPymeMasterCatalogService.resolveCurrencyId(currency);
 
           this.logger.log(
-            `[companyId=${companyId}] Numeración local factura de venta ${JSON.stringify(
+            `[companyId=${companyId}] Numeración local ${documentLabel} ${JSON.stringify(
               {
                 prefix: numbering.prefix,
                 number: numbering.number,
@@ -230,19 +247,7 @@ export class JarvisInvoiceSendService {
           );
           const payable = toMoney(taxableBase + ivaTotal);
 
-          const taxTotals =
-            ivaTotal > 0
-              ? [
-                  {
-                    tax_id: this.nextPymeMasterCatalogService.getIvaTaxId(),
-                    tax_amount: formatMoney(ivaTotal),
-                    taxable_amount: formatMoney(taxableBase),
-                    percent: formatMoney(
-                      taxableBase > 0 ? (ivaTotal / taxableBase) * 100 : 0,
-                    ),
-                  },
-                ]
-              : [];
+          const taxTotals = buildJarvisInvoiceChargeTaxTotals(parsedItems);
 
           for (const retention of request.retentions ?? []) {
             if (!retention?.id || !Number.isFinite(retention.id)) {
@@ -279,14 +284,12 @@ export class JarvisInvoiceSendService {
                 this.nextPymeMasterCatalogService.getDefaultItemIdentificationId(),
               price_amount: formatMoney(toMoney(item.unitValue)),
               base_quantity: item.quantity,
-              type_generation_transmition_id:
-                this.nextPymeMasterCatalogService.getDefaultGenerationTransmissionId(),
-              start_date: issueDate,
+              ...(isSupport ? { type_generation_transmition_id: 1, start_date: issueDate } : {}),
               ...(item.taxAmount > 0
                 ? {
                     tax_totals: [
                       {
-                        tax_id: this.nextPymeMasterCatalogService.getIvaTaxId(),
+                        tax_id: item.taxId,
                         tax_amount: formatMoney(item.taxAmount),
                         taxable_amount: formatMoney(lineExtension),
                         percent: formatMoney(
@@ -305,10 +308,12 @@ export class JarvisInvoiceSendService {
 
           const payload = {
             type_document_id:
-              this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
+              isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
             number: numbering.number,
             date: issueDate,
+            ...(isSupport ? { time: new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }), sendmail: false, sendmailtome: false } : {}),
             prefix: numbering.prefix,
+            ...(numbering.formNumber ? { resolution_number: numbering.formNumber } : {}),
             ...(currencyId ? { type_currency_id: currencyId } : {}),
             ...(request.observations?.trim()
               ? { notes: request.observations.trim() }
@@ -376,14 +381,31 @@ export class JarvisInvoiceSendService {
           };
 
           this.logger.log(
-            `[companyId=${companyId}] Body factura de venta -> NextPyme ${JSON.stringify(
+            `[companyId=${companyId}] Body ${documentLabel} -> NextPyme ${JSON.stringify(
               payload,
               null,
               2,
             )}`,
           );
 
-          const created = await this.nextPymeApiClient.createInvoice(payload);
+          const { customer, ...supportPayload } = payload;
+          const created = isSupport
+            ? await this.nextPymeApiClient.createSupportDocument({ ...supportPayload, seller: customer }, companyToken)
+            : await this.nextPymeApiClient.createInvoice(payload, companyToken).catch(async (error: unknown) => {
+                if (
+                  error instanceof BadGatewayException &&
+                  /documento\s+procesado\s+anteriormente/i.test(error.message)
+                ) {
+                  // El número ya está ocupado en DIAN. Avanzar bajo el mismo
+                  // bloqueo de resolución, conservando el rechazo del envío.
+                  await this.jarvisSetupService.commitResolutionNumber(
+                    companyId,
+                    kind,
+                    numbering.number,
+                  );
+                }
+                throw error;
+              });
 
           this.logger.log(
             `[companyId=${companyId}] Respuesta NextPyme ${JSON.stringify(created)}`,
@@ -406,14 +428,25 @@ export class JarvisInvoiceSendService {
           );
           const createdCufe = readNextPymeCreatedUniqueCode(created);
 
+          // Un fallo de historial no convierte una emision aceptada en un error ni invita a reenviarla.
+          try {
+            await this.invoiceHistory.record({
+              companyId, documentKind: kind, providerId: createdId, prefix: numbering.prefix, number: String(createdNumber),
+              issueDate, customerName: request.customerName?.trim() || tercero.name,
+              customerIdentification, currency, total: formatMoney(payable), cufe: createdCufe,
+            });
+          } catch (historyError) {
+            this.logger.error('No se pudo registrar la factura aceptada ' + createdConsecutive, historyError);
+          }
+
           await this.jarvisSetupService.commitResolutionNumber(
             companyId,
-            JarvisResolutionKind.ELECTRONIC_INVOICE,
+            kind,
             createdNumber,
           );
 
           this.logger.log(
-            `[companyId=${companyId}] Factura de venta enviada a NextPyme (id=${createdId}, consecutive=${createdConsecutive}, number=${createdNumber}, cufe=${createdCufe ?? 'n/a'})`,
+            `[companyId=${companyId}] ${documentLabel} enviado a NextPyme (id=${createdId}, consecutive=${createdConsecutive}, number=${createdNumber}, cufe=${createdCufe ?? 'n/a'})`,
           );
 
           return {
@@ -431,7 +464,7 @@ export class JarvisInvoiceSendService {
       );
     } catch (error) {
       this.logger.error(
-        `[companyId=${companyId}] Error al enviar Factura de venta a NextPyme`,
+        `[companyId=${companyId}] Error al enviar ${documentLabel} a NextPyme`,
         error instanceof Error ? error.stack : String(error),
       );
 
@@ -446,7 +479,7 @@ export class JarvisInvoiceSendService {
       throw new BadGatewayException(
         error instanceof Error
           ? error.message
-          : 'Error inesperado al crear la Factura de venta.',
+          : `Error inesperado al crear ${documentLabel}.`,
       );
     }
   }

@@ -161,6 +161,9 @@ function mapDocumentItems(
     total: item.total,
     ivaPercentage: item.ivaPercentage,
     ...(item.codigo?.trim() ? { code: item.codigo.trim() } : {}),
+    ...(item.productMapping?.code?.trim()
+      ? { productMapping: { code: item.productMapping.code.trim() } }
+      : {}),
     ...(item.accountMapping?.code?.trim()
       ? {
           accountMapping: {
