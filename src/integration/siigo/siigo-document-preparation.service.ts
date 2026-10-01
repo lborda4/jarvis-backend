@@ -47,7 +47,16 @@ export class SiigoDocumentPreparationService {
     documentIds: string[],
     companyId: string,
   ): Promise<void> {
-    const batchContext = await this.createBatchContext(companyId);
+    if (!documentIds.length) return;
+    let batchContext: SiigoBatchContext;
+    try {
+      batchContext = await this.createBatchContext(companyId);
+    } catch (error) {
+      this.logger.error(`[companyId=${companyId}] No se pudo iniciar la revisión de proveedores`, error instanceof Error ? error.stack : String(error));
+      await mapWithConcurrency(documentIds, SIIGO_DOCUMENT_PREPARATION_CONCURRENCY,
+        (id) => this.markPreparationFailed(id, companyId));
+      return;
+    }
     const total = documentIds.length;
     // Log cada ~total/20 documentos (mínimo 1) — como máximo ~20 líneas de
     // progreso por lote, sin importar si son 50 o 5000 documentos.

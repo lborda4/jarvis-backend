@@ -1,5 +1,7 @@
 import { normalizeSupplierCostCenterPreference } from '../integration/helpers/supplier-mapping-value.helper';
 import { summarizeDocumentAiSuggestion } from './helpers/electronic-document-ai-suggestion.helper';
+import { applySupportDocumentExcelAccounts } from '../invoices/helpers/support-document-accounts.helper';
+import { collectUniqueAccountsCatalog } from '../integration/helpers/supplier-accounts-catalog.helper';
 import {
   BadRequestException,
   ForbiddenException,
@@ -711,6 +713,12 @@ export class ElectronicDocumentService {
       companyId,
     );
     const provider = await this.resolveDocumentProvider(company.id);
+
+    if (provider === IntegrationProvider.SIIGO && groups.some((group) => group.rows.some((row) => row.account?.trim()))) {
+      const integration = await getSiigoIntegration(this.integrationsRepository, company.id);
+      const accounts = await this.siigoAccountsRepository.findByCompanyAndIntegration(company.id, integration.id);
+      applySupportDocumentExcelAccounts(groups, collectUniqueAccountsCatalog(accounts));
+    }
 
     const { savedDocuments, supplierNamesByNit } =
       await this.withDocumentQuotaLock(

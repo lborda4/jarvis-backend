@@ -1,3 +1,5 @@
+import { companyDueDate, normalizeCompanyTracking } from './company-tracking';
+import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
 import type { BoldCredentials } from '../integration/interfaces/integration-credentials.interface';
 import { SaveAdminBoldCredentialsDto, AdminBoldCredentialsStatusDto } from './dto/admin-bold-credentials.dto';
 import { readCompanyAiContext, validateCompanyAiContext } from '../company/company-ai-context';
@@ -158,6 +160,16 @@ export class AdminService {
     };
   }
 
+  async updateCompanyTracking(companyId: string, request: UpdateCompanyTrackingDto) {
+    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle);
+    const company = await this.companiesRepository.findById(companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    Object.assign(company, tracking);
+    await this.companiesRepository.save(company);
+    const updated = (await this.companiesRepository.findAllWithIntegrations()).find(item => item.id === companyId);
+    return { company: this.mapCompany(updated ?? company) };
+  }
+
   async listCompanies(
     _adminUserId: string,
   ): Promise<ListAdminCompaniesResponseDto> {
@@ -172,6 +184,7 @@ export class AdminService {
     request: CreateAdminCompanyRequestDto,
     adminUserId: string,
   ): Promise<CreateAdminCompanyResponseDto> {
+    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle ?? 'MONTHLY');
     const nit = this.normalizeNit(request?.nit);
     const name = request?.name?.trim();
     const personType = this.normalizePersonType(request?.personType);
@@ -253,6 +266,7 @@ export class AdminService {
           name,
           personType,
           responsible,
+          ...tracking,
           inviteCode: generateCompanyInviteCode(),
           description: validateCompanyAiContext({ description: request?.description ?? '', rules: [] }),
           cityCode: request?.cityCode?.trim() || null,
@@ -563,6 +577,9 @@ export class AdminService {
       aiRules: readCompanyAiContext(company.description).rules,
       personType: company.personType,
       responsible: company.responsible,
+      commercial: company.commercial ?? null,
+      billingCycle: company.billingCycle ?? null,
+      subscriptionDueDate: companyDueDate(company.createdAt, company.billingCycle),
       createdAt: company.createdAt.toISOString(),
       inviteCode: company.inviteCode,
       nextPymeToken: company.nextPymeToken,

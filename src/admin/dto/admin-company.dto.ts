@@ -70,6 +70,13 @@ export class AdminIntegrationItemDto {
 }
 
 export class AdminCompanyListItemDto {
+  @ApiPropertyOptional({ nullable: true })
+  commercial?: string | null;
+  @ApiPropertyOptional({ enum: ['MONTHLY', 'ANNUAL'], nullable: true })
+  billingCycle?: 'MONTHLY' | 'ANNUAL' | null;
+  @ApiPropertyOptional({ nullable: true })
+  subscriptionDueDate?: string | null;
+
   @ApiProperty()
   id: string;
 
@@ -129,6 +136,11 @@ export class AdminCompanyListItemDto {
 }
 
 export class CreateAdminCompanyRequestDto {
+  @ApiPropertyOptional({ maxLength: 120 })
+  commercial?: string;
+  @ApiPropertyOptional({ enum: ['MONTHLY', 'ANNUAL'], default: 'MONTHLY' })
+  billingCycle?: 'MONTHLY' | 'ANNUAL';
+
   @ApiProperty({ example: '900123456' })
   nit: string;
 
@@ -330,4 +342,11 @@ export class LookupAdminCompanyNameResponseDto {
       'Razón social encontrada en el RUT/RUES de la DIAN. Null si no se encontró.',
   })
   name: string | null;
+}
+
+export class UpdateCompanyTrackingDto {
+  @ApiPropertyOptional({ maxLength: 120, nullable: true })
+  commercial?: string | null;
+  @ApiProperty({ enum: ['MONTHLY', 'ANNUAL'] })
+  billingCycle: 'MONTHLY' | 'ANNUAL';
 }

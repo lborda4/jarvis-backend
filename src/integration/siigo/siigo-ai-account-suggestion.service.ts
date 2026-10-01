@@ -417,7 +417,9 @@ export class SiigoAiAccountSuggestionService {
       ]);
 
     // Account codes are company-specific; the prompt filters by name and function.
-    const transactionalAccounts = allTransactionalAccounts;
+    const transactionalAccounts = allTransactionalAccounts.filter(
+      (account) => !account.code.trim().startsWith('4'),
+    );
 
     if (transactionalAccounts.length === 0) {
       console.log(
@@ -570,12 +572,13 @@ export class SiigoAiAccountSuggestionService {
     }
 
     const accountCodes = new Set(
-      allTransactionalAccounts.map((account) => account.code.trim()),
+      transactionalAccounts.map((account) => account.code.trim()),
     );
     const accountHistoryRows = historicalPool.filter(
       (row) =>
-        row.tipo === HistorialFacturaTipo.CUENTA ||
-        accountCodes.has(row.cuentaPuc.trim()),
+        !row.cuentaPuc.trim().startsWith('4') &&
+        (row.tipo === HistorialFacturaTipo.CUENTA ||
+        accountCodes.has(row.cuentaPuc.trim())),
     );
     const { invoiceRows, balanceRows } =
       splitSupplierHistory(accountHistoryRows);
@@ -586,11 +589,11 @@ export class SiigoAiAccountSuggestionService {
           cuentaPuc: row.cuentaPuc,
         }),
       ),
-      allTransactionalAccounts,
+      transactionalAccounts,
     );
     const supplierUsedAccounts = uniqueSupplierUsedAccounts(
       balanceRows,
-      allTransactionalAccounts,
+      transactionalAccounts,
     );
 
     const parsed = {

@@ -12,7 +12,7 @@ describe('Inicialización del catálogo de impuestos por empresa', () => {
     await repository.ensureDefaults('company-a', 'integration-a');
     expect(manager.query).toHaveBeenCalledWith(expect.any(String), ['company-a']);
     const values = insert.values.mock.calls[0][0];
-    expect(values).toHaveLength(28);
+    expect(values).toHaveLength(24);
     expect(values.every((value: any) => value.companyId === 'company-a' && value.integrationId === 'integration-a')).toBe(true);
     expect(insert.orIgnore).toHaveBeenCalled();
   });

@@ -163,6 +163,26 @@ describe('Documento soporte con el mismo flujo de ventas', () => {
 
 describe('Notas credito Jarvis', () => {
   const reference = { number: 'SETP990000605', uuid: 'a'.repeat(96), issueDate: '2026-09-15' };
+  it('envía el consecutivo recibido sin exigir ni modificar una resolución local', async () => {
+    const { service, request, client, numbering } = setup();
+    numbering.allocateResolutionNumber.mockRejectedValue(new Error('Sin configuración local'));
+    await service.createAndSendInvoice({ ...request, number: 27, prefix: 'NC', billingReference: reference,
+      discrepancyResponseCode: 2, discrepancyResponseDescription: 'Devolución',
+    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE);
+    expect(client.createCreditNote).toHaveBeenCalledWith(expect.objectContaining({ number: 27, prefix: 'NC' }), 'company-token');
+    expect(client.createCreditNote.mock.calls[0][0]).not.toHaveProperty('resolution_number');
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+  });
+  it('conserva el rechazo del proveedor y el consecutivo explícito sin alterarlo', async () => {
+    const { service, request, client, numbering, history } = setup();
+    client.createCreditNote.mockRejectedValue(new BadGatewayException('Documento procesado anteriormente'));
+    await expect(service.createAndSendInvoice({ ...request, number: 27, prefix: 'NC', billingReference: reference,
+      discrepancyResponseCode: 2, discrepancyResponseDescription: 'Devolución',
+    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('Documento procesado anteriormente');
+    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
+  });
   it('envia referencia, motivo y lineas al servicio correcto y usa numeracion independiente', async () => {
     const {service, request, client, numbering, history} = setup();
     await service.createAndSendInvoice({ ...request, billingReference: reference,

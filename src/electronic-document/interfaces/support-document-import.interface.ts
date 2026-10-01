@@ -11,6 +11,8 @@ export interface SupportDocumentExcelRow {
   currency?: string;
   itemDescription: string;
   itemCode?: string;
+  account?: string;
+  accountMapping?: { code: string; description?: string };
   quantity: number;
   unitValue: number;
   lineTotal: number;

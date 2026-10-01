@@ -143,6 +143,10 @@ export class SiigoAccountMappingService {
     >();
 
     for (const item of items) {
+      if (electronicDocument.electronicDocumentType === 'SUPPORT_DOCUMENT' && item.accountMapping?.code) {
+        accountByDescription.set(normalizeItemDescription(item.descripcion), item.accountMapping);
+        continue;
+      }
       const itemMapping =
         await this.supplierItemAccountMappingsRepository.findOneByKey(
           electronicDocument.companyId,
@@ -171,7 +175,8 @@ export class SiigoAccountMappingService {
     }
 
     const distinctCodes = new Set(
-      [...accountByDescription.values()].map((value) => value.code),
+      items.map((item) => electronicDocument.electronicDocumentType === 'SUPPORT_DOCUMENT' && item.accountMapping?.code
+        ? item.accountMapping.code : accountByDescription.get(normalizeItemDescription(item.descripcion))!.code),
     );
     const singleAccount =
       distinctCodes.size === 1 ? [...accountByDescription.values()][0] : null;
@@ -180,6 +185,12 @@ export class SiigoAccountMappingService {
       electronicDocument.payload,
       accountByDescription,
     );
+    if (electronicDocument.electronicDocumentType === 'SUPPORT_DOCUMENT') {
+      updatedPayload.items = updatedPayload.items.map((item, index) => ({
+        ...item,
+        ...(items[index].accountMapping ? { accountMapping: items[index].accountMapping } : {}),
+      }));
+    }
     const updatedDocument =
       await this.electronicDocumentService.updatePayloadAndStatus(
         documentId,

@@ -31,6 +31,7 @@ function buildService() {
     purchaseInvoiceImportJobRowsRepository as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   return {

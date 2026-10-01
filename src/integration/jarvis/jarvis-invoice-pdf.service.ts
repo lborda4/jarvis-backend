@@ -5,22 +5,25 @@ import { CompaniesRepository } from '../../company/repositories/companies.reposi
 import { mapInvoiceXmlToPurchaseInvoiceDownload } from '../../electronic-document/mappers/invoice-xml-to-purchase-invoice-download.mapper';
 import { JarvisSalesInvoice } from './entities/jarvis-sales-invoice.entity';
 import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
+import { IntegrationLogoService } from '../integration-logo.service';
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 @Injectable()
 export class JarvisInvoicePdfService {
-  constructor(@InjectRepository(JarvisSalesInvoice) private readonly invoices: Repository<JarvisSalesInvoice>, private readonly companies: CompaniesRepository, private readonly nextPyme: NextPymeApiClient) {}
+  constructor(@InjectRepository(JarvisSalesInvoice) private readonly invoices: Repository<JarvisSalesInvoice>, private readonly companies: CompaniesRepository, private readonly nextPyme: NextPymeApiClient, private readonly logos: IntegrationLogoService) {}
   async getData(companyId: string, id: string) {
     const invoice = await this.invoices.createQueryBuilder('invoice').addSelect('invoice.invoiceXml')
       .where('invoice.companyId = :companyId', { companyId })
       .andWhere('invoice.id = :id', { id }).andWhere('invoice.documentKind = :kind', { kind: 'ELECTRONIC_INVOICE' }).getOne();
     if (!invoice) throw new NotFoundException('No se encontró la factura.');
     if (!invoice.cufe) throw new BadGatewayException('La factura aún no tiene CUFE disponible. No vuelvas a emitirla; actualiza el listado e intenta visualizarla después.');
+    const logo = await this.logos.get(companyId, IntegrationProvider.JARVIS);
     if (invoice.invoiceXml) {
-      try { return mapInvoiceXmlToPurchaseInvoiceDownload(invoice.invoiceXml, id, invoice.cufe); } catch { /* An emission envelope can contain an incomplete XML; recover the DIAN copy. */ }
+      try { return { ...mapInvoiceXmlToPurchaseInvoiceDownload(invoice.invoiceXml, id, invoice.cufe), ...logo }; } catch { /* An emission envelope can contain an incomplete XML; recover the DIAN copy. */ }
     }
     const company = await this.companies.findById(companyId);
     const xml = await this.nextPyme.getInvoiceXmlByCufe(invoice.cufe, company?.nextPymeToken ?? '');
     const data = mapInvoiceXmlToPurchaseInvoiceDownload(xml, id, invoice.cufe);
     await this.invoices.update({ id, companyId }, { invoiceXml: xml });
-    return data;
+    return { ...data, ...logo };
   }
 }

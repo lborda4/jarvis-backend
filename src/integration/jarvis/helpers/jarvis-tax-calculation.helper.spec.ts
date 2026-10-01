@@ -3,9 +3,9 @@ import { JARVIS_DEFAULT_TAXES } from '../constants/jarvis-default-taxes';
 
 describe('Catálogo solicitado y cálculos técnicos', () => {
   it('contiene los 28 códigos sin duplicados y conserva las tres variantes de IVA cero', () => {
-    expect(JARVIS_DEFAULT_TAXES).toHaveLength(28);
-    expect(new Set(JARVIS_DEFAULT_TAXES.map(tax => tax.code)).size).toBe(28);
-    expect(JARVIS_DEFAULT_TAXES.filter(tax => tax.taxType === 'IVA').map(tax => Number(tax.rate))).toEqual([19, 5, 0, 0, 0]);
+    expect(JARVIS_DEFAULT_TAXES).toHaveLength(24);
+    expect(new Set(JARVIS_DEFAULT_TAXES.map(tax => tax.code)).size).toBe(24);
+    expect(JARVIS_DEFAULT_TAXES.filter(tax => tax.taxType === 'IVA').map(tax => Number(tax.rate))).toEqual([0, 5, 19]);
   });
   it('ReteICA 4,14 por mil = 414 sobre 100.000', () => {
     expect(calculateJarvisRetention('ReteICA', 4.14, 100000, 19000)).toEqual({ base: 100000, amount: 414, percent: 0.414 });

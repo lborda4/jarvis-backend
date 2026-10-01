@@ -33,6 +33,9 @@ export class Integration {
   @Column({ type: 'jsonb', default: {} })
   credentials: IntegrationCredentials;
 
+  @Column({ type: 'bytea', nullable: true, select: false })
+  logo: Buffer | null;
+
   @ManyToOne(() => Plan, (plan) => plan.integrations, {
     onDelete: 'SET NULL',
     nullable: true,

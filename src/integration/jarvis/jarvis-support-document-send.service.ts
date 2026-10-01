@@ -74,6 +74,11 @@ export class JarvisSupportDocumentSendService {
     private readonly jarvisSetupService: JarvisSetupService,
   ) {}
 
+  async listTypeRejections() {
+    const rows = await this.nextPymeMasterCatalogService.getTypeRejections();
+    return rows.map(({ id, name, code }) => ({ id, name, code: code ?? null }));
+  }
+
   async listCatalogs(): Promise<JarvisCatalogsResponseDto> {
     const [taxes, paymentMethods, paymentForms, currencies] = await Promise.all(
       [

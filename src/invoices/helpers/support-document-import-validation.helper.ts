@@ -38,6 +38,7 @@ export interface SupportDocumentValidationReport {
 export function validateSupportDocumentExcelRows(
   groups: GroupedSupportDocument[],
   costCenters: SiigoCostCenterCatalogItemDto[],
+  accounts?: Array<{ code: string; name: string }>,
 ): SupportDocumentValidationReport {
   const errors: SupportDocumentValidationRowError[] = [];
   const invalidGroupKeys = new Set<string>();
@@ -59,6 +60,13 @@ export function validateSupportDocumentExcelRows(
     }
 
     const costCenterText = group.costCenter?.trim();
+    if (accounts) {
+      group.rows.forEach((row, index) => {
+        if (row.account?.trim() && !accounts.some((account) => account.code === row.account!.trim().split(/\s+-\s+/, 1)[0])) {
+          addError(`Cuenta contable "${row.account}" del ítem ${index + 1} no existe en SIIGO para esta empresa.`);
+        }
+      });
+    }
 
     // Vacío SÍ pasa — el centro de costos es opcional. Solo se rechaza un
     // valor que no matchea NADA del catálogo real (typo, o un centro de

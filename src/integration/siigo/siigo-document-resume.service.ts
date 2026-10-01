@@ -72,7 +72,15 @@ export class SiigoDocumentResumeService {
       return { items: [] };
     }
 
-    const batchContext = await this.createBatchContext(companyId);
+    let batchContext: SiigoBatchContext;
+    try {
+      batchContext = await this.createBatchContext(companyId);
+    } catch (error) {
+      const results = await Promise.allSettled(uniqueIds.map((id) =>
+        this.buildFailedResponseSafely(id, companyId, error)));
+      this.logger.error(`[companyId=${companyId}] No se pudo iniciar la revisión de proveedores`, error instanceof Error ? error.stack : String(error));
+      return { items: results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []) };
+    }
     const prepareOnly = options?.prepareOnly ?? true;
     // mapWithConcurrency (no Promise.all sin límite): reanudar un lote de
     // 50 documentos importados no debe disparar 50 llamadas paralelas
@@ -264,8 +272,9 @@ export class SiigoDocumentResumeService {
       }
 
       if (
-        refreshed.status === ElectronicDocumentStatus.ACCOUNT_REQUIRED ||
-        refreshed.status === ElectronicDocumentStatus.ACCOUNT_MAPPING_REQUIRED
+        refreshed.supplierExistsInSiigo === true &&
+        (refreshed.status === ElectronicDocumentStatus.ACCOUNT_REQUIRED ||
+        refreshed.status === ElectronicDocumentStatus.ACCOUNT_MAPPING_REQUIRED)
       ) {
         return this.buildResponse(
           'ACCOUNT_REQUIRED',
@@ -275,6 +284,11 @@ export class SiigoDocumentResumeService {
         );
       }
 
+      await this.electronicDocumentService.updateStatus(
+        document.id,
+        prepareOnly ? ElectronicDocumentStatus.FAILED : ElectronicDocumentStatus.PURCHASE_FAILED,
+        companyId,
+      );
       return this.buildResponse('FAILED', document.id, companyId, message);
     }
   }

@@ -53,6 +53,23 @@ function buildService(status: ElectronicDocumentStatus) {
 }
 
 describe('SiigoDocumentResumeService.resume', () => {
+  it('una cuenta sugerida no oculta el fallo cuando el proveedor sigue sin verificar', async () => {
+    const { service, electronicDocumentService, siigoDocumentPreparationService } = buildService(ElectronicDocumentStatus.ACCOUNT_REQUIRED);
+    electronicDocumentService.requireById.mockResolvedValue({
+      ...(buildDocumentStub(ElectronicDocumentStatus.ACCOUNT_REQUIRED) as any),
+      supplierExistsInSiigo: null,
+    } as never);
+    siigoDocumentPreparationService.prepareSupplierAndAccounts.mockRejectedValue(new Error('SIIGO no responde'));
+    expect((await service.resume('doc-1', 'company-1')).nextStep).toBe('FAILED');
+    expect(electronicDocumentService.updateStatus).toHaveBeenCalledWith('doc-1', ElectronicDocumentStatus.FAILED, 'company-1');
+  });
+  it('persiste el error de preparación para que el polling no lo vea en proceso', async () => {
+    const { service, electronicDocumentService, siigoDocumentPreparationService } = buildService(ElectronicDocumentStatus.PENDING);
+    siigoDocumentPreparationService.prepareSupplierAndAccounts.mockRejectedValue(new Error('Consulta fallida'));
+    const result = await service.resume('doc-1', 'company-1');
+    expect(result.nextStep).toBe('FAILED');
+    expect(electronicDocumentService.updateStatus).toHaveBeenCalledWith('doc-1', ElectronicDocumentStatus.FAILED, 'company-1');
+  });
   it('en modo prepareOnly (default), un documento PURCHASE_FAILED se reporta como FAILED sin volver a prepararlo (no limpia el error sin reintentar de verdad)', async () => {
     const {
       service,
@@ -98,6 +115,14 @@ describe('SiigoDocumentResumeService.resume', () => {
 });
 
 describe('SiigoDocumentResumeService.resumeBatch', () => {
+  it('un fallo de autenticación marca todos los documentos y no inicia la preparación', async () => {
+    const { service, siigoAuthService, electronicDocumentService, siigoDocumentPreparationService } = buildService(ElectronicDocumentStatus.PENDING);
+    siigoAuthService.getValidAuthContext.mockRejectedValue(new Error('Autenticación fallida'));
+    await service.resumeBatch(['doc-1', 'doc-2'], 'company-1');
+    expect(siigoDocumentPreparationService.prepareSupplierAndAccounts).not.toHaveBeenCalled();
+    expect(electronicDocumentService.updateStatus).toHaveBeenCalledWith('doc-1', ElectronicDocumentStatus.FAILED, 'company-1');
+    expect(electronicDocumentService.updateStatus).toHaveBeenCalledWith('doc-2', ElectronicDocumentStatus.FAILED, 'company-1');
+  });
   it('nunca reanuda más documentos en simultáneo que el límite de concurrencia acotada (bug real: 50 resume() disparados a la vez saturaban el rate limit de SIIGO)', async () => {
     const { service, siigoDocumentPreparationService } = buildService(
       ElectronicDocumentStatus.ACCOUNT_MAPPED,

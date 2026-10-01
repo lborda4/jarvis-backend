@@ -207,8 +207,13 @@ export class JarvisInvoiceSendService {
         this.dataSource,
         resolutionLockKey,
         async () => {
-          const numbering =
-            await this.jarvisSetupService.allocateResolutionNumber(
+          const explicitCreditNumber = kind === JarvisResolutionKind.CREDIT_NOTE && request.number != null;
+          if (explicitCreditNumber && (!Number.isSafeInteger(request.number) || request.number! < 1)) {
+            throw new BadRequestException('Indique un consecutivo entero positivo para la nota crédito.');
+          }
+          const numbering = explicitCreditNumber
+            ? { number: request.number!, prefix: request.prefix ?? '', formNumber: null }
+            : await this.jarvisSetupService.allocateResolutionNumber(
               companyId,
               kind,
             );
@@ -452,7 +457,7 @@ export class JarvisInvoiceSendService {
             ? this.nextPymeApiClient.createSupportDocument({ ...supportPayload, seller: customer }, companyToken)
             : this.nextPymeApiClient.createInvoice(payload, companyToken)).catch(async (error: unknown) => {
                 if (
-                  error instanceof BadGatewayException &&
+                  !explicitCreditNumber && error instanceof BadGatewayException &&
                   /documento\s+procesado\s+anteriormente/i.test(error.message)
                 ) {
                   // El número ya está ocupado en DIAN. Avanzar bajo el mismo
@@ -505,7 +510,7 @@ export class JarvisInvoiceSendService {
             this.logger.error('No se pudo registrar la factura aceptada ' + createdConsecutive, historyError);
           }
 
-          await this.jarvisSetupService.commitResolutionNumber(
+          if (!explicitCreditNumber) await this.jarvisSetupService.commitResolutionNumber(
             companyId,
             kind,
             createdNumber,

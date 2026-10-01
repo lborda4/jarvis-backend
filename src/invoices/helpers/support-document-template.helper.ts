@@ -10,6 +10,7 @@ const TEMPLATE_HEADERS = [
   'Nombre tercero',
   'Prefijo',
   'Consecutivo',
+  'Cuenta contable',
   'Descripcion',
   'Cantidad',
   'Valor unitario',
@@ -17,7 +18,7 @@ const TEMPLATE_HEADERS = [
   'Observaciones',
 ] as const;
 
-const COLUMN_WIDTHS = [14, 20, 20, 30, 12, 14, 32, 12, 16, 26, 38];
+const COLUMN_WIDTHS = [14, 20, 20, 30, 12, 14, 40, 32, 12, 16, 26, 38];
 
 const HEADER_FILL_COLOR = 'FF2F5233';
 const HEADER_ROW_HEIGHT = 26;
@@ -58,7 +59,7 @@ function formatCostCenterLabel(costCenter: {
   return `${costCenter.code} - ${costCenter.name}`;
 }
 
-function buildTemplateExampleRows(exampleCostCenterLabel: string): string[][] {
+function buildTemplateExampleRows(exampleCostCenterLabel: string): Array<Array<string | null>> {
   const todayFormatted = getTodayFormatted();
 
   return [
@@ -69,6 +70,7 @@ function buildTemplateExampleRows(exampleCostCenterLabel: string): string[][] {
       'Proveedor Ejemplo S.A.S.',
       'DS',
       '100',
+      null,
       'Servicio de consultoría',
       '1',
       '150000',
@@ -82,6 +84,7 @@ function buildTemplateExampleRows(exampleCostCenterLabel: string): string[][] {
       'Juan Pérez',
       'DS',
       '101',
+      null,
       'Papelería',
       '2',
       '25000',
@@ -95,6 +98,7 @@ function buildTemplateExampleRows(exampleCostCenterLabel: string): string[][] {
       'Juan Pérez',
       'DS',
       '101',
+      null,
       'Transporte',
       '1',
       '80000',
@@ -140,6 +144,7 @@ function applyListDataValidation(
  */
 export async function buildSupportDocumentTemplateExcel(
   costCenters: SupportDocumentTemplateCostCenter[] = [],
+  accounts: Array<{ code: string; name: string }> = [],
 ): Promise<Buffer> {
   // El nombre del tercero se resuelve por NIT (BD → SIIGO), no va en el Excel.
   const supplierNameIndex = TEMPLATE_HEADERS.indexOf('Nombre tercero');
@@ -246,6 +251,18 @@ export async function buildSupportDocumentTemplateExcel(
     );
   }
 
+  if (accounts.length > 0) {
+    const accountSheet = workbook.addWorksheet('CuentasContables');
+    accountSheet.state = 'veryHidden';
+    accounts.forEach((account, index) => {
+      accountSheet.getCell(index + 1, 1).value = `${account.code} - ${account.name}`;
+    });
+    applyListDataValidation(sheet, headers.indexOf('Cuenta contable'),
+      `CuentasContables!$A$1:$A$${accounts.length}`, {
+        errorTitle: 'Cuenta contable no reconocida',
+        error: 'Selecciona una cuenta de la empresa o deja la celda vacía para usar las sugerencias.',
+      });
+  }
   const buffer = await workbook.xlsx.writeBuffer();
 
   return Buffer.from(buffer);

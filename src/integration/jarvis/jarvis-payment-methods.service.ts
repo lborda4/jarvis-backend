@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
@@ -9,6 +9,7 @@ import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog
 
 @Injectable()
 export class JarvisPaymentMethodsService {
+  private readonly logger = new Logger(JarvisPaymentMethodsService.name);
   constructor(
     @InjectRepository(JarvisPaymentMethod) private readonly repository: Repository<JarvisPaymentMethod>,
     private readonly integrations: IntegrationsRepository,
@@ -26,23 +27,27 @@ export class JarvisPaymentMethodsService {
     await this.requireCompany(companyId);
     let items = await this.repository.find({ where: { companyId }, order: { createdAt: 'ASC', id: 'ASC' } });
     const defaults = [
-      { name: 'Efectivo', masterName: 'Efectivo' },
-      { name: 'Crédito clientes', masterName: 'Otro' },
-      { name: 'Transferencia bancaria', masterName: 'Transferencia crédito' },
-      { name: 'Tarjeta crédito', masterName: 'Tarjeta crédito' },
-      { name: 'Tarjeta débito', masterName: 'Tarjeta débito' },
+      { name: 'Efectivo', masterName: 'Efectivo', code: '10' },
+      { name: 'Crédito clientes', masterName: 'Otro', code: 'ZZZ' },
+      { name: 'Transferencia bancaria', masterName: 'Transferencia crédito', code: '30' },
+      { name: 'Tarjeta crédito', masterName: 'Tarjeta crédito', code: '48' },
+      { name: 'Tarjeta débito', masterName: 'Tarjeta débito', code: '49' },
     ];
     const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const missing = defaults.filter(preset => !items.some(item => item.name.trim().toLowerCase() === preset.name.toLowerCase()));
     if (missing.length) {
       const catalog = await this.catalogs.getPaymentMethods();
-      const values = missing.map(preset => {
-        const master = catalog.find(row => normalize(row.name) === normalize(preset.masterName));
-        if (!master) throw new BadRequestException('No se encontró la forma de pago predeterminada ' + preset.name + ' en NextPyme.');
-        return { companyId, name: preset.name, nextpymeMethodId: master.id, nextpymeMethodName: master.name };
+      const values = missing.flatMap(preset => {
+        const master = catalog.find(row => String(row.code ?? '').trim().toUpperCase() === preset.code)
+          ?? catalog.find(row => normalize(row.name) === normalize(preset.masterName));
+        if (!master) {
+          this.logger.warn('No está disponible el medio de pago maestro con código ' + preset.code);
+          return [];
+        }
+        return [{ companyId, name: preset.name, nextpymeMethodId: master.id, nextpymeMethodName: master.name }];
       });
       // La restricción única por empresa y nombre evita duplicados en cargas simultáneas.
-      await this.repository.createQueryBuilder().insert().values(values).orIgnore().execute();
+      if (values.length) await this.repository.createQueryBuilder().insert().values(values).orIgnore().execute();
       items = await this.repository.find({ where: { companyId }, order: { createdAt: 'ASC', id: 'ASC' } });
     }
     const priority = (name: string) => { const index = defaults.findIndex(item => item.name.toLowerCase() === name.trim().toLowerCase()); return index < 0 ? defaults.length : index; };

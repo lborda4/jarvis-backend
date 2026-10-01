@@ -23,6 +23,7 @@ import { JarvisDocumentPreparationService } from '../integration/jarvis/jarvis-d
 import { SiigoDocumentPreparationService } from '../integration/siigo/siigo-document-preparation.service';
 import { SiigoPurchaseAiClassificationService } from '../integration/siigo/siigo-purchase-ai-classification.service';
 import { SiigoCostCentersCatalogService } from '../integration/siigo/siigo-cost-centers-catalog.service';
+import { SiigoAccountsCatalogService } from '../integration/siigo/siigo-accounts-catalog.service';
 import { ImportSessionService } from '../import-session/import-session.service';
 import { ExcelService } from '../common/services/excel.service';
 import { ExtractInvoicesResponseDto } from './dto/extract-invoices-response.dto';
@@ -75,6 +76,7 @@ export class InvoicesService {
     private readonly purchaseInvoiceImportJobRowsRepository: PurchaseInvoiceImportJobRowsRepository,
     private readonly purchaseInvoiceImportStatusService: PurchaseInvoiceImportStatusService,
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
+    private readonly siigoAccountsCatalogService: SiigoAccountsCatalogService,
   ) {}
 
   /**
@@ -104,7 +106,9 @@ export class InvoicesService {
         return [];
       });
 
-    return validateSupportDocumentExcelRows(groups, costCenters);
+    return validateSupportDocumentExcelRows(groups, costCenters,
+      groups.some((group) => group.rows.some((row) => row.account?.trim()))
+        ? await this.siigoAccountsCatalogService.listAccounts(companyId) : []);
   }
 
   async previewSupportDocumentsFromExcel(
@@ -547,7 +551,7 @@ export class InvoicesService {
       });
 
     return {
-      buffer: await buildSupportDocumentTemplateExcel(costCenters),
+      buffer: await buildSupportDocumentTemplateExcel(costCenters, await this.siigoAccountsCatalogService.listAccounts(companyId)),
       filename: SUPPORT_DOCUMENT_TEMPLATE_FILENAME,
     };
   }

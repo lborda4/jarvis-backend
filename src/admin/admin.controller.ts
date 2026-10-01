@@ -1,3 +1,4 @@
+import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
 import { SaveAdminBoldCredentialsDto } from './dto/admin-bold-credentials.dto';
 import {
   Body,
@@ -58,6 +59,12 @@ export class AdminController {
   @ApiOperation({ summary: 'Guardar llaves Bold de la empresa' })
   saveBoldCredentials(@Param('companyId') companyId: string, @Body() request: SaveAdminBoldCredentialsDto) {
     return this.adminService.saveBoldCredentials(companyId, request);
+  }
+
+  @Patch('companies/:companyId/tracking')
+  @ApiOperation({ summary: 'Configurar comercial y periodicidad del seguimiento' })
+  updateTracking(@Param('companyId') companyId: string, @Body() request: UpdateCompanyTrackingDto) {
+    return this.adminService.updateCompanyTracking(companyId, request);
   }
 
   @Get('plans')

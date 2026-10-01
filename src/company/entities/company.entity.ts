@@ -55,6 +55,12 @@ export class Company {
   @Column({ name: 'city_name', type: 'varchar', nullable: true })
   cityName: string | null;
 
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  commercial: string | null;
+
+  @Column({ name: 'billing_cycle', type: 'varchar', length: 10, nullable: true })
+  billingCycle: 'MONTHLY' | 'ANNUAL' | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

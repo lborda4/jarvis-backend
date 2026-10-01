@@ -16,6 +16,16 @@ function buildService(
 }
 
 describe('SiigoDocumentPreparationService.prepareDocuments', () => {
+  it('marca el lote como error si falla la autenticación antes de preparar documentos', async () => {
+    const documents = { updateStatus: jest.fn().mockResolvedValue(undefined) };
+    const service = buildService(documents);
+    jest.spyOn(service as any, 'createBatchContext').mockRejectedValue(new Error('SIIGO no disponible'));
+    const prepare = jest.spyOn(service, 'prepareSupplierAndAccounts');
+    await service.prepareDocuments(['doc-1', 'doc-2'], 'company-1');
+    expect(prepare).not.toHaveBeenCalled();
+    expect(documents.updateStatus).toHaveBeenCalledWith('doc-1', ElectronicDocumentStatus.FAILED, 'company-1');
+    expect(documents.updateStatus).toHaveBeenCalledWith('doc-2', ElectronicDocumentStatus.FAILED, 'company-1');
+  });
   it('nunca procesa más documentos en simultáneo que el límite de concurrencia acotada', async () => {
     const service = buildService();
     jest.spyOn(service as any, 'createBatchContext').mockResolvedValue({});

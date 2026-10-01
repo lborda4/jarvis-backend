@@ -45,6 +45,9 @@ export class JarvisTax {
   @Column({ type: 'numeric', precision: 12, scale: 4, nullable: true })
   rate: string | null;
 
+  @Column({ name: 'default_retired', type: 'boolean', default: false })
+  defaultRetired: boolean;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 

@@ -35,6 +35,22 @@ function resolveStateCodeFromCity(cityCode: string): string {
   return cityCode.slice(0, 2) || '11';
 }
 
+function normalizeColombianCityCode(value: string, stateCode?: string): string {
+  let code = value.trim();
+  // Algunas fuentes devuelven departamento + DANE completo: 11 + 11001.
+  if (/^\d{7}$/.test(code) && code.slice(0, 2) === code.slice(2, 4)) {
+    code = code.slice(2);
+  }
+  if (/^\d{3}$/.test(code) && stateCode && /^\d{1,2}$/.test(stateCode)) {
+    code = stateCode.padStart(2, '0') + code;
+  }
+  if (/^\d{4}$/.test(code)) code = code.padStart(5, '0');
+  if (!/^\d{5}$/.test(code)) {
+    throw new BadRequestException('El código de ciudad del tercero para SIIGO debe ser un código DANE de 5 dígitos. Revisa la ciudad del proveedor.');
+  }
+  return code;
+}
+
 function buildAddress(
   supplier: ElectronicDocumentSupplier,
   companyFallback?: SiigoSupplierAddressFallback,
@@ -48,6 +64,12 @@ function buildAddress(
     companyFallback?.stateCode?.trim() ||
     (fallbackCityCode ? resolveStateCodeFromCity(fallbackCityCode) : undefined);
 
+  const isColombia = !countryCode || countryCode.toUpperCase() === 'CO';
+  const selectedCity = cityCode || fallbackCityCode || '11001';
+  const resolvedCity = isColombia
+    ? normalizeColombianCityCode(selectedCity, cityCode ? stateCode : fallbackStateCode)
+    : selectedCity;
+
   // SIIGO exige el bloque address para crear terceros. Cuando la DIAN/NextPyme
   // no trae ningún dato de dirección (ej. asociaciones/entidades pequeñas),
   // se envía igual con valores por defecto en vez de omitirlo, porque omitir
@@ -58,9 +80,9 @@ function buildAddress(
   return {
     address: addressText || '0000',
     city: {
-      country_code: countryCode || 'Co',
-      state_code: stateCode || fallbackStateCode || '11',
-      city_code: cityCode || fallbackCityCode || '11001',
+      country_code: isColombia ? 'Co' : countryCode!,
+      state_code: isColombia ? resolveStateCodeFromCity(resolvedCity) : stateCode || fallbackStateCode || '11',
+      city_code: resolvedCity,
     },
   };
 }

@@ -36,6 +36,10 @@ export class CreateJarvisInvoiceItemDto {
 }
 
 export class CreateJarvisInvoiceRequestDto {
+  @ApiPropertyOptional({ description: 'Consecutivo explícito de la nota crédito.' })
+  number?: number;
+  @ApiPropertyOptional({ description: 'Prefijo de la nota crédito enviado a NextPyme.' })
+  prefix?: string;
   @ApiPropertyOptional()
   billingReference?: { number: string; uuid: string; issueDate: string };
   @ApiPropertyOptional()

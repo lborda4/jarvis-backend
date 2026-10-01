@@ -164,6 +164,12 @@ export class JarvisController {
     );
   }
 
+  @Get('catalogs/type-rejections')
+  @ApiOperation({ summary: 'Motivos de las notas desde la tabla maestra type_rejections' })
+  listTypeRejections() {
+    return this.jarvisSupportDocumentSendService.listTypeRejections();
+  }
+
   @Get('catalogs')
   @ApiOperation({
     summary: 'Catálogos NextPyme para documento soporte',

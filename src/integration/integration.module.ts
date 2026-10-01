@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { IntegrationLogoService } from './integration-logo.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HistorialFactura } from './entities/historial-factura.entity';
 import { Integration } from './entities/integration.entity';
@@ -29,6 +30,7 @@ import { IntegrationSetupService } from './integration-setup.service';
   ],
   controllers: [IntegrationsController],
   providers: [
+    IntegrationLogoService,
     IntegrationsRepository,
     SiigoAccountsRepository,
     SupplierConfigurationsRepository,
@@ -39,6 +41,7 @@ import { IntegrationSetupService } from './integration-setup.service';
     IntegrationsService,
   ],
   exports: [
+    IntegrationLogoService,
     IntegrationsRepository,
     SiigoAccountsRepository,
     SupplierConfigurationsRepository,

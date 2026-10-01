@@ -57,6 +57,7 @@ const COLUMN_ALIASES = {
     'centro costos',
     'centro costo',
   ],
+  account: ['cuenta contable', 'codigo cuenta contable', 'cuenta puc'],
   observations: ['observaciones', 'comentarios', 'observacion', 'comentario'],
 } as const;
 
@@ -452,6 +453,7 @@ function mapSupportDocumentRow(
     lineTotal,
     taxAmount: getNumberValue(row, columnIndexes.taxAmount, 0),
     costCenter: getCellValue(row, columnIndexes.costCenter) || undefined,
+    account: getCellValue(row, columnIndexes.account) || undefined,
     observations: getCellValue(row, columnIndexes.observations) || undefined,
   };
 }

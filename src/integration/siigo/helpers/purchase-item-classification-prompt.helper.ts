@@ -403,6 +403,7 @@ export function buildAccountCodeClassificationPrompt(
   params: AccountCodeClassificationPromptParams,
 ): OpenRouterMessage[] {
   const accountsCatalog = params.accounts
+    .filter((account) => !account.code.trim().startsWith('4'))
     .map((account) => `${account.code} ${account.name}`)
     .join('\n');
 
@@ -417,10 +418,10 @@ export function buildAccountCodeClassificationPrompt(
     'ITEMS:',
     itemsSection(params.items),
     'HISTORIAL_FACTURAS_PROVEEDOR:',
-    historicalExamplesSection(params.historicalExamples).trim() ||
+    historicalExamplesSection(params.historicalExamples?.filter((row) => !row.cuentaPuc.trim().startsWith('4'))).trim() ||
       'Sin historial de facturas disponible.',
     'BALANCE_TERCERO:',
-    supplierUsedAccountsSection(params.supplierUsedAccounts).trim() ||
+    supplierUsedAccountsSection(params.supplierUsedAccounts?.filter((account) => !account.code.trim().startsWith('4'))).trim() ||
       'Sin balance del tercero disponible.',
     'CATALOGO_CUENTAS:',
     accountsCatalog || 'Sin cuentas disponibles.',
@@ -429,7 +430,7 @@ export function buildAccountCodeClassificationPrompt(
   ].join('\n\n');
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT_ACCOUNT_CODE },
+    { role: 'system', content: SYSTEM_PROMPT_ACCOUNT_CODE + '\n\nRegla adicional: En facturas de compra no recomiendes cuentas contables de clase 4 (códigos que comienzan por 4), aunque el proveedor no tenga historial. Si no hay una cuenta válida en el catálogo permitido, devuelve accountCode null; nunca inventes ni sustituyas un código.' },
     { role: 'user', content: userContent },
   ];
 }
@@ -482,7 +483,9 @@ export function parseAccountCodeClassificationResponse(
   rawText: string,
   expectedItemIds: string[],
 ): ParsedAccountCodeClassification {
-  return { items: parseCodeItems(rawText, expectedItemIds, 'accountCode') };
+  return { items: parseCodeItems(rawText, expectedItemIds, 'accountCode').map((item) =>
+    item.accountCode?.startsWith('4') ? { accountCode: null, confidence: null } : item,
+  ) };
 }
 
 // ---------------------------------------------------------------------------

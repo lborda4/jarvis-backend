@@ -6,8 +6,15 @@ describe('sales invoice PDF data', () => {
     const repository = { createQueryBuilder: jest.fn(() => query), update: jest.fn() };
     const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'company-token' }) };
     const client = { getInvoiceXmlByCufe: jest.fn().mockResolvedValue(DOWNLOAD_XML) };
-    return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never), repository, query, client };
+    const logos = { get: jest.fn().mockResolvedValue({ logoDataUrl: null }) };
+    return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never, logos as never), repository, query, client, logos };
   }
+  it('adds only the owning company logo to the PDF', async () => {
+    const { service, logos } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
+    logos.get.mockResolvedValue({ logoDataUrl: 'data:image/png;base64,test' } as never);
+    expect((await service.getData('owner', 'id')).logoDataUrl).toBe('data:image/png;base64,test');
+    expect(logos.get).toHaveBeenCalledWith('owner', 'JARVIS');
+  });
   it('uses the stored signed XML without calling the provider', async () => {
     const { service, client, query } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
     const data = await service.getData('company', 'id');

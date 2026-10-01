@@ -1,0 +1,38 @@
+import { MigrationInterface, QueryRunner } from 'typeorm';
+// Snapshots intentionally frozen for repeatable migrations.
+const legacy: Array<[string, string, string, number]> = [["101","IVA General 19%","IVA",19],["102","IVA Reducido 5%","IVA",5],["103","IVA Exento 0%","IVA",0],["104","IVA Excluido 0%","IVA",0],["105","IVA No gravado 0%","IVA",0],["201","Honorarios 10% · Persona natural","Retefuente",10],["202","Honorarios 11% · Persona jurídica","Retefuente",11],["203","Honorarios 11% · P.N. casos especiales","Retefuente",11],["204","Comisiones 10% · Persona natural","Retefuente",10],["205","Comisiones 11% · Persona jurídica","Retefuente",11],["206","Comisiones 11% · P.N. casos especiales","Retefuente",11],["207","Servicios 4% · Declarante","Retefuente",4],["208","Servicios 6% · No declarante","Retefuente",6],["209","Compras 2,5% · Declarante","Retefuente",2.5],["210","Compras 3,5% · No declarante","Retefuente",3.5],["211","Arrendamiento de inmuebles 3,5%","Retefuente",3.5],["212","Arrendamiento de bienes muebles 4%","Retefuente",4],["213","Aseo y vigilancia 2%","Retefuente",2],["214","Servicios temporales 1%","Retefuente",1],["215","Otros ingresos 2,5% · Declarante","Retefuente",2.5],["216","Otros ingresos 3,5% · No declarante","Retefuente",3.5],["301","ReteIVA General 15%","ReteIVA",15],["401","ReteICA Bogotá 4,14 x 1.000","ReteICA",4.14],["402","ReteICA Bogotá 6,90 x 1.000","ReteICA",6.9],["403","ReteICA Bogotá 9,66 x 1.000","ReteICA",9.66],["404","ReteICA Bogotá 11,04 x 1.000","ReteICA",11.04],["405","ReteICA Bogotá 13,80 x 1.000","ReteICA",13.8],["406","ReteICA Bogotá Financiero 14 x 1.000","ReteICA",14]];
+const presets = [{"code":"501","name":"INC | 4%","taxType":"INC","rate":"4","isActive":true,"category":"IMPUESTO"},{"code":"502","name":"INC | 8%","taxType":"INC","rate":"8","isActive":true,"category":"IMPUESTO"},{"code":"503","name":"INC | 16%","taxType":"INC","rate":"16","isActive":true,"category":"IMPUESTO"},{"code":"301","name":"ReteIVA | 15%","taxType":"ReteIVA","rate":"15","isActive":true,"category":"RETENCION"},{"code":"302","name":"ReteIVA | 100%","taxType":"ReteIVA","rate":"100","isActive":true,"category":"RETENCION"},{"code":"214","name":"Retefuente | 1%","taxType":"Retefuente","rate":"1","isActive":true,"category":"RETENCION"},{"code":"213","name":"Retefuente | 2%","taxType":"Retefuente","rate":"2","isActive":true,"category":"RETENCION"},{"code":"209","name":"Retefuente | 2,5%","taxType":"Retefuente","rate":"2.5","isActive":true,"category":"RETENCION"},{"code":"210","name":"Retefuente | 3,5%","taxType":"Retefuente","rate":"3.5","isActive":true,"category":"RETENCION"},{"code":"207","name":"Retefuente | 4%","taxType":"Retefuente","rate":"4","isActive":true,"category":"RETENCION"},{"code":"208","name":"Retefuente | 6%","taxType":"Retefuente","rate":"6","isActive":true,"category":"RETENCION"},{"code":"201","name":"Retefuente | 10%","taxType":"Retefuente","rate":"10","isActive":true,"category":"RETENCION"},{"code":"202","name":"Retefuente | 11%","taxType":"Retefuente","rate":"11","isActive":true,"category":"RETENCION"},{"code":"401","name":"ReteICA | 4,14 x 1.000","taxType":"ReteICA","rate":"4.14","isActive":true,"category":"RETENCION"},{"code":"402","name":"ReteICA | 6,90 x 1.000","taxType":"ReteICA","rate":"6.9","isActive":true,"category":"RETENCION"},{"code":"407","name":"ReteICA | 7,00 x 1.000","taxType":"ReteICA","rate":"7","isActive":true,"category":"RETENCION"},{"code":"408","name":"ReteICA | 8,00 x 1.000","taxType":"ReteICA","rate":"8","isActive":true,"category":"RETENCION"},{"code":"403","name":"ReteICA | 9,66 x 1.000","taxType":"ReteICA","rate":"9.66","isActive":true,"category":"RETENCION"},{"code":"404","name":"ReteICA | 11,04 x 1.000","taxType":"ReteICA","rate":"11.04","isActive":true,"category":"RETENCION"},{"code":"405","name":"ReteICA | 13,80 x 1.000","taxType":"ReteICA","rate":"13.8","isActive":true,"category":"RETENCION"},{"code":"406","name":"ReteICA | 14,00 x 1.000","taxType":"ReteICA","rate":"14","isActive":true,"category":"RETENCION"},{"code":"103","name":"IVA | 0%","taxType":"IVA","rate":"0","isActive":true,"category":"IMPUESTO"},{"code":"102","name":"IVA | 5%","taxType":"IVA","rate":"5","isActive":true,"category":"IMPUESTO"},{"code":"101","name":"IVA | 19%","taxType":"IVA","rate":"19","isActive":true,"category":"IMPUESTO"}];
+export class ReplaceJarvisTaxDefaults1791900000000 implements MigrationInterface {
+  name = 'ReplaceJarvisTaxDefaults1791900000000';
+  async up(runner: QueryRunner): Promise<void> {
+    await runner.query('ALTER TABLE jarvis_taxes ADD COLUMN IF NOT EXISTS default_retired boolean NOT NULL DEFAULT false');
+    await runner.query('LOCK TABLE jarvis_taxes IN SHARE ROW EXCLUSIVE MODE');
+    const companies = await runner.query(`SELECT s.company_id, i.id AS integration_id FROM jarvis_tax_catalog_seeds s JOIN integrations i ON i.company_id = s.company_id AND i.provider = 'JARVIS'`);
+    for (const company of companies) {
+      const rows = await runner.query('SELECT * FROM jarvis_taxes WHERE company_id = $1 AND default_retired = false', [company.company_id]);
+      for (const preset of presets) {
+        // Only untouched legacy defaults are replaced; user customizations remain.
+        const matches = rows.filter(row => legacy.some(([code,name,type,rate]) => row.code === code && row.name === name && row.tax_type === type && Number(row.rate) === rate && row.category === (type === 'IVA' ? 'IMPUESTO' : 'RETENCION')) && row.tax_type === preset.taxType && Number(row.rate) === Number(preset.rate));
+        let canonical = rows.find(row => row.name === preset.name && row.tax_type === preset.taxType && Number(row.rate) === Number(preset.rate) && row.category === preset.category) ?? matches[0];
+        if (canonical) {
+          await runner.query('UPDATE jarvis_taxes SET name = $2, is_active = true, updated_at = now() WHERE id = $1', [canonical.id, preset.name]);
+        } else {
+          // An old numeric code may belong to a customized tax. Allocate another.
+          const code = rows.some(row => row.code === preset.code) ? (await runner.query(`SELECT (COALESCE(MAX(CASE WHEN code ~ '^[0-9]+$' THEN code::numeric END), 0) + 1)::text AS code FROM jarvis_taxes WHERE company_id = $1`, [company.company_id]))[0].code : preset.code;
+          [canonical] = await runner.query('INSERT INTO jarvis_taxes (company_id,integration_id,category,code,name,tax_type,rate,is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING *', [company.company_id, company.integration_id, preset.category, code, preset.name, preset.taxType, preset.rate]);
+          rows.push(canonical);
+        }
+        for (const duplicate of matches.filter(row => row.id !== canonical.id)) {
+          await runner.query('INSERT INTO product_taxes (product_id,tax_id) SELECT product_id,$2 FROM product_taxes WHERE tax_id = $1 ON CONFLICT DO NOTHING', [duplicate.id,canonical.id]);
+          await runner.query('DELETE FROM product_taxes WHERE tax_id = $1', [duplicate.id]);
+          // Archive rather than delete so historical references keep resolving.
+          await runner.query('UPDATE jarvis_taxes SET default_retired = true, is_active = false, updated_at = now() WHERE id = $1', [duplicate.id]);
+        }
+        await runner.query('UPDATE jarvis_taxes SET is_in_use = is_in_use OR EXISTS (SELECT 1 FROM product_taxes WHERE tax_id = $1) WHERE id = $1', [canonical.id]);
+      }
+    }
+  }
+  async down(): Promise<void> {
+    throw new Error('La unificación conserva los impuestos anteriores archivados; revertir requiere restaurar sus asociaciones desde un respaldo.');
+  }
+}

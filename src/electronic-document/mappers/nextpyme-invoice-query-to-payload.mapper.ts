@@ -216,7 +216,7 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
   // para la base gravable) — line_extension_amount y payable_amount solo se
   // usan como respaldo cuando tax_exclusive_amount viene en 0 (ej. facturas
   // sin IVA de algunos proveedores, donde ese campo no se diligencia).
-  const subtotal =
+  let subtotal =
     taxExclusive > 0
       ? taxExclusive
       : lineExtension > 0
@@ -243,6 +243,19 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
       : taxExclusive > 0 && taxInclusive > taxExclusive
         ? taxInclusive - taxExclusive
         : Math.max(payable + discount - subtotal, 0);
+  // Algunos emisores informan en tax_exclusive_amount solo las bases que
+  // aparecen en tax_totals. Usar el subtotal completo certificado únicamente
+  // si coincide con las líneas y concilia con el total antes de descuentos globales.
+  const linesSubtotal = toNumber(result.invoice_lines.reduce(
+    (sum, line) => sum + toNumber(line.line_extension_amount), 0,
+  ));
+  const invoiceTaxes = toNumber([...taxesByType.values()].reduce((sum, amount) => sum + amount, 0));
+  if (lineExtension > taxExclusive && invoiceTaxTotals.length > 0 &&
+      Math.abs(linesSubtotal - lineExtension) < 0.011 &&
+      Math.abs(toNumber(lineExtension + invoiceTaxes) - taxInclusive) < 0.011 &&
+      Math.abs(toNumber(taxInclusive - discount + toNumber(totals.charge_total_amount)) - payable) < 0.011) {
+    subtotal = lineExtension;
+  }
   // Retenciones sugeridas por el vendedor, certificadas en la factura DIAN
   // (ver comentario en NextPymeInvoiceQueryResult.with_holding_tax_totals) —
   // se descartan entradas sin tax_code o con porcentaje 0/inválido, nunca se

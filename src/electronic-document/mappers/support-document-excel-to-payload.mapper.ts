@@ -10,6 +10,7 @@ export function mapGroupedSupportDocumentToPayload(
     valorUnitario: row.unitValue,
     total: row.lineTotal > 0 ? row.lineTotal : row.quantity * row.unitValue,
     ...(row.itemCode?.trim() ? { codigo: row.itemCode.trim() } : {}),
+    ...(row.accountMapping ? { accountMapping: { ...row.accountMapping }, itemType: 'Account' as const } : {}),
   }));
 
   const subtotal = roundMoney(

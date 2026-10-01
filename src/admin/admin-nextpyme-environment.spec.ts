@@ -45,6 +45,8 @@ describe('Configuración NextPyme de empresa desde admin', () => {
     const result = await service.createCompany(request, 'admin-1');
     expect(nextPyme.configureProductionEnvironment).toHaveBeenCalledWith('company-token');
     expect(result.company.nextPymeToken).toBe('company-token');
+    expect(result.company.billingCycle).toBe('MONTHLY');
+    expect(result.company.subscriptionDueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(nextPyme.configureProductionEnvironment.mock.invocationCallOrder[0])
       .toBeLessThan(companies.save.mock.invocationCallOrder[0]);
   });

@@ -10,7 +10,7 @@ describe('JarvisPaymentMethodsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     integrations.findByCompanyAndProvider.mockResolvedValue({ id: 'integration' });
-    catalogs.getPaymentMethods.mockResolvedValue([{ id: 10, name: 'Efectivo', code: '10' }, { id: 75, name: 'Otro*', code: 'ZZZ' }, { id: 42, name: 'Transferencia Crédito', code: '47' }, { id: 43, name: 'Tarjeta Crédito', code: '48' }, { id: 44, name: 'Tarjeta Débito', code: '49' }]);
+    catalogs.getPaymentMethods.mockResolvedValue([{ id: 10, name: 'Efectivo', code: '10' }, { id: 75, name: 'Otro*', code: 'ZZZ' }, { id: 42, name: 'Transferecia Crédito', code: '30' }, { id: 43, name: 'Tarjeta Crédito', code: '48' }, { id: 44, name: 'Tarjeta Débito', code: '49' }]);
     repository.save.mockImplementation(async value => ({ ...value, id: 'saved' }));
     repository.findOneBy.mockResolvedValue(null);
   });
@@ -46,7 +46,7 @@ describe('JarvisPaymentMethodsService', () => {
     expect(insert.values).toHaveBeenCalledWith([
       { companyId: 'company-a', name: 'Efectivo', nextpymeMethodId: 10, nextpymeMethodName: 'Efectivo' },
        { companyId: 'company-a', name: 'Crédito clientes', nextpymeMethodId: 75, nextpymeMethodName: 'Otro*' },
-      { companyId: 'company-a', name: 'Transferencia bancaria', nextpymeMethodId: 42, nextpymeMethodName: 'Transferencia Crédito' },
+      { companyId: 'company-a', name: 'Transferencia bancaria', nextpymeMethodId: 42, nextpymeMethodName: 'Transferecia Crédito' },
       { companyId: 'company-a', name: 'Tarjeta crédito', nextpymeMethodId: 43, nextpymeMethodName: 'Tarjeta Crédito' },
       { companyId: 'company-a', name: 'Tarjeta débito', nextpymeMethodId: 44, nextpymeMethodName: 'Tarjeta Débito' },
     ]);
@@ -69,8 +69,8 @@ describe('JarvisPaymentMethodsService', () => {
 describe('Missing master payment method', () => {
   it('does not insert guessed IDs when a master mapping is unavailable', async () => {
     const repository = { find: jest.fn().mockResolvedValue([]), createQueryBuilder: jest.fn() };
-    const service = new JarvisPaymentMethodsService(repository as never, { findByCompanyAndProvider: jest.fn().mockResolvedValue({ id: 'jarvis' }) } as never, { getPaymentMethods: jest.fn().mockResolvedValue([{ id: 10, name: 'Efectivo' }]) } as never);
-    await expect(service.list('company')).rejects.toThrow('Crédito clientes');
+    const service = new JarvisPaymentMethodsService(repository as never, { findByCompanyAndProvider: jest.fn().mockResolvedValue({ id: 'jarvis' }) } as never, { getPaymentMethods: jest.fn().mockResolvedValue([]) } as never);
+    await expect(service.list('company')).resolves.toEqual({ items: [], total: 0 });
     expect(repository.createQueryBuilder).not.toHaveBeenCalled();
   });
 });

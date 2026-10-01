@@ -63,6 +63,10 @@ export class NextPymeMasterCatalogService {
     return IVA_TAX_ID;
   }
 
+  async getTypeRejections(): Promise<NextPymeMasterRow[]> {
+    return this.getTable('type_rejections');
+  }
+
   async getTaxes(): Promise<NextPymeMasterRow[]> {
     return this.getTable('taxes');
   }

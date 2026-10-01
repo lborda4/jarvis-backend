@@ -1,0 +1,1524 @@
+{
+  "legal_monetary_totals": {
+    "line_extension_amount": "2332594.54",
+    "tax_exclusive_amount": "1293916.54",
+    "tax_inclusive_amount": "2527328.00",
+    "allowance_total_amount": "0.00",
+    "charge_total_amount": "0.00",
+    "payable_amount": "2527328.00"
+  },
+  "tax_totals": [
+    {
+      "tax_code": "01",
+      "tax_name": "IVA",
+      "tax_amount": "7260.95",
+      "percent": "5.00",
+      "amount": "145219.05"
+    },
+    {
+      "tax_code": "01",
+      "tax_name": "IVA",
+      "tax_amount": "187472.51",
+      "percent": "19.00",
+      "amount": "986697.49"
+    },
+    {
+      "tax_code": "01",
+      "tax_name": "IVA",
+      "tax_amount": "0.00",
+      "percent": "0.00",
+      "amount": "162000.00"
+    }
+  ],
+  "invoice_lines": [
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "18857.14",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "942.86",
+          "percent": "5.00",
+          "amount": "18857.14"
+        }
+      ],
+      "description": "Item 1",
+      "code": "1",
+      "price_amount": "9428.57",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "14142.86",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dctos 2-8may_7702084550053",
+          "amount": "2495.80",
+          "base_amount": "16639.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "2687.14",
+          "percent": "19.00",
+          "amount": "14142.86"
+        }
+      ],
+      "description": "Item 2",
+      "code": "2",
+      "price_amount": "8319.33",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "69428.57",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "3471.43",
+          "percent": "5.00",
+          "amount": "69428.57"
+        }
+      ],
+      "description": "Item 3",
+      "code": "3",
+      "price_amount": "69428.57",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "5.00",
+      "line_extension_amount": "65126.05",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "12373.95",
+          "percent": "19.00",
+          "amount": "65126.05"
+        }
+      ],
+      "description": "Item 4",
+      "code": "4",
+      "price_amount": "13025.21",
+      "base_quantity": "5.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "17200.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 5",
+      "code": "5",
+      "price_amount": "17200.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "3.00",
+      "line_extension_amount": "35042.02",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "6657.98",
+          "percent": "19.00",
+          "amount": "35042.02"
+        }
+      ],
+      "description": "Item 6",
+      "code": "6",
+      "price_amount": "11680.67",
+      "base_quantity": "3.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "14117.65",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "DSTO NUTRESA 2- 8 MAYO_7702025186440",
+          "amount": "3529.41",
+          "base_amount": "17647.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "2682.35",
+          "percent": "19.00",
+          "amount": "14117.65"
+        }
+      ],
+      "description": "Item 7",
+      "code": "7",
+      "price_amount": "8823.53",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "4.00",
+      "line_extension_amount": "29915.97",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5684.03",
+          "percent": "19.00",
+          "amount": "29915.97"
+        }
+      ],
+      "description": "Item 8",
+      "code": "8",
+      "price_amount": "7478.99",
+      "base_quantity": "4.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "4941.18",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dcto Sep MP 02May_7701023835770",
+          "amount": "2117.65",
+          "base_amount": "7059.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "938.82",
+          "percent": "19.00",
+          "amount": "4941.18"
+        }
+      ],
+      "description": "Item 9",
+      "code": "9",
+      "price_amount": "7058.83",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "5588.23",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dcto Sep MP 02May_7701023835763",
+          "amount": "2394.96",
+          "base_amount": "7983.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1061.77",
+          "percent": "19.00",
+          "amount": "5588.24"
+        }
+      ],
+      "description": "Item 10",
+      "code": "10",
+      "price_amount": "7983.19",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "5.00",
+      "line_extension_amount": "26500.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 11",
+      "code": "11",
+      "price_amount": "5300.00",
+      "base_quantity": "5.00"
+    },
+    {
+      "invoiced_quantity": "6.00",
+      "line_extension_amount": "222600.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 12",
+      "code": "12",
+      "price_amount": "37100.00",
+      "base_quantity": "6.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "7200.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 13",
+      "code": "13",
+      "price_amount": "7200.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "4.00",
+      "line_extension_amount": "36266.67",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dct 25 al 3 may_7702406000150",
+          "amount": "15542.86",
+          "base_amount": "51810.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1813.33",
+          "percent": "5.00",
+          "amount": "36266.67"
+        }
+      ],
+      "description": "Item 14",
+      "code": "14",
+      "price_amount": "12952.38",
+      "base_quantity": "4.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "12941.18",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dctos 2-8may_7702116000273",
+          "amount": "5546.22",
+          "base_amount": "18487.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "2458.82",
+          "percent": "19.00",
+          "amount": "12941.18"
+        }
+      ],
+      "description": "Item 15",
+      "code": "15",
+      "price_amount": "9243.70",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "19000.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 16",
+      "code": "16",
+      "price_amount": "9500.00",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "27151.26",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Hiper Aseo 1 a 31 may_7702425483163",
+          "amount": "3016.81",
+          "base_amount": "30168.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5158.74",
+          "percent": "19.00",
+          "amount": "27151.26"
+        }
+      ],
+      "description": "Item 17",
+      "code": "17",
+      "price_amount": "30168.07",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "4.00",
+      "line_extension_amount": "48151.26",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dto alpina 2-8may_7702001090297",
+          "amount": "16050.42",
+          "base_amount": "64202.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "9148.74",
+          "percent": "19.00",
+          "amount": "48151.26"
+        }
+      ],
+      "description": "Item 18",
+      "code": "18",
+      "price_amount": "16050.42",
+      "base_quantity": "4.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "16722.69",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "3177.31",
+          "percent": "19.00",
+          "amount": "16722.69"
+        }
+      ],
+      "description": "Item 19",
+      "code": "19",
+      "price_amount": "16722.69",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "25042.02",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "4757.98",
+          "percent": "19.00",
+          "amount": "25042.02"
+        }
+      ],
+      "description": "Item 20",
+      "code": "20",
+      "price_amount": "12521.01",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "7.00",
+      "line_extension_amount": "57400.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 21",
+      "code": "21",
+      "price_amount": "8200.00",
+      "base_quantity": "7.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "21800.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 22",
+      "code": "22",
+      "price_amount": "21800.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "75900.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 23",
+      "code": "23",
+      "price_amount": "75900.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "23445.38",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "4454.62",
+          "percent": "19.00",
+          "amount": "23445.38"
+        }
+      ],
+      "description": "Item 24",
+      "code": "24",
+      "price_amount": "23445.38",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "38571.43",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "7328.57",
+          "percent": "19.00",
+          "amount": "38571.43"
+        }
+      ],
+      "description": "Item 25",
+      "code": "25",
+      "price_amount": "38571.43",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "4.00",
+      "line_extension_amount": "30240.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dto colanta 2-8may_7702129025157",
+          "amount": "12960.00",
+          "base_amount": "43200.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 26",
+      "code": "26",
+      "price_amount": "10800.00",
+      "base_quantity": "4.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "39200.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 27",
+      "code": "27",
+      "price_amount": "19600.00",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "23361.35",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "4438.65",
+          "percent": "19.00",
+          "amount": "23361.34"
+        }
+      ],
+      "description": "Item 28",
+      "code": "28",
+      "price_amount": "11680.68",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "33529.41",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "6370.59",
+          "percent": "19.00",
+          "amount": "33529.41"
+        }
+      ],
+      "description": "Item 29",
+      "code": "29",
+      "price_amount": "33529.41",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "39411.77",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "7488.23",
+          "percent": "19.00",
+          "amount": "39411.76"
+        }
+      ],
+      "description": "Item 30",
+      "code": "30",
+      "price_amount": "39411.77",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "7983.19",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1516.81",
+          "percent": "19.00",
+          "amount": "7983.19"
+        }
+      ],
+      "description": "Item 31",
+      "code": "31",
+      "price_amount": "7983.19",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "21764.71",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "4135.29",
+          "percent": "19.00",
+          "amount": "21764.71"
+        }
+      ],
+      "description": "Item 32",
+      "code": "32",
+      "price_amount": "21764.71",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "18655.46",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "3544.54",
+          "percent": "19.00",
+          "amount": "18655.46"
+        }
+      ],
+      "description": "Item 33",
+      "code": "33",
+      "price_amount": "9327.73",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "4957.98",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "942.02",
+          "percent": "19.00",
+          "amount": "4957.98"
+        }
+      ],
+      "description": "Item 34",
+      "code": "34",
+      "price_amount": "4957.98",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "5798.32",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1101.68",
+          "percent": "19.00",
+          "amount": "5798.32"
+        }
+      ],
+      "description": "Item 35",
+      "code": "35",
+      "price_amount": "5798.32",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "14722.69",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Hiper Aseo 25 a 3 mayo_7702166006515",
+          "amount": "3680.67",
+          "base_amount": "18403.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "2797.31",
+          "percent": "19.00",
+          "amount": "14722.69"
+        }
+      ],
+      "description": "Item 36",
+      "code": "36",
+      "price_amount": "18403.36",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "4957.98",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "942.02",
+          "percent": "19.00",
+          "amount": "4957.98"
+        }
+      ],
+      "description": "Item 37",
+      "code": "37",
+      "price_amount": "4957.98",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "10000.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1900.00",
+          "percent": "19.00",
+          "amount": "10000.00"
+        }
+      ],
+      "description": "Item 38",
+      "code": "38",
+      "price_amount": "10000.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "4058.82",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "HIPERASEO 2-8MAYOO_7702137191257",
+          "amount": "1739.50",
+          "base_amount": "5798.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "771.18",
+          "percent": "19.00",
+          "amount": "4058.82"
+        }
+      ],
+      "description": "Item 39",
+      "code": "39",
+      "price_amount": "5798.32",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "36050.42",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "6849.58",
+          "percent": "19.00",
+          "amount": "36050.42"
+        }
+      ],
+      "description": "Item 40",
+      "code": "40",
+      "price_amount": "36050.42",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "11092.44",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "2107.56",
+          "percent": "19.00",
+          "amount": "11092.44"
+        }
+      ],
+      "description": "Item 41",
+      "code": "41",
+      "price_amount": "11092.44",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "38400.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Dto colanta 2-8may_7702129015653",
+          "amount": "9600.00",
+          "base_amount": "48000.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 42",
+      "code": "42",
+      "price_amount": "24000.00",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "29327.73",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5572.27",
+          "percent": "19.00",
+          "amount": "29327.73"
+        }
+      ],
+      "description": "Item 43",
+      "code": "43",
+      "price_amount": "29327.73",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "18550.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "SEPARATA FRUVER 2-8 MAY 2026_77059464",
+          "amount": "7950.00",
+          "base_amount": "26500.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 44",
+      "code": "44",
+      "price_amount": "26500.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "26722.69",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5077.31",
+          "percent": "19.00",
+          "amount": "26722.69"
+        }
+      ],
+      "description": "Item 45",
+      "code": "45",
+      "price_amount": "13361.35",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "15798.32",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "3001.68",
+          "percent": "19.00",
+          "amount": "15798.32"
+        }
+      ],
+      "description": "Item 46",
+      "code": "46",
+      "price_amount": "15798.32",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "9170.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "San Marzano 29-04-2026_7700149306416",
+          "amount": "3930.00",
+          "base_amount": "13100.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 47",
+      "code": "47",
+      "price_amount": "13100.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.14",
+      "line_extension_amount": "13280.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 48",
+      "code": "48",
+      "price_amount": "11700.44",
+      "base_quantity": "1.14"
+    },
+    {
+      "invoiced_quantity": "3.40",
+      "line_extension_amount": "15323.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 49",
+      "code": "49",
+      "price_amount": "4500.15",
+      "base_quantity": "3.40"
+    },
+    {
+      "invoiced_quantity": "0.21",
+      "line_extension_amount": "7770.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 50",
+      "code": "50",
+      "price_amount": "37000.00",
+      "base_quantity": "0.21"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "11800.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 51",
+      "code": "51",
+      "price_amount": "5900.00",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "11188.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "SEPARATA FRUVER 2-8 MAY 2026_204",
+          "amount": "7459.00",
+          "base_amount": "18647.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 52",
+      "code": "52",
+      "price_amount": "9300.25",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "0.58",
+      "line_extension_amount": "10925.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 53",
+      "code": "53",
+      "price_amount": "19000.00",
+      "base_quantity": "0.58"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "16200.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 54",
+      "code": "54",
+      "price_amount": "16200.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "9100.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 55",
+      "code": "55",
+      "price_amount": "9100.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "51932.77",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "9867.23",
+          "percent": "19.00",
+          "amount": "51932.77"
+        }
+      ],
+      "description": "Item 56",
+      "code": "56",
+      "price_amount": "25966.39",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "14900.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 57",
+      "code": "57",
+      "price_amount": "14900.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "30084.03",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "5715.97",
+          "percent": "19.00",
+          "amount": "30084.03"
+        }
+      ],
+      "description": "Item 58",
+      "code": "58",
+      "price_amount": "15042.02",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "22605.04",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "4294.96",
+          "percent": "19.00",
+          "amount": "22605.04"
+        }
+      ],
+      "description": "Item 59",
+      "code": "59",
+      "price_amount": "22605.04",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "17563.02",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "3336.98",
+          "percent": "19.00",
+          "amount": "17563.03"
+        }
+      ],
+      "description": "Item 60",
+      "code": "60",
+      "price_amount": "17563.02",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "34369.75",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "6530.25",
+          "percent": "19.00",
+          "amount": "34369.75"
+        }
+      ],
+      "description": "Item 61",
+      "code": "61",
+      "price_amount": "34369.75",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "6235.29",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "SEPARATA FRUVER 2-8 MAY 2026_01916100",
+          "amount": "2672.27",
+          "base_amount": "8908.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1184.71",
+          "percent": "19.00",
+          "amount": "6235.29"
+        }
+      ],
+      "description": "Item 62",
+      "code": "62",
+      "price_amount": "4453.78",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "6235.29",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "SEPARATA FRUVER 2-8 MAY 2026_01916100",
+          "amount": "2672.27",
+          "base_amount": "8908.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1184.71",
+          "percent": "19.00",
+          "amount": "6235.29"
+        }
+      ],
+      "description": "Item 63",
+      "code": "63",
+      "price_amount": "4453.78",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "3117.65",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "SEPARATA FRUVER 2-8 MAY 2026_01916100",
+          "amount": "1336.13",
+          "base_amount": "4454.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "592.35",
+          "percent": "19.00",
+          "amount": "3117.65"
+        }
+      ],
+      "description": "Item 64",
+      "code": "64",
+      "price_amount": "4453.78",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "43277.31",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "8222.69",
+          "percent": "19.00",
+          "amount": "43277.31"
+        }
+      ],
+      "description": "Item 65",
+      "code": "65",
+      "price_amount": "43277.31",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "5865.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Diana 2-3may_7702511002964",
+          "amount": "1035.00",
+          "base_amount": "6900.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 66",
+      "code": "66",
+      "price_amount": "6900.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "4.05",
+      "line_extension_amount": "162000.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "0.00",
+          "percent": "0.00",
+          "amount": "162000.00"
+        }
+      ],
+      "description": "Item 67",
+      "code": "67",
+      "price_amount": "40000.00",
+      "base_quantity": "4.05"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "4420.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Diana 2-3may_7702511637975",
+          "amount": "780.00",
+          "base_amount": "5200.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 68",
+      "code": "68",
+      "price_amount": "5200.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "10200.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 69",
+      "code": "69",
+      "price_amount": "10200.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "8950.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 70",
+      "code": "70",
+      "price_amount": "8950.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "12450.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 71",
+      "code": "71",
+      "price_amount": "12450.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "3.00",
+      "line_extension_amount": "128700.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 72",
+      "code": "72",
+      "price_amount": "42900.00",
+      "base_quantity": "3.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "10900.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 73",
+      "code": "73",
+      "price_amount": "10900.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "20666.67",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "DSCTO BARILLA 30ABR-8MAY",
+          "amount": "8857.14",
+          "base_amount": "29524.00"
+        }
+      ],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1033.33",
+          "percent": "5.00",
+          "amount": "20666.67"
+        }
+      ],
+      "description": "Item 74",
+      "code": "74",
+      "price_amount": "14761.91",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "43900.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 75",
+      "code": "75",
+      "price_amount": "43900.00",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.12",
+      "line_extension_amount": "5040.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 76",
+      "code": "76",
+      "price_amount": "4500.00",
+      "base_quantity": "1.12"
+    },
+    {
+      "invoiced_quantity": "1.88",
+      "line_extension_amount": "8577.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Platano 30-04-2026_234",
+          "amount": "3676.00",
+          "base_amount": "12253.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 77",
+      "code": "77",
+      "price_amount": "6500.27",
+      "base_quantity": "1.88"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "27030.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [
+        {
+          "discount_id": "",
+          "charge_indicator": "false",
+          "allowance_charge_reason": "Diana 2-3may_7702511003282",
+          "amount": "4770.00",
+          "base_amount": "31800.00"
+        }
+      ],
+      "tax_totals": [],
+      "description": "Item 78",
+      "code": "78",
+      "price_amount": "15900.00",
+      "base_quantity": "2.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "34369.75",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "6530.25",
+          "percent": "19.00",
+          "amount": "34369.75"
+        }
+      ],
+      "description": "Item 79",
+      "code": "79",
+      "price_amount": "34369.75",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "9159.66",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "1740.34",
+          "percent": "19.00",
+          "amount": "9159.66"
+        }
+      ],
+      "description": "Item 80",
+      "code": "80",
+      "price_amount": "9159.66",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "21764.71",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "4135.29",
+          "percent": "19.00",
+          "amount": "21764.71"
+        }
+      ],
+      "description": "Item 81",
+      "code": "81",
+      "price_amount": "21764.71",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "1.00",
+      "line_extension_amount": "36890.76",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [
+        {
+          "tax_code": "01",
+          "tax_name": "IVA",
+          "tax_amount": "7009.24",
+          "percent": "19.00",
+          "amount": "36890.76"
+        }
+      ],
+      "description": "Item 82",
+      "code": "82",
+      "price_amount": "36890.76",
+      "base_quantity": "1.00"
+    },
+    {
+      "invoiced_quantity": "2.00",
+      "line_extension_amount": "79000.00",
+      "free_of_charge_indicator": false,
+      "allowance_charges": [],
+      "tax_totals": [],
+      "description": "Item 83",
+      "code": "83",
+      "price_amount": "39500.00",
+      "base_quantity": "2.00"
+    }
+  ]
+}

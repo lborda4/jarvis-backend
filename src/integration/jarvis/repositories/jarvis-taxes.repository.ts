@@ -39,7 +39,8 @@ export class JarvisTaxesRepository {
   ): Promise<JarvisTax[]> {
     const query = this.repository
       .createQueryBuilder('tax')
-      .where('tax.companyId = :companyId', { companyId });
+      .where('tax.companyId = :companyId', { companyId })
+      .andWhere('tax.defaultRetired = false');
 
     if (filters.category) {
       query.andWhere('tax.category = :category', {
