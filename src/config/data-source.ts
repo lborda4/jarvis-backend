@@ -1,3 +1,4 @@
+import { JarvisPaymentMethod } from '../integration/jarvis/entities/jarvis-payment-method.entity';
 import { SiigoBoldCashRegister } from '../bold/entities/siigo-bold-cash-register.entity';
 import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
 import { DataSource } from 'typeorm';
@@ -37,6 +38,7 @@ export default new DataSource({
   url: databaseUrl,
   ssl: { rejectUnauthorized: false },
   entities: [
+    JarvisPaymentMethod,
     JarvisSalesInvoice,
     SiigoBoldCashRegister,
     Integration,

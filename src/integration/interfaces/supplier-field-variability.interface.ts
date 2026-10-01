@@ -1,3 +1,4 @@
+import type { SupplierCostCenterPreference } from './supplier-mapping-value.interface';
 import type { HistorialFacturaTaxDetail } from './historial-factura-impuestos.interface';
 import type { SupplierPaymentMethodPreference } from './supplier-mapping-value.interface';
 
@@ -29,6 +30,7 @@ export interface SupplierFieldVariabilityEntry<T> {
  * evalúa de forma independiente.
  */
 export interface SupplierFieldVariability {
+  centroCosto?: SupplierFieldVariabilityEntry<SupplierCostCenterPreference>;
   cuentaPuc?: SupplierFieldVariabilityEntry<string>;
   tipoItem?: SupplierFieldVariabilityEntry<'Account' | 'Product'>;
   medioPago?: SupplierFieldVariabilityEntry<SupplierPaymentMethodPreference>;

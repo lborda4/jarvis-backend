@@ -24,14 +24,6 @@ import {
 
 const VALID_CATEGORIES = new Set<string>(Object.values(JarvisTaxCategory));
 
-/** ReteICA no lleva tarifa manual: por defecto se divide en mil (pedido
- * explícito) — cualquier tarifa que llegue para este tipo se ignora acá
- * (no solo se oculta el campo en el front) para que quede consistente
- * sin importar por dónde entre la petición. */
-function isReteIca(taxType: string): boolean {
-  return taxType.trim().toLowerCase() === 'reteica';
-}
-
 @Injectable()
 export class JarvisTaxesService {
   constructor(
@@ -46,7 +38,8 @@ export class JarvisTaxesService {
     isActive?: boolean,
   ): Promise<JarvisTaxesListResponseDto> {
     const trimmedCompanyId = this.requireCompanyId(companyId);
-    await this.requireJarvisIntegration(trimmedCompanyId);
+    const integration = await this.requireJarvisIntegration(trimmedCompanyId);
+    await this.jarvisTaxesRepository.ensureDefaults(trimmedCompanyId, integration.id);
 
     const filters: FindJarvisTaxesFilters = {
       search,
@@ -92,7 +85,8 @@ export class JarvisTaxesService {
       throw new BadRequestException('El tipo de impuesto es obligatorio.');
     }
 
-    const rate = isReteIca(taxType) ? null : this.normalizeRate(request.rate);
+    const rate = this.normalizeRate(request.rate);
+    await this.jarvisTaxesRepository.ensureDefaults(trimmedCompanyId, integration.id);
 
     // El código es una numeración interna que asigna el sistema (pedido
     // explícito: el cliente elige solo el nombre, nunca el código) — se
@@ -196,13 +190,6 @@ export class JarvisTaxesService {
       tax.rate = this.normalizeRate(request.rate);
     }
 
-    // Se revisa DESPUÉS de aplicar tax_type/rate (en cualquier orden que
-    // hayan llegado en el mismo request) — si el tipo final es ReteICA, la
-    // tarifa manual no aplica sin importar lo que se haya mandado.
-    if (isReteIca(tax.taxType)) {
-      tax.rate = null;
-    }
-
     if (request.is_active !== undefined) {
       tax.isActive = request.is_active;
     }
@@ -251,7 +238,7 @@ export class JarvisTaxesService {
       return null;
     }
 
-    if (!Number.isFinite(rate)) {
+    if (!Number.isFinite(rate) || rate < 0) {
       throw new BadRequestException('La tarifa debe ser un número válido.');
     }
 

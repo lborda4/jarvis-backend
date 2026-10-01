@@ -214,7 +214,10 @@ export class ElectronicDocumentsRepository {
       });
     }
 
-    if (filters.search?.trim()) {
+    if (filters.search?.trim() && filters.electronicDocumentType === ElectronicDocumentType.PURCHASE_INVOICE) {
+      const term = '%' + filters.search.trim().replace(/[\\%_]/g, (character) => '\\' + character) + '%';
+      query.andWhere("(document.cufe ILIKE :term OR document.payload->'invoice'->>'number' ILIKE :term)", { term });
+    } else if (filters.search?.trim()) {
       const term = `%${filters.search.trim()}%`;
       query.andWhere(
         new Brackets((qb) => {

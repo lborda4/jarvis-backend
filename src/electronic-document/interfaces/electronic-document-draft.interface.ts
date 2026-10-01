@@ -1,3 +1,4 @@
+import type { SupplierCostCenterPreference } from '../../integration/interfaces/supplier-mapping-value.interface';
 /**
  * Borrador de contabilización de un documento: lo que el contador ajustó en
  * el panel de detalle y todavía NO se ha enviado a SIIGO.
@@ -28,6 +29,7 @@ export interface ElectronicDocumentDraft {
   /** Cuenta contable a nivel de documento (respaldo de los ítems). */
   accountCode?: string | null;
   paymentMethodId?: number | null;
+  costCenter?: SupplierCostCenterPreference | null;
   dueDate?: string | null;
   observations?: string | null;
   /** Retenciones elegidas a nivel de documento (Rete ICA, Rete IVA...). */

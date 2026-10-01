@@ -1,3 +1,4 @@
+import type { SupplierCostCenterPreference } from '../interfaces/supplier-mapping-value.interface';
 import { HistorialFactura } from '../entities/historial-factura.entity';
 import { HistorialFacturaTipo } from '../enums/historial-factura-tipo.enum';
 import type { HistorialFacturaTaxDetail } from '../interfaces/historial-factura-impuestos.interface';
@@ -9,6 +10,7 @@ import {
 import { SuggestedPurchaseItemConfig } from './supplier-preference.helper';
 
 export interface HistorialFacturaInvoiceSnapshot {
+  costCenter: SupplierCostCenterPreference | null;
   account: SuggestedAccount | null;
   paymentMethod: SupplierPaymentMethodPreference | null;
   itemConfig: SuggestedPurchaseItemConfig | null;
@@ -83,7 +85,7 @@ export function buildInvoiceSnapshotFromHistorialLines(
   lines: HistorialFactura[],
 ): HistorialFacturaInvoiceSnapshot {
   if (lines.length === 0) {
-    return { account: null, paymentMethod: null, itemConfig: null };
+    return { account: null, paymentMethod: null, itemConfig: null, costCenter: null };
   }
 
   const consistentTipo = resolveConsistentValue(lines, (line) => line.tipo);
@@ -113,6 +115,7 @@ export function buildInvoiceSnapshotFromHistorialLines(
   const paymentMethod = resolvePaymentMethodFromHistorial(lines[0]);
 
   return {
+    costCenter: lines[0].centroCosto ?? null,
     account: accountCode
       ? { code: accountCode, name: accountCode, uses: lines.length }
       : null,

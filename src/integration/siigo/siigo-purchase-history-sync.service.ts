@@ -1,3 +1,5 @@
+import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
+import { dominantCostCenter, resolveHistoricalCostCenter } from './helpers/siigo-cost-center-history.helper';
 import { Injectable, Logger } from '@nestjs/common';
 import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { HistorialFacturaFuente } from '../enums/historial-factura-fuente.enum';
@@ -117,6 +119,7 @@ export class SiigoPurchaseHistorySyncService {
     private readonly historialFacturasRepository: HistorialFacturasRepository,
     private readonly siigoPurchaseSyncJobsRepository: SiigoPurchaseSyncJobsRepository,
     private readonly supplierConfigurationsRepository: SupplierConfigurationsRepository,
+    private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
     private readonly siigoThirdPartyBalanceHistoryService: SiigoThirdPartyBalanceHistoryService,
   ) {}
 
@@ -337,6 +340,7 @@ export class SiigoPurchaseHistorySyncService {
       return 0;
     }
 
+    const costCenters = await this.siigoCostCentersCatalogService.listCostCenters(companyId);
     const rows: HistorialFactura[] = [];
     const facturaIds: string[] = [];
 
@@ -374,6 +378,7 @@ export class SiigoPurchaseHistorySyncService {
               purchase.retentions,
               taxCatalogById,
             ),
+            centroCosto: resolveHistoricalCostCenter(purchase.cost_center, costCenters),
             metodoPagoId: payment?.id ?? null,
             metodoPagoNombre: payment?.name?.trim() || null,
             metodoPagoType: paymentTypeCatalogEntry?.type ?? null,
@@ -456,6 +461,16 @@ export class SiigoPurchaseHistorySyncService {
       ).then((entries) => new Map(entries)),
     ]);
 
+    const [costCenterGroups, costCenters] = await Promise.all([
+      this.historialFacturasRepository.groupByProveedorAndCostCenter(companyId, integrationId),
+      this.siigoCostCentersCatalogService.listCostCenters(companyId),
+    ]);
+    const costGroupsBySupplier = new Map<string, typeof costCenterGroups>();
+    for (const group of costCenterGroups) {
+      const groups = costGroupsBySupplier.get(group.proveedorNit) ?? [];
+      groups.push(group);
+      costGroupsBySupplier.set(group.proveedorNit, groups);
+    }
     const cuenta = pickDominantGroups(cuentaGroups);
     const tipo = pickDominantGroups(tipoGroups);
     const medioPago = pickDominantGroups(medioPagoGroups);
@@ -509,7 +524,9 @@ export class SiigoPurchaseHistorySyncService {
       configuration.tieneVariabilidad = cuentaTotal > 0 ? !cuentaFixed : null;
       configuration.ultimaActualizacion = new Date();
 
-      const campoVariabilidad: SupplierFieldVariability = {};
+      const campoVariabilidad: SupplierFieldVariability = {
+        centroCosto: dominantCostCenter(costGroupsBySupplier.get(proveedorNit) ?? [], costCenters),
+      };
 
       if (cuentaBest) {
         campoVariabilidad.cuentaPuc = cuentaFixed

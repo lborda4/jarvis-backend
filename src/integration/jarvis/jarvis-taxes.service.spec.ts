@@ -35,6 +35,7 @@ function buildService(overrides: {
       .mockResolvedValue({ id: 'integration-1' }),
   };
   const jarvisTaxesRepository = {
+    ensureDefaults: jest.fn().mockResolvedValue(undefined),
     findByCompany: overrides.findByCompany ?? jest.fn().mockResolvedValue([]),
     findById: overrides.findById ?? jest.fn().mockResolvedValue(null),
     findByCompanyAndCode:
@@ -138,7 +139,7 @@ describe('JarvisTaxesService.create', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('caso real pedido: ReteICA nunca guarda tarifa manual, se divide en mil por defecto — ignora la tarifa aunque venga en la petición', async () => {
+  it('guarda la tarifa editable de ReteICA en unidades por mil', async () => {
     const { service } = buildService();
 
     const result = await service.create(
@@ -151,7 +152,7 @@ describe('JarvisTaxesService.create', () => {
       'company-1',
     );
 
-    expect(result.tax.rate).toBeNull();
+    expect(result.tax.rate).toBe(11);
   });
 
   it('rechaza nombre o tipo vacíos', async () => {
@@ -228,7 +229,7 @@ describe('JarvisTaxesService.update', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('caso real pedido: cambiar el tipo a ReteICA borra la tarifa que tuviera antes', async () => {
+  it('conserva la tarifa al cambiar el tipo a ReteICA', async () => {
     const existing = buildTax({ taxType: 'IVA', rate: '19' });
     const { service } = buildService({
       findById: jest.fn().mockResolvedValue(existing),
@@ -240,7 +241,7 @@ describe('JarvisTaxesService.update', () => {
       'company-1',
     );
 
-    expect(result.tax.rate).toBeNull();
+    expect(result.tax.rate).toBe(19);
   });
 
   it('rechaza cambiar a un código que ya usa otro impuesto', async () => {

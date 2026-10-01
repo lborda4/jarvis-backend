@@ -80,6 +80,7 @@ export class BoldController {
   @Public()
   @Post('jarvis/test')
   async testJarvis(@Body() body: unknown) {
+    console.log('[Bold] JSON recibido de la extensión:', JSON.stringify(body, null, 2));
     const { userEmail } = this.configService.get('bold', { infer: true });
     const result = await this.boldCheckoutService.createFromExtension(body, userEmail ?? '');
     return { success: true, message: 'Solicitud de cobro enviada a Bold.', ...result };

@@ -53,6 +53,8 @@ export class JarvisSubscriptionStatusDto {
 }
 
 export class JarvisCredentialsStatusResponseDto {
+  @ApiPropertyOptional()
+  creditNoteResolution?: JarvisResolutionDto | null;
   @ApiProperty({
     description:
       'Indica si la empresa activa ya completó la configuración inicial de Jarvis.',

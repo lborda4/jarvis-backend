@@ -128,6 +128,7 @@ export interface SiigoPurchaseResponsePayment {
 }
 
 export interface SiigoPurchaseResponse {
+  cost_center?: number | { id: number; code?: string; name?: string } | null;
   id: string;
   document: { id: number };
   number: number;

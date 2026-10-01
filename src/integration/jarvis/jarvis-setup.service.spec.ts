@@ -163,3 +163,20 @@ describe('JarvisSetupService.listAvailableResolutions — normalización de type
     expect(result.resolutions[0].typeDocumentId).toBe(1);
   });
 });
+
+describe('Numeracion independiente de notas credito', () => {
+  it('guarda NC sin clave tecnica y conserva factura y soporte al avanzar', async () => {
+    const {service, integrationsRepository, nextPymeApiClient} = buildService({});
+    const saved = await service.saveResolution(buildRequest({ kind: JarvisResolutionKind.CREDIT_NOTE, prefix: 'NC', technicalKey: undefined }), 'company-1');
+    expect(nextPymeApiClient.putConfigResolution).toHaveBeenCalledWith(expect.objectContaining({ type_document_id: 4 }));
+    const integration = integrationsRepository.save.mock.calls[0][0];
+    const invoice = { ...saved.resolution, kind: JarvisResolutionKind.ELECTRONIC_INVOICE, prefix: 'FV', nextConsecutive: 50 };
+    integration.credentials.resolutions.electronic_invoice = invoice;
+    integrationsRepository.findByCompanyAndProvider.mockResolvedValue(integration);
+    expect(await service.allocateResolutionNumber('company-1', JarvisResolutionKind.CREDIT_NOTE)).toEqual(expect.objectContaining({ prefix: 'NC', number: 1 }));
+    await service.commitResolutionNumber('company-1', JarvisResolutionKind.CREDIT_NOTE, 1);
+    const updated = integrationsRepository.save.mock.calls.at(-1)![0].credentials.resolutions;
+    expect(updated.credit_note.nextConsecutive).toBe(2);
+    expect(updated.electronic_invoice.nextConsecutive).toBe(50);
+  });
+});

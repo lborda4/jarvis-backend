@@ -41,9 +41,7 @@ export class JarvisTax {
   @Column({ name: 'tax_type', type: 'varchar', length: 128 })
   taxType: string;
 
-  /** Tarifa (%). Nullable: un impuesto puede no tener tarifa definida
-   * todavía, y ReteICA nunca la lleva (se divide en mil por defecto, ver
-   * isReteIca en jarvis-taxes.service.ts). */
+  /** Tarifa en porcentaje; para ReteICA se expresa por mil. */
   @Column({ type: 'numeric', precision: 12, scale: 4, nullable: true })
   rate: string | null;
 

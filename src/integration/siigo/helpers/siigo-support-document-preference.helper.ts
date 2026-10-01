@@ -263,6 +263,11 @@ export async function persistHistorialFacturaFromSendRequest(
         [...itemTaxIds, ...retentionIds],
         taxCatalogById,
       ),
+      centroCosto: request.cost_center ? normalizeSupplierCostCenterPreference({
+        id: request.cost_center,
+        code: snapshot?.costCenter?.code ?? String(request.cost_center),
+        name: snapshot?.costCenter?.name ?? 'Centro ' + request.cost_center,
+      }) : null,
       metodoPagoId,
       metodoPagoNombre,
       fuente: HistorialFacturaFuente.CORREGIDO_CONTADOR,

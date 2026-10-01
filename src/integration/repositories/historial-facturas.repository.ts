@@ -1,3 +1,4 @@
+import type { CostCenterHistoryGroup } from '../siigo/helpers/siigo-cost-center-history.helper';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -186,6 +187,19 @@ export class HistorialFacturasRepository {
   }
 
   /** Agrupa por (proveedor_nit, cuenta_puc) para el recálculo de variabilidad. */
+  async groupByProveedorAndCostCenter(companyId: string, integrationId: string): Promise<CostCenterHistoryGroup[]> {
+    const rows = await this.repository.createQueryBuilder('h')
+      .select('h.proveedor_nit', 'proveedorNit')
+      .addSelect("h.centro_costo->>'id'", 'id')
+      .addSelect('COUNT(DISTINCT h.factura_id)', 'count')
+      .where('h.company_id = :companyId', { companyId })
+      .andWhere('h.integration_id = :integrationId', { integrationId })
+      .andWhere('h.fuente = :source', { source: HistorialFacturaFuente.SIIGO_ORIGINAL })
+      .groupBy('h.proveedor_nit').addGroupBy("h.centro_costo->>'id'")
+      .getRawMany<{ proveedorNit: string; id: string | null; count: string }>();
+    return rows.map(row => ({ proveedorNit: row.proveedorNit, id: row.id == null ? null : Number(row.id), count: Number(row.count) }));
+  }
+
   groupByProveedorAndCuenta(
     companyId: string,
     integrationId: string,

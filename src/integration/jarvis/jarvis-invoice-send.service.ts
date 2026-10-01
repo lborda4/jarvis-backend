@@ -41,6 +41,7 @@ import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 
 import { buildJarvisInvoiceChargeTaxTotals } from './helpers/jarvis-invoice-tax.helper';
+import { calculateJarvisRetention } from './helpers/jarvis-tax-calculation.helper';
 
 const DOCUMENT_TYPE_IDENTIFICATION_FALLBACK: Record<string, number> = {
   [JarvisDocumentType.CC]: 3,
@@ -70,8 +71,9 @@ export class JarvisInvoiceSendService {
     companyId: string,
     kind = JarvisResolutionKind.ELECTRONIC_INVOICE,
   ): Promise<CreateJarvisInvoiceResponseDto> {
+    const isCreditNote = kind === JarvisResolutionKind.CREDIT_NOTE;
     const isSupport = kind === JarvisResolutionKind.SUPPORT_DOCUMENT;
-    const documentLabel = isSupport ? "documento soporte" : "factura de venta";
+    const documentLabel = isCreditNote ? "nota crédito" : isSupport ? "documento soporte" : "factura de venta";
     const issueDate = request.issueDate?.trim();
     const customerIdentification = normalizeJarvisDocumentNumber(
       request.customerIdentification ?? '',
@@ -91,6 +93,17 @@ export class JarvisInvoiceSendService {
       throw new BadRequestException(
         'Debe agregar al menos un producto o servicio.',
       );
+    }
+
+    if (isCreditNote) {
+      const reference = request.billingReference;
+      const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+      if (!reference?.number?.trim() || !/^[a-f0-9]{96}$/i.test(reference?.uuid?.trim() ?? '') || !validDate(reference?.issueDate ?? '') || !validDate(issueDate) || reference.issueDate > issueDate) {
+        throw new BadRequestException('Indique el número, CUFE y fecha válidos de la factura afectada.');
+      }
+      if (!Number.isSafeInteger(request.discrepancyResponseCode) || request.discrepancyResponseCode! < 1 || !request.discrepancyResponseDescription?.trim()) {
+        throw new BadRequestException('Indique el código y la descripción del motivo de la nota crédito.');
+      }
     }
 
     const documentType = normalizeJarvisDocumentType(
@@ -169,6 +182,9 @@ export class JarvisInvoiceSendService {
         );
       }
 
+      if (isCreditNote && (!Number.isFinite(discount) || !Number.isFinite(taxAmount) || discount > quantity * unitValue || Number(item.discount ?? 0) < 0 || Number(item.taxAmount ?? 0) < 0)) {
+        throw new BadRequestException('El descuento o impuesto del ítem no es válido.');
+      }
       return {
         description,
         quantity,
@@ -176,6 +192,7 @@ export class JarvisInvoiceSendService {
         discount,
         taxAmount,
         taxId,
+        retention: item.retention,
         code: item.code?.trim() || `ITEM-${index + 1}`,
         notes: item.notes?.trim(),
       };
@@ -248,21 +265,34 @@ export class JarvisInvoiceSendService {
           const payable = toMoney(taxableBase + ivaTotal);
 
           const taxTotals = buildJarvisInvoiceChargeTaxTotals(parsedItems);
+          const withholdingTotals: typeof taxTotals = [];
+          const retentionEntries = [
+            ...(request.retentions ?? []).map(retention => ({ retention, base: taxableBase, iva: ivaTotal })),
+            ...parsedItems.filter(item => item.retention).map(item => ({
+              retention: item.retention!, base: toMoney(item.quantity * item.unitValue - item.discount), iva: item.taxAmount,
+            })),
+          ];
 
-          for (const retention of request.retentions ?? []) {
+          for (const { retention, base, iva } of retentionEntries) {
             if (!retention?.id || !Number.isFinite(retention.id)) {
               continue;
             }
 
             const percentage = Number(retention.percentage ?? 0);
-            const retentionAmount =
-              percentage > 0 ? toMoney((taxableBase * percentage) / 100) : 0;
+            if (!Number.isFinite(percentage) || percentage < 0) throw new BadRequestException('La tarifa de retención no es válida.');
+            const calculated = calculateJarvisRetention(retention.type ?? '', percentage, base, iva);
 
-            taxTotals.push({
+            const existing = withholdingTotals.find(tax => tax.tax_id === retention.id && Number(tax.percent) === calculated.percent);
+            if (existing) {
+              existing.tax_amount = formatMoney(Number(existing.tax_amount) + calculated.amount);
+              existing.taxable_amount = formatMoney(Number(existing.taxable_amount) + calculated.base);
+              continue;
+            }
+            withholdingTotals.push({
               tax_id: retention.id,
-              tax_amount: formatMoney(retentionAmount),
-              taxable_amount: formatMoney(taxableBase),
-              percent: formatMoney(percentage),
+              tax_amount: formatMoney(calculated.amount),
+              taxable_amount: formatMoney(calculated.base),
+              percent: String(calculated.percent),
             });
           }
 
@@ -279,6 +309,10 @@ export class JarvisInvoiceSendService {
               free_of_charge_indicator: false,
               description: item.description,
               ...(item.notes ? { notes: item.notes } : {}),
+              ...(isCreditNote && item.discount > 0 ? { allowance_charges: [{
+                charge_indicator: false, allowance_charge_reason: 'DESCUENTO',
+                amount: formatMoney(item.discount), base_amount: formatMoney(item.quantity * item.unitValue),
+              }] } : {}),
               code: item.code,
               type_item_identification_id:
                 this.nextPymeMasterCatalogService.getDefaultItemIdentificationId(),
@@ -308,10 +342,18 @@ export class JarvisInvoiceSendService {
 
           const payload = {
             type_document_id:
-              isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
+              isCreditNote ? 4 : isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
             number: numbering.number,
             date: issueDate,
-            ...(isSupport ? { time: new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }), sendmail: false, sendmailtome: false } : {}),
+            ...((isSupport || isCreditNote) ? { time: new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }), sendmail: false, sendmailtome: false } : {}),
+            ...(isCreditNote ? {
+              billing_reference: { number: request.billingReference!.number.trim(), uuid: request.billingReference!.uuid.trim(), issue_date: request.billingReference!.issueDate },
+              discrepancyresponsecode: request.discrepancyResponseCode,
+              discrepancyresponsedescription: request.discrepancyResponseDescription!.trim(),
+              sendmail: request.sendmail === true,
+              sendmailtome: request.sendmailtome === true,
+              ...(request.seze?.trim() ? { seze: request.seze.trim() } : {}),
+            } : {}),
             prefix: numbering.prefix,
             ...(numbering.formNumber ? { resolution_number: numbering.formNumber } : {}),
             ...(currencyId ? { type_currency_id: currencyId } : {}),
@@ -325,6 +367,7 @@ export class JarvisInvoiceSendService {
               ? { foot_note: request.footNote.trim() }
               : {}),
             customer: {
+              ...(isCreditNote ? { merchant_registration: '0000000-00' } : {}),
               identification_number: Number(tercero.documentNumber),
               ...(tercero.checkDigit
                 ? { dv: Number(tercero.checkDigit) || tercero.checkDigit }
@@ -343,7 +386,7 @@ export class JarvisInvoiceSendService {
               type_liability_id: liabilityId,
               type_regime_id: regimeId,
             },
-            ...(request.payment?.id
+            ...(!isCreditNote && request.payment?.id
               ? {
                   payment_form: {
                     payment_form_id: request.payment.payment_form_id ?? 1,
@@ -377,6 +420,7 @@ export class JarvisInvoiceSendService {
               charge_total_amount: '0.00',
             },
             ...(taxTotals.length > 0 ? { tax_totals: taxTotals } : {}),
+            ...(withholdingTotals.length ? { with_holding_tax_total: withholdingTotals } : {}),
             invoice_lines: invoiceLines,
           };
 
@@ -389,9 +433,12 @@ export class JarvisInvoiceSendService {
           );
 
           const { customer, ...supportPayload } = payload;
-          const created = isSupport
-            ? await this.nextPymeApiClient.createSupportDocument({ ...supportPayload, seller: customer }, companyToken)
-            : await this.nextPymeApiClient.createInvoice(payload, companyToken).catch(async (error: unknown) => {
+          const { invoice_lines, ...creditPayload } = payload;
+          const created = await (isCreditNote
+            ? this.nextPymeApiClient.createCreditNote({ ...creditPayload, credit_note_lines: invoice_lines }, companyToken)
+            : isSupport
+            ? this.nextPymeApiClient.createSupportDocument({ ...supportPayload, seller: customer }, companyToken)
+            : this.nextPymeApiClient.createInvoice(payload, companyToken)).catch(async (error: unknown) => {
                 if (
                   error instanceof BadGatewayException &&
                   /documento\s+procesado\s+anteriormente/i.test(error.message)

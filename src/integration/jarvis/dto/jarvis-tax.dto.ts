@@ -20,7 +20,7 @@ export class CreateJarvisTaxRequestDto {
     example: 19,
     nullable: true,
     description:
-      'Tarifa (%). Se ignora si tax_type es ReteICA — esa siempre se divide en mil, sin tarifa manual.',
+      'Tarifa editable: porcentaje para IVA y retenciones; por mil para ReteICA.',
   })
   rate?: number | null;
 }

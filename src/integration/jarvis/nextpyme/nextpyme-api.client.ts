@@ -80,6 +80,8 @@ export interface NextPymeSupportDocumentCreatePayload {
   type_currency_id?: number;
   seller: {
     identification_number: number | string;
+    merchant_registration?: string;
+    postal_zone_code?: string;
     dv?: number | string;
     name: string;
     phone?: string;
@@ -556,11 +558,24 @@ export class NextPymeApiClient {
     if (companyToken !== undefined && !companyToken.trim()) throw new ServiceUnavailableException("La empresa no tiene un token de NextPyme configurado.");
     return this.postDianUblDocument(
       'support-document',
-      payload,
+      {
+        ...payload,
+        seller: {
+          ...payload.seller,
+          merchant_registration: payload.seller.merchant_registration?.trim() || '0000000-00',
+          postal_zone_code: payload.seller.postal_zone_code?.trim() || '000000',
+        },
+      },
       'el documento soporte',
       companyToken?.trim() ?? this.requireToken(),
       companyToken !== undefined,
     );
+  }
+
+  async createCreditNote(payload: unknown, companyToken: string): Promise<UnknownRecord> {
+    const token = companyToken?.trim();
+    if (!token) throw new ServiceUnavailableException('La empresa no tiene token de NextPyme configurado.');
+    return this.postDianUblDocument('credit-note', payload, 'la nota crédito', token, true);
   }
 
   async createInvoice(

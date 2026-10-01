@@ -520,7 +520,19 @@ export class JarvisSupportDocumentSendService {
           );
 
           const created =
-            await this.nextPymeApiClient.createSupportDocument(payload);
+            await this.nextPymeApiClient.createSupportDocument(payload).catch(async (error: unknown) => {
+              if (
+                error instanceof BadGatewayException &&
+                /documento\s+procesado\s+anteriormente/i.test(error.message)
+              ) {
+                await this.jarvisSetupService.commitResolutionNumber(
+                  companyId,
+                  JarvisResolutionKind.SUPPORT_DOCUMENT,
+                  numbering.number,
+                );
+              }
+              throw error;
+            });
 
           this.logger.log(
             `[documentId=${documentId}] Respuesta NextPyme ${JSON.stringify(created)}`,

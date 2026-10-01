@@ -17,6 +17,39 @@ const COMPANY_ID = 'company-1';
 const INTEGRATION_ID = 'integration-1';
 const SUPPLIER_NIT = '900685902';
 
+describe('Retenciones sugeridas para compras SIIGO', () => {
+  it.each([
+    ['Compras 2.5%', 523999, false],
+    ['Compras 2.5%', 524000, true],
+    ['Compras 2.5%', 524001, true],
+    ['Servicios 4%', 104999, false],
+    ['Servicios 4%', 105000, true],
+    ['Servicios 4%', 105001, true],
+    ['Honorarios 10%', 1, true],
+    ['Retefuente 4%', 900000, false],
+  ])('%s con subtotal %s: sugerencia %s', (name, subtotal, expected) => {
+    const tax = { id: 4, name, percentage: 4 };
+    const doc = buildDocument({ electronicDocumentType: 'PURCHASE_INVOICE' });
+    doc.payload.totals = { subtotal, iva: subtotal * 0.19, total: subtotal * 1.19 };
+    const index = buildConfigurationIndex({ campoVariabilidad: {
+      retefuente: { variable: false, valor: tax },
+    } });
+    expect(resolveSuggestedRetentionsForDocument(doc, index, INTEGRATION_ID)).toHaveLength(expected ? 1 : 0);
+    expect(resolveSuggestedItemConfigForDocument(doc, index, INTEGRATION_ID)?.retefuenteTax)
+      .toEqual(expected ? tax : null);
+  });
+
+  it.each([undefined, { variable: false, valor: null }, { variable: true, valor: null }])(
+    'no sugiere sin evidencia consistente en el historial (%j)', (retefuente) => {
+      const doc = buildDocument({ electronicDocumentType: 'PURCHASE_INVOICE' });
+      doc.payload.totals = { subtotal: 1000000, iva: 190000, total: 1190000 };
+      const index = buildConfigurationIndex({ campoVariabilidad: { retefuente } });
+      expect(resolveSuggestedRetentionsForDocument(doc, index, INTEGRATION_ID)).toEqual([]);
+      expect(resolveSuggestedItemConfigForDocument(doc, index, INTEGRATION_ID)?.retefuenteTax).toBeNull();
+    },
+  );
+});
+
 const PAYMENT_METHOD = {
   id: 5056,
   name: 'Crédito proveedores',

@@ -25,6 +25,7 @@ export class BoldHttpClient {
     const config = this.configService.get('bold', { infer: true });
     const baseUrl = (config.baseUrl || 'https://integrations.api.bold.co').replace(/\/$/, '');
     try {
+      console.log('[Bold app-checkout] JSON enviado:', JSON.stringify(payload, null, 2));
       const response = await firstValueFrom(this.httpService.post<BoldCheckoutResponse>(
         `${baseUrl}/payments/app-checkout`, payload, {
           headers: { Authorization: `x-api-key ${apiKey.trim()}` },
@@ -32,6 +33,10 @@ export class BoldHttpClient {
           validateStatus: () => true,
         },
       ));
+      console.log(
+        `[Bold app-checkout] Respuesta HTTP ${response.status}:`,
+        JSON.stringify(response.data, null, 2),
+      );
       if (response.status < 200 || response.status >= 300 ||
           response.data?.success === false ||
           (Array.isArray(response.data?.errors) && response.data.errors.length > 0) ||

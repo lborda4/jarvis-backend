@@ -1,3 +1,6 @@
+import { ParseUUIDPipe } from '@nestjs/common';
+import { JarvisPaymentMethodsService } from './jarvis-payment-methods.service';
+import { SaveJarvisPaymentMethodDto } from './dto/jarvis-payment-method.dto';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import {
   Body,
@@ -73,6 +76,7 @@ import { JarvisTercerosService } from './jarvis-terceros.service';
 @Controller('integrations/jarvis')
 export class JarvisController {
   constructor(
+    private readonly paymentMethodsService: JarvisPaymentMethodsService,
     private readonly jarvisSetupService: JarvisSetupService,
     private readonly jarvisTercerosService: JarvisTercerosService,
     private readonly jarvisSupportDocumentSendService: JarvisSupportDocumentSendService,
@@ -331,6 +335,16 @@ export class JarvisController {
     return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.SUPPORT_DOCUMENT);
   }
 
+  @Get('credit-notes')
+  listCreditNotes(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
+    return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page }, JarvisResolutionKind.CREDIT_NOTE);
+  }
+
+  @Post('credit-notes')
+  createCreditNote(@CurrentUser() user: AuthenticatedUser, @Body() request: CreateJarvisInvoiceRequestDto) {
+    return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.CREDIT_NOTE);
+  }
+
   @Get('invoices')
   @ApiOperation({ summary: 'Historial de facturas de venta enviadas de la empresa activa.' })
   listInvoices(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
@@ -444,5 +458,25 @@ export class JarvisController {
     @Param('id') id: string,
   ): Promise<DeleteJarvisTaxResponseDto> {
     return this.jarvisTaxesService.remove(id, getAuthenticatedCompanyId(user));
+  }
+
+  @Get('payment-methods')
+  listPaymentMethods(@CurrentUser() user: AuthenticatedUser) {
+    return this.paymentMethodsService.list(getAuthenticatedCompanyId(user));
+  }
+
+  @Post('payment-methods')
+  createPaymentMethod(@CurrentUser() user: AuthenticatedUser, @Body() request: SaveJarvisPaymentMethodDto) {
+    return this.paymentMethodsService.save(getAuthenticatedCompanyId(user), request);
+  }
+
+  @Patch('payment-methods/:id')
+  updatePaymentMethod(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Body() request: SaveJarvisPaymentMethodDto) {
+    return this.paymentMethodsService.save(getAuthenticatedCompanyId(user), request, id);
+  }
+
+  @Delete('payment-methods/:id')
+  deletePaymentMethod(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.paymentMethodsService.remove(getAuthenticatedCompanyId(user), id);
   }
 }

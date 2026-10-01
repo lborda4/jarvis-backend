@@ -1,4 +1,5 @@
 import { resolveItemAiSuggestion } from '../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
+import { meetsPurchaseRetentionMinimum } from './purchase-retention-suggestion.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { resolveSendConfigurationFromPayload } from '../../electronic-document/helpers/electronic-document-send-configuration.helper';
 import { ElectronicDocumentPayload } from '../../electronic-document/interfaces/electronic-document-payload.interface';
@@ -29,13 +30,14 @@ import {
 } from './supplier-preference.helper';
 
 export interface SupplierDocumentIdentity {
+  electronicDocumentType?: string | null;
   companyId: string;
   status?: string;
   documentNumberThird: string | null;
   payload: Pick<
     ElectronicDocumentPayload,
     'supplier' | 'siigoSendConfiguration' | 'aiSuggestion' | 'items'
-  >;
+  > & { totals?: ElectronicDocumentPayload['totals'] };
 }
 
 export function resolveSupplierConfigurationForDocument(
@@ -312,6 +314,12 @@ export function resolveSuggestedRetentionsForDocument(
     integrationId,
   );
 
+  if (document.electronicDocumentType === 'PURCHASE_INVOICE') {
+    return (resolveSuggestedRetentionsFromSync(configuration) ?? []).filter(
+      (tax) => meetsPurchaseRetentionMinimum(tax, document.payload.totals?.subtotal),
+    );
+  }
+
   return (
     resolveSuggestedRetentionsFromSync(configuration) ??
     resolveSuggestedRetentionsFromPreference(configuration) ??
@@ -336,6 +344,10 @@ export function resolveSuggestedCostCenterForDocument(
     integrationId,
   );
 
+  if (document.electronicDocumentType === 'PURCHASE_INVOICE') {
+    const entry = configuration?.campoVariabilidad?.centroCosto;
+    return entry && !entry.variable ? entry.valor : null;
+  }
   return resolveSuggestedCostCenterFromPreference(configuration);
 }
 
@@ -373,5 +385,15 @@ export function resolveSuggestedItemConfigForDocument(
     integrationId,
   );
 
-  return resolveSuggestedItemConfigFromConfiguration(configuration);
+  const suggestion = resolveSuggestedItemConfigFromConfiguration(configuration);
+  if (suggestion && document.electronicDocumentType === 'PURCHASE_INVOICE' &&
+      document.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
+    return {
+      ...suggestion,
+      retefuenteTax: suggestion.retefuenteTax &&
+        meetsPurchaseRetentionMinimum(suggestion.retefuenteTax, document.payload.totals?.subtotal)
+        ? suggestion.retefuenteTax : null,
+    };
+  }
+  return suggestion;
 }

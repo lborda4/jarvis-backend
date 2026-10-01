@@ -5,6 +5,8 @@ import {
 } from './create-jarvis-support-document.dto';
 
 export class CreateJarvisInvoiceItemDto {
+  @ApiPropertyOptional({ type: CreateJarvisSupportDocumentRetentionDto })
+  retention?: CreateJarvisSupportDocumentRetentionDto;
   @ApiProperty({ example: 'Comisión por servicios' })
   description: string;
 
@@ -34,6 +36,19 @@ export class CreateJarvisInvoiceItemDto {
 }
 
 export class CreateJarvisInvoiceRequestDto {
+  @ApiPropertyOptional()
+  billingReference?: { number: string; uuid: string; issueDate: string };
+  @ApiPropertyOptional()
+  discrepancyResponseCode?: number;
+  @ApiPropertyOptional()
+  discrepancyResponseDescription?: string;
+  @ApiPropertyOptional()
+  seze?: string;
+  @ApiPropertyOptional()
+  sendmail?: boolean;
+  @ApiPropertyOptional()
+  sendmailtome?: boolean;
+
   @ApiProperty({ example: '2026-08-05' })
   issueDate: string;
 

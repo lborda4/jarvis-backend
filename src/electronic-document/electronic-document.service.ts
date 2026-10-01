@@ -1,3 +1,4 @@
+import { normalizeSupplierCostCenterPreference } from '../integration/helpers/supplier-mapping-value.helper';
 import { summarizeDocumentAiSuggestion } from './helpers/electronic-document-ai-suggestion.helper';
 import {
   BadRequestException,
@@ -505,6 +506,7 @@ export class ElectronicDocumentService {
       items: request.items,
       accountCode: request.accountCode ?? null,
       paymentMethodId: request.paymentMethodId ?? null,
+      costCenter: normalizeSupplierCostCenterPreference(request.costCenter),
       dueDate: request.dueDate ?? null,
       observations: request.observations ?? null,
       retentionTaxIds: request.retentionTaxIds,
@@ -1912,7 +1914,8 @@ export class ElectronicDocumentService {
       // usado solo como ÚLTIMO recurso cuando ni el historial confirmado ni
       // una preferencia guardada resolvieron nada (nunca pisa una decisión
       // ya tomada). Ver resolveSuggestedRetentionsFromInvoice.
-      const invoiceWithholdingMatches = taxesCatalog
+      const invoiceWithholdingMatches = taxesCatalog &&
+        document.electronicDocumentType !== ElectronicDocumentType.PURCHASE_INVOICE
         ? resolveSuggestedRetentionsFromInvoice(
             document.payload?.withholdings,
             taxesCatalog,
@@ -1949,7 +1952,7 @@ export class ElectronicDocumentService {
         : null;
       costCenters.set(
         document.id,
-        costCenterFromExcel ??
+        historialSnapshot ? historialSnapshot.costCenter : costCenterFromExcel ??
         resolveSuggestedCostCenterForDocument(
           document,
           configurationIndex,

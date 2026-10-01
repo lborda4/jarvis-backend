@@ -31,6 +31,24 @@ function buildClient(configOverrides: Record<string, unknown> = {}) {
   return { client, httpService };
 }
 
+describe('NextPymeApiClient.createSupportDocument defaults', () => {
+  it.each([undefined, '', '   '])('completa matrícula y código postal vacíos (%s)', async (value) => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { IsValid: 'true' } }));
+    const payload = { seller: { name: 'Proveedor', merchant_registration: value, postal_zone_code: value } } as any;
+    await client.createSupportDocument(payload, 'company-token');
+    expect(httpService.post.mock.calls[0][1].seller).toEqual({ name: 'Proveedor', merchant_registration: '0000000-00', postal_zone_code: '000000' });
+    expect(payload.seller.postal_zone_code).toBe(value);
+  });
+
+  it('conserva los valores que ya tiene el vendedor', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { IsValid: true } }));
+    await client.createSupportDocument({ seller: { merchant_registration: '1234567-89', postal_zone_code: '110111' } } as any, 'company-token');
+    expect(httpService.post.mock.calls[0][1].seller).toEqual({ merchant_registration: '1234567-89', postal_zone_code: '110111' });
+  });
+});
+
 describe('NextPymeApiClient.configureProductionEnvironment', () => {
   it('activa producción usando únicamente el Bearer de la empresa', async () => {
     const { client, httpService } = buildClient({
@@ -387,7 +405,10 @@ describe('NextPymeApiClient.getInvoiceXmlByCufe', () => {
 });
 
 describe('NextPymeApiClient.createSupportDocument con token de empresa', () => {
-  const payload = { number: 1, type_document_id: 11, invoice_lines: [] } as any;
+  const payload = {
+    number: 1, type_document_id: 11, invoice_lines: [],
+    seller: { name: 'Proveedor', merchant_registration: '0000000-00', postal_zone_code: '000000' },
+  } as any;
   it('usa support-document y el token de la empresa, sin el token global', async () => {
     const { client, httpService } = buildClient();
     const data = { success: true, ResponseDian: { IsValid: 'true' }, cuds: 'support-code' };
@@ -409,5 +430,20 @@ describe('NextPymeApiClient.createSupportDocument con token de empresa', () => {
     const { client, httpService } = buildClient();
     httpService.post.mockReturnValue(of({ status: 200, data: { success: false } }));
     await expect(client.createSupportDocument(payload, 'company-a')).rejects.toThrow();
+  });
+});
+
+describe('NextPymeApiClient credit-note', () => {
+  it('usa endpoint credit-note y token de la empresa', async () => {
+    const { client, httpService } = buildClient();
+    const response = { success: true, ResponseDian: { IsValid: true } };
+    httpService.post.mockReturnValue(of({ status: 200, data: response }));
+    await expect(client.createCreditNote({ type_document_id: 4 }, ' company-credit ')).resolves.toEqual(response);
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/credit-note', { type_document_id: 4 }, expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-credit' }) }));
+  });
+  it.each([false, undefined])('rechaza respuesta sin confirmacion DIAN (%s)', async IsValid => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { success: true, ResponseDian: { IsValid } } }));
+    await expect(client.createCreditNote({}, 'company-token')).rejects.toThrow();
   });
 });

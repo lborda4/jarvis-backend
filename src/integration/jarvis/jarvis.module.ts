@@ -1,3 +1,5 @@
+import { JarvisPaymentMethod } from './entities/jarvis-payment-method.entity';
+import { JarvisPaymentMethodsService } from './jarvis-payment-methods.service';
 import { Module, forwardRef } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -32,10 +34,11 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     IntegrationModule,
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),
-    TypeOrmModule.forFeature([JarvisTercero, JarvisTax, JarvisSalesInvoice]),
+    TypeOrmModule.forFeature([JarvisPaymentMethod, JarvisTercero, JarvisTax, JarvisSalesInvoice]),
   ],
   controllers: [JarvisController],
   providers: [
+    JarvisPaymentMethodsService,
     JarvisInvoiceHistoryService,
     JarvisSetupService,
     JarvisTercerosService,

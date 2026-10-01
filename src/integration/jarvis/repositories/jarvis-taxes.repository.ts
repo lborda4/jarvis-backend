@@ -3,6 +3,7 @@ import { In, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JarvisTax } from '../entities/jarvis-tax.entity';
 import { JarvisTaxCategory } from '../enums/jarvis-tax-category.enum';
+import { JARVIS_DEFAULT_TAXES } from '../constants/jarvis-default-taxes';
 
 export interface FindJarvisTaxesFilters {
   category?: JarvisTaxCategory;
@@ -16,6 +17,21 @@ export class JarvisTaxesRepository {
     @InjectRepository(JarvisTax)
     private readonly repository: Repository<JarvisTax>,
   ) {}
+
+  async ensureDefaults(companyId: string, integrationId: string): Promise<void> {
+    await this.repository.manager.transaction(async (manager) => {
+      // El marcador y las filas se confirman juntos. Una lectura posterior
+      // nunca restablece tarifas editadas, desactivadas o eliminadas.
+      const inserted = await manager.query(
+        'INSERT INTO jarvis_tax_catalog_seeds (company_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING company_id',
+        [companyId],
+      );
+      if (!inserted.length) return;
+      await manager.createQueryBuilder().insert().into(JarvisTax)
+        .values(JARVIS_DEFAULT_TAXES.map(tax => ({ ...tax, companyId, integrationId })))
+        .orIgnore().execute();
+    });
+  }
 
   findByCompany(
     companyId: string,

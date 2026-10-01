@@ -1,3 +1,4 @@
+import type { SupplierCostCenterPreference } from '../../integration/interfaces/supplier-mapping-value.interface';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SaveElectronicDocumentDraftItemDto {
@@ -35,6 +36,7 @@ export class SaveElectronicDocumentDraftRequestDto {
 
   @ApiPropertyOptional({ example: 5636, nullable: true })
   paymentMethodId?: number | null;
+  costCenter?: SupplierCostCenterPreference | null;
 
   @ApiPropertyOptional({ example: '2026-10-02', nullable: true })
   dueDate?: string | null;

@@ -1,3 +1,4 @@
+import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 import { ElectronicDocumentsRepository } from './electronic-documents.repository';
 import { ElectronicDocument } from '../entities/electronic-document.entity';
 
@@ -35,5 +36,20 @@ describe('import batch document filters', () => {
     await repository.findAll({ companyId: 'company-1', documentIds: ['old-reused-document'], page: 1, limit: 100 });
     expect(query.andWhere).toHaveBeenCalledWith('document.companyId = :companyId', { companyId: 'company-1' });
     expect(query.andWhere).toHaveBeenCalledWith('document.id IN (:...documentIds)', { documentIds: ['old-reused-document'] });
+  });
+});
+
+describe('buscar referencia de factura de compra', () => {
+  it.each([' FEV27381 ', 'a'.repeat(96), 'INV_10%'])('filtra consecutivo o CUFE sin buscar en proveedor (%s)', async search => {
+    const query = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), take: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0), getMany: jest.fn().mockResolvedValue([]),
+    };
+    const repository = new ElectronicDocumentsRepository({ createQueryBuilder: () => query } as never);
+    await repository.findAll({ companyId: 'company-1', electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE, search, page: 1, limit: 100 });
+    const term = '%' + search.trim().replace(/[\\%_]/g, '\\$&') + '%';
+    expect(query.andWhere).toHaveBeenCalledWith("(document.cufe ILIKE :term OR document.payload->'invoice'->>'number' ILIKE :term)", { term });
+    expect(query.andWhere).toHaveBeenCalledWith('document.companyId = :companyId', { companyId: 'company-1' });
   });
 });

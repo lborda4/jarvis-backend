@@ -9,7 +9,7 @@ function setup(token: string | null = ' company-token ') {
   };
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
   const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: token }) };
-  const client = { createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }) };
+  const client = { createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }) };
   const catalog = {
     getIvaTaxId: () => 1,
     getDefaultUnitMeasureId: () => 70,
@@ -77,15 +77,34 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
 });
 
 describe('Registro del envio en historial', () => {
-  it('avanza una vez el consecutivo ocupado y conserva el rechazo sin reenviar ni guardar historial', async () => {
+  it.each([JarvisResolutionKind.ELECTRONIC_INVOICE, JarvisResolutionKind.SUPPORT_DOCUMENT])('calcula retenciones por ítem y ReteICA por mil (%s)', async (kind) => {
+    const { service, request, client } = setup();
+    await service.createAndSendInvoice({ ...request, items: [
+      { description: 'Servicio', quantity: 1, unitValue: 100000, taxAmount: 19000, retention: { id: 6, type: 'Retefuente', percentage: 4 } },
+      { description: 'Otro servicio', quantity: 1, unitValue: 200000, taxAmount: 38000, retention: { id: 6, type: 'Retefuente', percentage: 6 } },
+      { description: 'ReteIVA', quantity: 1, unitValue: 100000, taxAmount: 19000, retention: { id: 5, type: 'ReteIVA', percentage: 15 } },
+    ], retentions: [{ id: 7, type: 'ReteICA', percentage: 4.14 }] }, 'company-1', kind);
+    const mock = kind === JarvisResolutionKind.SUPPORT_DOCUMENT ? client.createSupportDocument : client.createInvoice;
+    const body = mock.mock.calls[0][0];
+    expect(body.with_holding_tax_total).toEqual(expect.arrayContaining([
+      { tax_id: 6, tax_amount: '4000.00', taxable_amount: '100000.00', percent: '4' },
+      { tax_id: 6, tax_amount: '12000.00', taxable_amount: '200000.00', percent: '6' },
+      { tax_id: 5, tax_amount: '2850.00', taxable_amount: '19000.00', percent: '15' },
+      { tax_id: 7, tax_amount: '1656.00', taxable_amount: '400000.00', percent: '0.414' },
+    ]));
+    expect(body.tax_totals.every((tax: any) => tax.tax_id === 1)).toBe(true);
+  });
+
+  it.each([JarvisResolutionKind.ELECTRONIC_INVOICE, JarvisResolutionKind.SUPPORT_DOCUMENT])('avanza una vez el consecutivo ocupado y conserva el rechazo sin reenviar ni guardar historial (%s)', async (kind) => {
     const { service, request, client, numbering, history } = setup();
     const error = new BadGatewayException('La DIAN rechazó la factura: Regla: 90, Rechazo: Documento procesado anteriormente.');
-    client.createInvoice.mockRejectedValue(error);
+    const send = kind === JarvisResolutionKind.SUPPORT_DOCUMENT ? client.createSupportDocument : client.createInvoice;
+    send.mockRejectedValue(error);
 
-    await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toBe(error);
+    await expect(service.createAndSendInvoice(request, 'company-1', kind)).rejects.toBe(error);
     expect(numbering.commitResolutionNumber).toHaveBeenCalledTimes(1);
-    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.ELECTRONIC_INVOICE, 1);
-    expect(client.createInvoice).toHaveBeenCalledTimes(1);
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', kind, 1);
+    expect(send).toHaveBeenCalledTimes(1);
     expect(history.record).not.toHaveBeenCalled();
   });
 
@@ -137,6 +156,44 @@ describe('Documento soporte con el mismo flujo de ventas', () => {
     const { service, request, client, numbering, history } = setup();
     client.createSupportDocument.mockRejectedValue(new Error('Rechazado'));
     await expect(service.createAndSendInvoice(request, 'company-1', JarvisResolutionKind.SUPPORT_DOCUMENT)).rejects.toThrow('Rechazado');
+    expect(history.record).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+  });
+});
+
+describe('Notas credito Jarvis', () => {
+  const reference = { number: 'SETP990000605', uuid: 'a'.repeat(96), issueDate: '2026-09-15' };
+  it('envia referencia, motivo y lineas al servicio correcto y usa numeracion independiente', async () => {
+    const {service, request, client, numbering, history} = setup();
+    await service.createAndSendInvoice({ ...request, billingReference: reference,
+      discrepancyResponseCode: 2, discrepancyResponseDescription: 'Devolucion', seze: '2026', sendmail: true,
+      items: [{ description: 'Servicio', quantity: 2, unitValue: 100, discount: 20, taxAmount: 34.2, notes: 'Detalle' }],
+      payment: { id: 10 },
+    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE);
+    expect(client.createInvoice).not.toHaveBeenCalled();
+    expect(client.createSupportDocument).not.toHaveBeenCalled();
+    const payload = client.createCreditNote.mock.calls[0][0];
+    expect(payload).toEqual(expect.objectContaining({ type_document_id: 4,
+      billing_reference: { number: reference.number, uuid: reference.uuid, issue_date: reference.issueDate },
+      discrepancyresponsecode: 2, discrepancyresponsedescription: 'Devolucion', sendmail: true, seze: '2026',
+      legal_monetary_totals: expect.objectContaining({ payable_amount: '214.20' }),
+    }));
+    expect(payload).not.toHaveProperty('invoice_lines');
+    expect(payload).not.toHaveProperty('seller');
+    expect(payload).not.toHaveProperty('payment_form');
+    expect(payload.credit_note_lines[0]).toEqual(expect.objectContaining({ notes: 'Detalle', line_extension_amount: '180.00', allowance_charges: [expect.objectContaining({amount: '20.00'})] }));
+    expect(numbering.allocateResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.CREDIT_NOTE);
+    expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ companyId: 'company-1', documentKind: JarvisResolutionKind.CREDIT_NOTE, cufe: 'credit-code' }));
+  });
+  it.each([undefined, { ...reference, uuid: 'invalid' }, { ...reference, issueDate: '2026-10-01' }])('rechaza referencia invalida antes de asignar consecutivo', async billingReference => {
+    const {service, request, numbering} = setup();
+    await expect(service.createAndSendInvoice({ ...request, billingReference, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('factura afectada');
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+  });
+  it('no registra ni avanza una nota rechazada', async () => {
+    const { service, request, client, numbering, history } = setup();
+    client.createCreditNote.mockRejectedValue(new BadGatewayException('Rechazada'));
+    await expect(service.createAndSendInvoice({ ...request, billingReference: reference, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('Rechazada');
     expect(history.record).not.toHaveBeenCalled();
     expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
   });

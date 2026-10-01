@@ -1,3 +1,4 @@
+import type { SupplierCostCenterPreference } from '../interfaces/supplier-mapping-value.interface';
 import {
   Column,
   CreateDateColumn,
@@ -47,6 +48,9 @@ import { Integration } from './integration.entity';
   'providerInvoiceNumber',
 ])
 export class HistorialFactura {
+  @Column({ name: 'centro_costo', type: 'jsonb', nullable: true })
+  centroCosto: SupplierCostCenterPreference | null;
+
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
