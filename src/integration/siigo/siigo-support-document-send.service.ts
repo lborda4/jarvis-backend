@@ -55,7 +55,11 @@ export class SiigoSupportDocumentSendService {
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
   ) {}
 
-  async sendSupportDocument(
+  async sendSupportDocument(request: CreateSiigoSupportDocumentRequestDto, companyId: string): Promise<CreateSiigoSupportDocumentResponseDto> {
+    return this.planSubscriptionService.withSiigoQuotaLock(companyId, () => this.sendSupportDocumentWithQuota(request, companyId));
+  }
+
+  private async sendSupportDocumentWithQuota(
     request: CreateSiigoSupportDocumentRequestDto,
     companyId: string,
   ): Promise<CreateSiigoSupportDocumentResponseDto> {

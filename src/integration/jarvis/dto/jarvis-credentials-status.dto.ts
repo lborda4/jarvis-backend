@@ -54,6 +54,9 @@ export class JarvisSubscriptionStatusDto {
 
 export class JarvisCredentialsStatusResponseDto {
   @ApiPropertyOptional()
+  debitNoteResolution?: JarvisResolutionDto | null;
+
+  @ApiPropertyOptional({ type: JarvisResolutionDto, nullable: true })
   creditNoteResolution?: JarvisResolutionDto | null;
   @ApiProperty({
     description:

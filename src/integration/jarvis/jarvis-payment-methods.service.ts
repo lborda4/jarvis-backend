@@ -25,12 +25,19 @@ export class JarvisPaymentMethodsService {
   async list(companyId: string) {
     await this.requireCompany(companyId);
     let items = await this.repository.find({ where: { companyId }, order: { createdAt: 'ASC', id: 'ASC' } });
-    const defaults = [{ name: 'Efectivo', code: '10' }, { name: 'Otros', code: 'ZZZ' }];
+    const defaults = [
+      { name: 'Efectivo', masterName: 'Efectivo' },
+      { name: 'Crédito clientes', masterName: 'Otro' },
+      { name: 'Transferencia bancaria', masterName: 'Transferencia crédito' },
+      { name: 'Tarjeta crédito', masterName: 'Tarjeta crédito' },
+      { name: 'Tarjeta débito', masterName: 'Tarjeta débito' },
+    ];
+    const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const missing = defaults.filter(preset => !items.some(item => item.name.trim().toLowerCase() === preset.name.toLowerCase()));
     if (missing.length) {
       const catalog = await this.catalogs.getPaymentMethods();
       const values = missing.map(preset => {
-        const master = catalog.find(row => row.code === preset.code);
+        const master = catalog.find(row => normalize(row.name) === normalize(preset.masterName));
         if (!master) throw new BadRequestException('No se encontró la forma de pago predeterminada ' + preset.name + ' en NextPyme.');
         return { companyId, name: preset.name, nextpymeMethodId: master.id, nextpymeMethodName: master.name };
       });

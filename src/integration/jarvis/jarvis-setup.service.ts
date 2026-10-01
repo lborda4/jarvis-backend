@@ -390,7 +390,7 @@ export class JarvisSetupService {
       request.typeDocumentId !== NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID;
     const typeDocumentId =
       (hasRealTypeDocumentId ? request.typeDocumentId : undefined) ??
-      (request.kind === JarvisResolutionKind.CREDIT_NOTE ? 4 : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+      (request.kind === JarvisResolutionKind.DEBIT_NOTE ? 5 : request.kind === JarvisResolutionKind.CREDIT_NOTE ? 4 : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId()
         : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId());
 
@@ -436,7 +436,7 @@ export class JarvisSetupService {
       ...existing,
       resolutions: {
         ...existing.resolutions,
-        ...(request.kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+        ...(request.kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: localResolution } : request.kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
           ? { support_document: localResolution }
           : { electronic_invoice: localResolution }),
       },
@@ -486,13 +486,13 @@ export class JarvisSetupService {
 
     const credentials = normalizeJarvisCredentials(integration.credentials);
     const current =
-      kind === JarvisResolutionKind.CREDIT_NOTE ? credentials.resolutions?.credit_note : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+      kind === JarvisResolutionKind.DEBIT_NOTE ? credentials.resolutions?.debit_note : kind === JarvisResolutionKind.CREDIT_NOTE ? credentials.resolutions?.credit_note : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? credentials.resolutions?.support_document
         : credentials.resolutions?.electronic_invoice;
 
     if (!isJarvisResolutionConfigured(current)) {
       throw new BadRequestException(
-        kind === JarvisResolutionKind.CREDIT_NOTE ? 'Configure primero la numeración de Nota crédito en la integración Jarvis.' : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+        kind === JarvisResolutionKind.DEBIT_NOTE ? 'Configure primero la numeración de Nota débito en la integración Jarvis.' : kind === JarvisResolutionKind.CREDIT_NOTE ? 'Configure primero la numeración de Nota crédito en la integración Jarvis.' : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
           ? 'Configure primero la resolución de Documento soporte (número, prefijo y consecutivo).'
           : 'Configure primero la resolución de Factura electrónica (número, prefijo y consecutivo).',
       );
@@ -543,7 +543,7 @@ export class JarvisSetupService {
 
     const credentials = normalizeJarvisCredentials(integration.credentials);
     const current =
-      kind === JarvisResolutionKind.CREDIT_NOTE ? credentials.resolutions?.credit_note : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+      kind === JarvisResolutionKind.DEBIT_NOTE ? credentials.resolutions?.debit_note : kind === JarvisResolutionKind.CREDIT_NOTE ? credentials.resolutions?.credit_note : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? credentials.resolutions?.support_document
         : credentials.resolutions?.electronic_invoice;
 
@@ -562,7 +562,7 @@ export class JarvisSetupService {
       ...credentials,
       resolutions: {
         ...credentials.resolutions,
-        ...(kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: updated } : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+        ...(kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: updated } : kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: updated } : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
           ? { support_document: updated }
           : { electronic_invoice: updated }),
       },
@@ -642,6 +642,7 @@ export class JarvisSetupService {
       configured_at: credentials.configured_at,
       supportDocumentResolution,
       electronicInvoiceResolution,
+      debitNoteResolution: credentials.resolutions?.debit_note ?? null,
       creditNoteResolution: credentials.resolutions?.credit_note ?? null,
       supportDocumentResolutionConfigured: isJarvisResolutionConfigured(
         localSupport,

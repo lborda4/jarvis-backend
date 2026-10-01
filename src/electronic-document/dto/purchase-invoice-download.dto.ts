@@ -18,6 +18,9 @@ export class PurchaseInvoiceDownloadPartyDto {
 }
 
 export class PurchaseInvoiceDownloadItemDto {
+  name?: string | null;
+  taxes?: Array<{ type: string; amount: number }>;
+  withholdings?: PurchaseInvoiceDownloadWithholdingDto[];
   unitCode?: string | null;
   incAmount?: number | null;
   incPercentage?: number | null;

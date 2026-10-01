@@ -187,7 +187,7 @@ describe('JarvisTercerosService.listPendingSuppliers', () => {
 });
 
 describe('JarvisTercerosService.create', () => {
-  it('caso real pedido: si ya hay más documentos importados del mismo proveedor, resuelve sus siblings de una vez — no solo cuando la creación viene disparada desde una fila puntual', async () => {
+  it('guarda el tercero sin buscar documentos pendientes del proveedor', async () => {
     const resolveSiblingsForSupplier = jest.fn().mockResolvedValue(undefined);
     const { service } = buildService({
       resolveSiblingsForSupplier,
@@ -207,11 +207,7 @@ describe('JarvisTercerosService.create', () => {
       'company-1',
     );
 
-    expect(resolveSiblingsForSupplier).toHaveBeenCalledWith(
-      'company-1',
-      '900123456',
-      'Proveedor Nuevo SAS',
-    );
+    expect(resolveSiblingsForSupplier).not.toHaveBeenCalled();
   });
 });
 

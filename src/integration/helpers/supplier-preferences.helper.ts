@@ -315,8 +315,14 @@ export function resolveSuggestedRetentionsForDocument(
   );
 
   if (document.electronicDocumentType === 'PURCHASE_INVOICE') {
+    const historicalRetefuente = configuration?.campoVariabilidad?.retefuente;
     return (resolveSuggestedRetentionsFromSync(configuration) ?? []).filter(
-      (tax) => meetsPurchaseRetentionMinimum(tax, document.payload.totals?.subtotal),
+      (tax) => meetsPurchaseRetentionMinimum(
+        tax,
+        document.payload.totals?.subtotal,
+        historicalRetefuente && !historicalRetefuente.variable
+          ? historicalRetefuente.valor?.name : undefined,
+      ),
     );
   }
 

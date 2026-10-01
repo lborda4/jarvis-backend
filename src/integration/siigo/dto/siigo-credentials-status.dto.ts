@@ -23,6 +23,9 @@ export class SiigoSubscriptionPlanDto {
 }
 
 export class SiigoSubscriptionStatusDto {
+  @ApiPropertyOptional()
+  documentQuotas?: Partial<Record<ElectronicDocumentType, { documentLimit: number | null; documentsUsed: number; remaining: number | null }>>;
+
   @ApiPropertyOptional({ enum: SubscriptionStatus, nullable: true })
   status: SubscriptionStatus | null;
 

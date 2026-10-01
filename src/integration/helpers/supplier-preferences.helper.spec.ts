@@ -19,6 +19,48 @@ const SUPPLIER_NIT = '900685902';
 
 describe('Retenciones sugeridas para compras SIIGO', () => {
   it.each([
+    ['Servicios', 209495.99, false],
+    ['Servicios', 209496, true],
+    ['Servicios', 209497, true],
+    ['Compras', 1414097.99, false],
+    ['Compras', 1414098, true],
+    ['Compras', 1414099, true],
+    ['Honorarios', 2000000, false],
+    ['Sin concepto', 2000000, false],
+  ])('ReteICA Bogotá %s con subtotal %s: %s', (concept, subtotal, expected) => {
+    const tax = { id: 55, name: 'ReteICA Bogotá 9.66 x 1000', percentage: 0.966 };
+    const doc = buildDocument({ electronicDocumentType: 'PURCHASE_INVOICE' });
+    doc.payload.totals = { subtotal, iva: subtotal * 0.19, total: subtotal * 1.19 };
+    const index = buildConfigurationIndex({ campoVariabilidad: {
+      reteica: { variable: false, valor: tax },
+      retefuente: { variable: false, valor: { id: 4, name: concept, percentage: 4 } },
+    } });
+    const result = resolveSuggestedRetentionsForDocument(doc, index, INTEGRATION_ID)
+      .filter((retention) => retention.type === 'ReteICA');
+    expect(result).toEqual(expected ? [{ ...tax, type: 'ReteICA' }] : []);
+  });
+
+  it.each([undefined, { variable: false, valor: null }, { variable: true, valor: { id: 55, name: 'ReteICA Servicios Bogotá', percentage: 0.966 } }])(
+    'no inventa ReteICA sin historial consistente (%j)', (reteica) => {
+      const doc = buildDocument({ electronicDocumentType: 'PURCHASE_INVOICE' });
+      doc.payload.totals = { subtotal: 2000000, iva: 380000, total: 2380000 };
+      const index = buildConfigurationIndex({ campoVariabilidad: {
+        reteica, retefuente: { variable: false, valor: { id: 4, name: 'Servicios 4%', percentage: 4 } },
+      } });
+      expect(resolveSuggestedRetentionsForDocument(doc, index, INTEGRATION_ID)
+        .filter((tax) => tax.type === 'ReteICA')).toEqual([]);
+    },
+  );
+
+  it('puede identificar servicios en el nombre de ReteICA sin historial de Retefuente', () => {
+    const doc = buildDocument({ electronicDocumentType: 'PURCHASE_INVOICE' });
+    doc.payload.totals = { subtotal: 209496, iva: 39804.24, total: 249300.24 };
+    const tax = { id: 55, name: 'ReteICA Servicios Bogotá', percentage: 0.414 };
+    const index = buildConfigurationIndex({ campoVariabilidad: { reteica: { variable: false, valor: tax } } });
+    expect(resolveSuggestedRetentionsForDocument(doc, index, INTEGRATION_ID)).toEqual([{ ...tax, type: 'ReteICA' }]);
+  });
+
+  it.each([
     ['Compras 2.5%', 523999, false],
     ['Compras 2.5%', 524000, true],
     ['Compras 2.5%', 524001, true],

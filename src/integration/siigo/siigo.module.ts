@@ -1,3 +1,6 @@
+import { SiigoDocumentQuotasController } from './siigo-document-quotas.controller';
+import { AuthModule } from '../../auth/auth.module';
+import { AdminGuard } from '../../admin/guards/admin.guard';
 import { SiigoPurchaseAiRecoveryService } from './siigo-purchase-ai-recovery.service';
 import { SiigoCompanyAiContextController } from './siigo-company-ai-context.controller';
 import { Module, forwardRef } from '@nestjs/common';
@@ -42,7 +45,7 @@ import { OpenRouterModule } from '../openrouter/openrouter.module';
 import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balance-history.service';
 
 @Module({
-  imports: [
+  imports: [AuthModule,
     HttpModule,
     IntegrationModule,
     CompanyModule,
@@ -51,8 +54,8 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     OpenRouterModule,
     JarvisModule,
   ],
-  controllers: [SiigoController, SiigoCompanyAiContextController],
-  providers: [
+  controllers: [SiigoDocumentQuotasController,SiigoController, SiigoCompanyAiContextController],
+  providers: [AdminGuard,
     SiigoPurchaseAiRecoveryService,
     SiigoHttpClient,
     SiigoAuthService,

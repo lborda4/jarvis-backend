@@ -401,7 +401,7 @@ export class ElectronicDocumentService {
   findSupplierNotFoundSiblings(
     companyId: string,
     documentNumberThird: string,
-    excludeId: string,
+    excludeId?: string,
   ): Promise<ElectronicDocument[]> {
     if (!documentNumberThird.trim()) {
       return Promise.resolve([]);

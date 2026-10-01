@@ -572,6 +572,12 @@ export class NextPymeApiClient {
     );
   }
 
+  async createDebitNote(payload: unknown, companyToken: string): Promise<UnknownRecord> {
+    const token = companyToken?.trim();
+    if (!token) throw new ServiceUnavailableException('La empresa no tiene token de NextPyme configurado.');
+    return this.postDianUblDocument('debit-note', payload, 'la nota débito', token, true);
+  }
+
   async createCreditNote(payload: unknown, companyToken: string): Promise<UnknownRecord> {
     const token = companyToken?.trim();
     if (!token) throw new ServiceUnavailableException('La empresa no tiene token de NextPyme configurado.');

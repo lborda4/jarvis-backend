@@ -209,3 +209,44 @@ describe('PlanSubscriptionService.assertCanCreateDocuments', () => {
     );
   });
 });
+
+describe('cupos manuales independientes de Siigo', () => {
+  const limits = { PURCHASE_INVOICE: 100, SUPPORT_DOCUMENT: 50 };
+  const integration = () => buildIntegration({ plan: null, documentLimits: limits, includedDocumentTypes: [ElectronicDocumentType.PURCHASE_INVOICE, ElectronicDocumentType.SUPPORT_DOCUMENT] });
+  it.each([[ElectronicDocumentType.PURCHASE_INVOICE, 100, 90], [ElectronicDocumentType.SUPPORT_DOCUMENT, 50, 40]])('usa su propio cupo sin plan del catalogo: %s', async (documentType, documentLimit, allowed) => {
+    const service = buildService(integration(), 10);
+    expect(await service.resolveAllowedQuantity({ companyId: COMPANY_ID, provider: IntegrationProvider.SIIGO, documentType, requestedQuantity: 200 })).toEqual({ documentLimit, documentsUsed: 10, allowed });
+  });
+  it('agotar soporte no bloquea facturas', async () => {
+    const service = buildService(integration(), 50);
+    await expect(service.assertCanCreateDocuments({ companyId: COMPANY_ID, provider: IntegrationProvider.SIIGO, documentType: ElectronicDocumentType.SUPPORT_DOCUMENT, quantity: 1 })).rejects.toThrow(ForbiddenException);
+    await expect(service.assertCanCreateDocuments({ companyId: COMPANY_ID, provider: IntegrationProvider.SIIGO, documentType: ElectronicDocumentType.PURCHASE_INVOICE, quantity: 1 })).resolves.toBeUndefined();
+  });
+  it('devuelve ambos contadores sin mezclar los consumos', async () => {
+    const queries: any[] = [];
+    const repo = { createQueryBuilder: () => {
+      let type: string;
+      const query = { where: jest.fn().mockReturnThis(), andWhere: jest.fn((sql, params) => { if (params.documentType) type = params.documentType; return query; }), getCount: jest.fn(async () => type === 'PURCHASE_INVOICE' ? 20 : 5) };
+      queries.push(query); return query;
+    } };
+    const service = new PlanSubscriptionService({} as never, { findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration()) } as never, repo as never);
+    const snapshot = await service.getSubscription(COMPANY_ID, IntegrationProvider.SIIGO);
+    expect(snapshot.documentQuotas).toEqual({ PURCHASE_INVOICE: {documentLimit: 100, documentsUsed: 20, remaining: 80}, SUPPORT_DOCUMENT: {documentLimit: 50, documentsUsed: 5, remaining: 45} });
+    expect(snapshot.remaining).toBe(125);
+    for (const query of queries) expect(query.andWhere).toHaveBeenCalledWith('document.alreadyInSiigo = :alreadyInSiigo', { alreadyInSiigo: false });
+    for (const query of queries) expect(query.andWhere).toHaveBeenCalledWith('document.status = :status', {status: 'PURCHASE_CREATED'});
+  });
+  it.each([-1, 1.5, undefined, '100'])('rechaza cupos invalidos: %s', async value => {
+    const service = buildService(integration(), 0);
+    await expect(service.saveSiigoDocumentLimits(COMPANY_ID, {purchaseInvoice: value as any, supportDocument: 50})).rejects.toThrow('enteros');
+  });
+  it('cupo cero bloquea e ilimitado permite solamente su tipo', async () => {
+    const service = buildService(buildIntegration({ documentLimits: { PURCHASE_INVOICE: 0, SUPPORT_DOCUMENT: null }, includedDocumentTypes: [ElectronicDocumentType.PURCHASE_INVOICE, ElectronicDocumentType.SUPPORT_DOCUMENT] }), 0);
+    await expect(service.assertCanCreateDocuments({ companyId: COMPANY_ID, provider: IntegrationProvider.SIIGO, documentType: ElectronicDocumentType.PURCHASE_INVOICE, quantity: 1 })).rejects.toThrow();
+    expect((await service.resolveAllowedQuantity({ companyId: COMPANY_ID, provider: IntegrationProvider.SIIGO, documentType: ElectronicDocumentType.SUPPORT_DOCUMENT, requestedQuantity: 500 })).allowed).toBe(500);
+  });
+  it('no aplica los cupos manuales de Siigo a Jarvis', async () => {
+    const service = buildService(buildIntegration({ provider: IntegrationProvider.JARVIS, documentLimits: { PURCHASE_INVOICE: 1 } }), 10);
+    expect((await service.resolveAllowedQuantity({ companyId: COMPANY_ID, provider: IntegrationProvider.JARVIS, documentType: ElectronicDocumentType.PURCHASE_INVOICE, requestedQuantity: 100 })).allowed).toBe(90);
+  });
+});

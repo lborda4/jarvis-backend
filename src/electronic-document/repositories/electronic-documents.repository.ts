@@ -431,17 +431,18 @@ export class ElectronicDocumentsRepository {
     companyId: string,
     documentNumberThird: string,
     status: ElectronicDocumentStatus,
-    excludeId: string,
+    excludeId?: string,
   ): Promise<ElectronicDocument[]> {
-    return this.repository
+    const query = this.repository
       .createQueryBuilder('document')
       .where('document.companyId = :companyId', { companyId })
       .andWhere('document.documentNumberThird = :documentNumberThird', {
         documentNumberThird,
       })
-      .andWhere('document.status = :status', { status })
-      .andWhere('document.id != :excludeId', { excludeId })
-      .getMany();
+      .andWhere('document.status = :status', { status });
+    // Creating a supplier from the catalog has no source document to exclude.
+    if (excludeId?.trim()) query.andWhere('document.id != :excludeId', { excludeId: excludeId.trim() });
+    return query.getMany();
   }
 
   /** Documentos ya existentes para esas CUFEs en esa empresa — usado para no

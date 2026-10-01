@@ -138,84 +138,10 @@ export class JarvisDocumentPreparationService {
       companyId,
     );
 
-    await this.resolvePendingSiblings(
-      trimmedId,
-      companyId,
-      documentNumber,
-      tercero.name,
-    );
-
     return {
       documentId: trimmedId,
       nextStep: 'READY',
     };
-  }
-
-  /**
-   * Igual que resolvePendingSiblings, pero para cuando el tercero se creó
-   * SIN venir disparado por un documento puntual (ej. "Crear" desde el
-   * listado de Terceros, no desde el botón de una fila) — ahí no hay un
-   * `resumeDocumentId` que excluir, así que se actualizan TODOS los
-   * documentos pendientes de ese proveedor de una vez (caso real pedido: si
-   * ya se creó el proveedor y hay más registros con ese mismo proveedor,
-   * que cambie el estado de todos, no solo del que disparó la creación).
-   */
-  async resolveSiblingsForSupplier(
-    companyId: string,
-    documentNumberThird: string,
-    supplierName: string,
-  ): Promise<void> {
-    await this.resolvePendingSiblings('', companyId, documentNumberThird, supplierName);
-  }
-
-  /**
-   * Al crear/encontrar el tercero para un documento, otros documentos ya
-   * importados del mismo proveedor (mismo NIT) que quedaron esperando a que
-   * el tercero existiera no se enteran solos — se actualizan aquí también,
-   * en vez de quedar en "Requiere proveedor" hasta que alguien reintente
-   * uno por uno.
-   */
-  private async resolvePendingSiblings(
-    resolvedDocumentId: string,
-    companyId: string,
-    documentNumberThird: string,
-    supplierName: string,
-  ): Promise<void> {
-    const siblings = await this.electronicDocumentService.findSupplierNotFoundSiblings(
-      companyId,
-      documentNumberThird,
-      resolvedDocumentId,
-    );
-
-    await Promise.all(
-      siblings.map(async (sibling) => {
-        try {
-          await this.electronicDocumentService.updatePayloadAndStatus(
-            sibling.id,
-            {
-              ...sibling.payload,
-              supplier: {
-                ...sibling.payload.supplier,
-                name: supplierName,
-                commercialName: supplierName,
-              },
-            },
-            ElectronicDocumentStatus.ACCOUNT_MAPPED,
-            companyId,
-          );
-          await this.electronicDocumentService.updateSupplierExistsInSiigo(
-            sibling.id,
-            true,
-            companyId,
-          );
-        } catch (error) {
-          this.logger.error(
-            `[documentId=${sibling.id}] Error al propagar tercero resuelto`,
-            error instanceof Error ? error.stack : String(error),
-          );
-        }
-      }),
-    );
   }
 
 }

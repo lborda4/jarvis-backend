@@ -111,6 +111,7 @@ export function normalizeJarvisCredentials(
     resolutionsRaw.support_document ?? resolutionsRaw.supportDocument,
     JarvisResolutionKind.SUPPORT_DOCUMENT,
   );
+  const debitNote = normalizeResolution(resolutionsRaw.debit_note, JarvisResolutionKind.DEBIT_NOTE);
   const creditNote = normalizeResolution(resolutionsRaw.credit_note, JarvisResolutionKind.CREDIT_NOTE);
   const electronicInvoice = normalizeResolution(
     resolutionsRaw.electronic_invoice ?? resolutionsRaw.electronicInvoice,
@@ -152,9 +153,10 @@ export function normalizeJarvisCredentials(
         ? String(raw.configuredAt)
         : undefined,
     resolutions:
-      supportDocument || electronicInvoice || creditNote
+      supportDocument || electronicInvoice || creditNote || debitNote
         ? {
             ...(creditNote ? { credit_note: creditNote } : {}),
+            ...(debitNote ? { debit_note: debitNote } : {}),
             ...(supportDocument
               ? { support_document: supportDocument }
               : {}),

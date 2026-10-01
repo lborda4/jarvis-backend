@@ -270,6 +270,9 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
         );
       }
       return {
+        name: str(line, 'Item.Name'),
+        taxes: taxRows(line).map(t => ({ type: t.name, amount: t.amount })),
+        withholdings: taxRows(line, 'WithholdingTaxTotal').map(t => ({ dianTaxCode: t.code, name: t.name, percentage: t.percentage ?? 0, amount: t.amount })),
         description:
           list(at(line, 'Item.Description'))
             .map(text)

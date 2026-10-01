@@ -1,3 +1,4 @@
+import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
 import { JarvisPaymentMethod } from './entities/jarvis-payment-method.entity';
 import { JarvisPaymentMethodsService } from './jarvis-payment-methods.service';
 import { Module, forwardRef } from '@nestjs/common';
@@ -38,6 +39,7 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
   ],
   controllers: [JarvisController],
   providers: [
+    JarvisInvoicePdfService,
     JarvisPaymentMethodsService,
     JarvisInvoiceHistoryService,
     JarvisSetupService,

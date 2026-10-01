@@ -20,7 +20,7 @@ describe('Envío de compra: los precios del formulario son base sin IVA', () => 
       {} as never,
       { listTaxes: jest.fn(async () => [{ id: 19, type: 'IVA', percentage: 19, active: true }]) } as never,
       {} as never, {} as never,
-      { assertCanCreateDocuments: jest.fn() } as never,
+      { assertCanCreateDocuments: jest.fn(), withSiigoQuotaLock: jest.fn((_company, work) => work()) } as never,
       {} as never, {} as never,
     );
     // Stop at the external boundary: the test must never issue a real purchase.

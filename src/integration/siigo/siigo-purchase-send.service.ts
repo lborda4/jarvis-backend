@@ -61,7 +61,11 @@ export class SiigoPurchaseSendService {
     private readonly historialFacturasRepository: HistorialFacturasRepository,
   ) {}
 
-  async sendPurchase(
+  async sendPurchase(request: CreateSiigoPurchaseSendRequestDto, companyId: string): Promise<CreateSiigoPurchaseSendResponseDto> {
+    return this.planSubscriptionService.withSiigoQuotaLock(companyId, () => this.sendPurchaseWithQuota(request, companyId));
+  }
+
+  private async sendPurchaseWithQuota(
     request: CreateSiigoPurchaseSendRequestDto,
     companyId: string,
   ): Promise<CreateSiigoPurchaseSendResponseDto> {

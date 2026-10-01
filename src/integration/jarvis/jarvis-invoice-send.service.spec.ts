@@ -9,7 +9,7 @@ function setup(token: string | null = ' company-token ') {
   };
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
   const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: token }) };
-  const client = { createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }) };
+  const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }) };
   const catalog = {
     getIvaTaxId: () => 1,
     getDefaultUnitMeasureId: () => 70,
@@ -196,5 +196,63 @@ describe('Notas credito Jarvis', () => {
     await expect(service.createAndSendInvoice({ ...request, billingReference: reference, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('Rechazada');
     expect(history.record).not.toHaveBeenCalled();
     expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+  });
+});
+
+describe('invoice source persistence', () => {
+  it('records the full accepted request independently of later edits', async () => {
+    const { service, request, history } = setup();
+    await service.createAndSendInvoice(request, 'company-1');
+    const saved = history.record.mock.calls[0][0].sourceRequest;
+    expect(saved).toEqual(request);
+    request.items[0].description = 'Changed';
+    expect(saved.items[0].description).toBe('Servicio');
+  });
+});
+
+describe('invoice viewer after issuance', () => {
+  it('returns the history ID and stores the XML supplied on successful issuance', async () => {
+    const { service, client, history, request } = setup();
+    history.record.mockResolvedValue('history-id' as never);
+    client.createInvoice.mockResolvedValue({ success: true, xml: Buffer.from('<Invoice/>').toString('base64') } as never);
+    const result = await service.createAndSendInvoice(request, 'company');
+    expect(result.invoice.historyId).toBe('history-id');
+    expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ invoiceXml: '<Invoice/>' }));
+  });
+});
+
+describe('Notas debito Jarvis', () => {
+  const reference = { number: 'FV100', uuid: 'a'.repeat(96), issueDate: '2026-09-01' };
+  it('uses debit fields, preserves copied line values and allocates independent numbering', async () => {
+    const { service, request, client, history, numbering } = setup();
+    await service.createAndSendInvoice({ ...request, billingReference: reference,
+      discrepancyResponseCode: 3, discrepancyResponseDescription: 'Ajuste de valor', observations: 'Observaciones',
+      headNote: 'Encabezado', footNote: 'Pie', sendmail: true, seze: 'REF', discountAmount: 10,
+      items: [{ description: 'Producto', code: 'ABC', notes: 'Detalle', quantity: 2, unitValue: 100, discount: 20, taxAmount: 34.2, taxId: 1 }],
+    }, 'company-1', JarvisResolutionKind.DEBIT_NOTE);
+    const body = client.createDebitNote.mock.calls[0][0];
+    expect(body.type_document_id).toBe(5);
+    expect(body.billing_reference).toEqual({ number: 'FV100', uuid: reference.uuid, issue_date: reference.issueDate });
+    expect(body).toMatchObject({ discrepancyresponsecode: 3, sendmail: true, notes: 'Observaciones', head_note: 'Encabezado', foot_note: 'Pie', seze: 'REF' });
+    expect(body.requested_monetary_totals).toMatchObject({ line_extension_amount: '180.00', tax_exclusive_amount: '180.00', tax_inclusive_amount: '214.20', allowance_total_amount: '10.00', payable_amount: '204.20' });
+    expect(body.allowance_charges[0]).toMatchObject({ amount: '10.00', base_amount: '214.20' });
+    expect(body.debit_note_lines[0]).toMatchObject({ code: 'ABC', invoiced_quantity: 2, price_amount: '100.00', notes: 'Detalle', line_extension_amount: '180.00' });
+    for (const key of ['legal_monetary_totals', 'invoice_lines', 'credit_note_lines', 'payment_form', 'prefix', 'resolution_number']) expect(body).not.toHaveProperty(key);
+    expect(client.createCreditNote).not.toHaveBeenCalled();
+    expect(client.createInvoice).not.toHaveBeenCalled();
+    expect(numbering.allocateResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.DEBIT_NOTE);
+    expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ documentKind: JarvisResolutionKind.DEBIT_NOTE, cufe: 'debit-code' }));
+  });
+  it('does not record or advance the number for rejected debit notes', async () => {
+    const { service, request, client, history, numbering } = setup();
+    client.createDebitNote.mockRejectedValue(new BadGatewayException('Rechazada'));
+    await expect(service.createAndSendInvoice({ ...request, billingReference: reference, discrepancyResponseCode: 3, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.DEBIT_NOTE)).rejects.toThrow('Rechazada');
+    expect(history.record).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+  });
+  it('requires an original invoice reference', async () => {
+    const { service, request, client } = setup();
+    await expect(service.createAndSendInvoice(request, 'company-1', JarvisResolutionKind.DEBIT_NOTE)).rejects.toThrow('factura afectada');
+    expect(client.createDebitNote).not.toHaveBeenCalled();
   });
 });

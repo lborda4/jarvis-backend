@@ -1,3 +1,4 @@
+import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
 import { ParseUUIDPipe } from '@nestjs/common';
 import { JarvisPaymentMethodsService } from './jarvis-payment-methods.service';
 import { SaveJarvisPaymentMethodDto } from './dto/jarvis-payment-method.dto';
@@ -76,6 +77,7 @@ import { JarvisTercerosService } from './jarvis-terceros.service';
 @Controller('integrations/jarvis')
 export class JarvisController {
   constructor(
+    private readonly invoicePdf: JarvisInvoicePdfService,
     private readonly paymentMethodsService: JarvisPaymentMethodsService,
     private readonly jarvisSetupService: JarvisSetupService,
     private readonly jarvisTercerosService: JarvisTercerosService,
@@ -335,6 +337,15 @@ export class JarvisController {
     return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.SUPPORT_DOCUMENT);
   }
 
+  @Get('debit-notes')
+  listDebitNotes(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
+    return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page }, JarvisResolutionKind.DEBIT_NOTE);
+  }
+  @Post('debit-notes')
+  createDebitNote(@CurrentUser() user: AuthenticatedUser, @Body() request: CreateJarvisInvoiceRequestDto) {
+    return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.DEBIT_NOTE);
+  }
+
   @Get('credit-notes')
   listCreditNotes(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
     return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page }, JarvisResolutionKind.CREDIT_NOTE);
@@ -343,6 +354,15 @@ export class JarvisController {
   @Post('credit-notes')
   createCreditNote(@CurrentUser() user: AuthenticatedUser, @Body() request: CreateJarvisInvoiceRequestDto) {
     return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.CREDIT_NOTE);
+  }
+
+  @Get('invoices/:id/pdf-data')
+  getInvoicePdfData(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.invoicePdf.getData(getAuthenticatedCompanyId(user), id);
+  }
+  @Get('invoices/:id')
+  getInvoiceDetail(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.jarvisInvoiceHistoryService.detail(getAuthenticatedCompanyId(user), id);
   }
 
   @Get('invoices')

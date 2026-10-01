@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withPostgresAdvisoryLock } from '../common/helpers/postgres-advisory-lock.helper';
 import { ElectronicDocument } from '../electronic-document/entities/electronic-document.entity';
 import { ElectronicDocumentStatus } from '../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../electronic-document/enums/electronic-document-type.enum';
@@ -16,7 +17,9 @@ import { Plan } from './entities/plan.entity';
 import { SubscriptionStatus } from './enums/subscription-status.enum';
 import { PlansRepository } from './repositories/plans.repository';
 
+export interface DocumentQuotaSnapshot { documentLimit: number | null; documentsUsed: number; remaining: number | null; }
 export interface PlanSubscriptionSnapshot {
+  documentQuotas?: Partial<Record<ElectronicDocumentType, DocumentQuotaSnapshot>>;
   status: SubscriptionStatus | null;
   startedAt: string | null;
   documentLimit: number | null;
@@ -45,6 +48,30 @@ export class PlanSubscriptionService {
     @InjectRepository(ElectronicDocument)
     private readonly electronicDocumentsRepository: Repository<ElectronicDocument>,
   ) {}
+  async withSiigoQuotaLock<T>(companyId: string, work: () => Promise<T>): Promise<T> {
+    return withPostgresAdvisoryLock(this.electronicDocumentsRepository.manager.connection, 'siigo-quota:' + companyId, work);
+  }
+
+  private limitFor(integration: Integration, type: ElectronicDocumentType): number | null {
+    const override = integration.provider === IntegrationProvider.SIIGO ? integration.documentLimits?.[type] : undefined;
+    return override !== undefined ? override : integration.plan?.documentLimit ?? null;
+  }
+
+  async saveSiigoDocumentLimits(companyId: string, limits: { purchaseInvoice: number | null; supportDocument: number | null }): Promise<PlanSubscriptionSnapshot> {
+    for (const value of [limits?.purchaseInvoice, limits?.supportDocument]) {
+      if (value !== null && (!Number.isSafeInteger(value) || value! < 0)) throw new BadRequestException('Los cupos deben ser enteros mayores o iguales a cero, o null para ilimitado.');
+    }
+    return this.withSiigoQuotaLock(companyId, async () => {
+      const integration = await this.integrationsRepository.findByCompanyAndProviderWithPlan(companyId, IntegrationProvider.SIIGO);
+      if (!integration) throw new NotFoundException('La empresa no tiene integración Siigo.');
+      integration.includedDocumentTypes = [...ALLOWED_DOCUMENT_TYPES];
+      integration.subscriptionStatus ??= SubscriptionStatus.ACTIVE;
+      integration.documentLimits = { [ElectronicDocumentType.PURCHASE_INVOICE]: limits.purchaseInvoice, [ElectronicDocumentType.SUPPORT_DOCUMENT]: limits.supportDocument };
+      await this.integrationsRepository.save(integration);
+      return this.buildSnapshot(integration);
+    });
+  }
+
   async getSubscription(
     companyId: string,
     provider: IntegrationProvider,
@@ -139,7 +166,7 @@ export class PlanSubscriptionService {
         provider,
       );
 
-    if (!integration?.plan?.id) {
+    if (!integration || (!integration.plan?.id && !(integration.provider === IntegrationProvider.SIIGO && integration.documentLimits))) {
       throw new ForbiddenException(
         'La integración no tiene un plan activo. Contacte al administrador.',
       );
@@ -159,7 +186,7 @@ export class PlanSubscriptionService {
       );
     }
 
-    const documentLimit = integration.plan.documentLimit;
+    const documentLimit = this.limitFor(integration, documentType);
 
     if (requestedQuantity <= 0) {
       return { allowed: 0, documentLimit, documentsUsed: 0 };
@@ -174,6 +201,7 @@ export class PlanSubscriptionService {
       companyId,
       documentType,
       startedAt,
+      provider,
     );
     const remaining = Math.max(0, documentLimit - documentsUsed);
 
@@ -281,7 +309,7 @@ export class PlanSubscriptionService {
     const plan = integration.plan;
     const includedDocumentTypes = this.resolveIncludedDocumentTypes(integration);
 
-    if (!plan) {
+    if (!plan && !(integration.provider === IntegrationProvider.SIIGO && integration.documentLimits)) {
       return {
         ...this.emptySnapshot(),
         status: integration.subscriptionStatus,
@@ -293,29 +321,39 @@ export class PlanSubscriptionService {
     const startedAt = integration.subscriptionStartedAt ?? integration.createdAt;
     const usagePerType = await Promise.all(
       includedDocumentTypes.map((documentType) =>
-        this.countDocumentsSince(integration.companyId, documentType, startedAt),
+        this.countDocumentsSince(integration.companyId, documentType, startedAt, integration.provider),
       ),
     );
+    const documentQuotas = integration.provider === IntegrationProvider.SIIGO
+      ? Object.fromEntries(includedDocumentTypes.map((type, index) => {
+          const documentLimit = this.limitFor(integration, type);
+          const documentsUsed = usagePerType[index];
+          return [type, { documentLimit, documentsUsed, remaining: documentLimit === null ? null : Math.max(0, documentLimit - documentsUsed) }];
+        })) : undefined;
     const documentsUsed = usagePerType.reduce((sum, count) => sum + count, 0);
-    const remaining =
-      plan.documentLimit == null
-        ? null
-        : Math.max(0, plan.documentLimit - documentsUsed);
+    const quotaValues = documentQuotas ? Object.values(documentQuotas) : [];
+    const documentLimit = documentQuotas
+      ? (quotaValues.some(quota => quota.documentLimit === null) ? null : quotaValues.reduce((sum, quota) => sum + quota.documentLimit!, 0))
+      : plan?.documentLimit ?? null;
+    const remaining = documentQuotas
+      ? (quotaValues.some(quota => quota.remaining === null) ? null : quotaValues.reduce((sum, quota) => sum + quota.remaining!, 0))
+      : documentLimit === null ? null : Math.max(0, documentLimit - documentsUsed);
 
     return {
       status: integration.subscriptionStatus,
       startedAt: integration.subscriptionStartedAt?.toISOString() ?? null,
-      documentLimit: plan.documentLimit,
+      documentLimit,
       documentsUsed,
       remaining,
       includedDocumentTypes,
-      plan: {
+      ...(documentQuotas ? { documentQuotas } : {}),
+      plan: plan ? {
         id: plan.id,
         name: plan.name,
         code: plan.code,
         documentLimit: plan.documentLimit,
         includedDocumentTypes: plan.includedDocumentTypes ?? [],
-      },
+      } : null,
     };
   }
 
@@ -323,8 +361,9 @@ export class PlanSubscriptionService {
     companyId: string,
     documentType: ElectronicDocumentType,
     since: Date,
+    provider: IntegrationProvider,
   ): Promise<number> {
-    return this.electronicDocumentsRepository
+    const query = this.electronicDocumentsRepository
       .createQueryBuilder('document')
       .where('document.companyId = :companyId', { companyId })
       .andWhere('document.electronicDocumentType = :documentType', {
@@ -333,8 +372,9 @@ export class PlanSubscriptionService {
       .andWhere('document.status = :status', {
         status: ElectronicDocumentStatus.PURCHASE_CREATED,
       })
-      .andWhere('document.createdAt >= :since', { since })
-      .getCount();
+      .andWhere('document.createdAt >= :since', { since });
+    if (provider === IntegrationProvider.SIIGO) query.andWhere('document.alreadyInSiigo = :alreadyInSiigo', { alreadyInSiigo: false });
+    return query.getCount();
   }
 
   private emptySnapshot(): PlanSubscriptionSnapshot {

@@ -61,6 +61,9 @@ export class Integration {
   })
   subscriptionStatus: SubscriptionStatus | null;
 
+  @Column({ name: 'document_limits', type: 'jsonb', nullable: true })
+  documentLimits: Partial<Record<ElectronicDocumentType, number | null>> | null;
+
   @Column({ default: true })
   active: boolean;
 

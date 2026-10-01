@@ -103,6 +103,7 @@ export class CreateJarvisInvoiceResponseDto {
 
   @ApiProperty()
   invoice: {
+    historyId?: string;
     id: string;
     number?: number | string;
     consecutive?: string;

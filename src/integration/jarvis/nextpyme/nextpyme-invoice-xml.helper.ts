@@ -48,6 +48,10 @@ export function extractNextPymeInvoiceXml(value: unknown, depth = 0): string {
     }
     for (const key of [
       'xml',
+      'invoiceXml',
+      'invoice_xml',
+      'XmlBase64',
+      'xmlBase64',
       'xml_base64',
       'XmlBytes',
       'XmlBytesBase64',

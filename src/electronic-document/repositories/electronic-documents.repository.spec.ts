@@ -1,3 +1,4 @@
+import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 import { ElectronicDocumentsRepository } from './electronic-documents.repository';
 import { ElectronicDocument } from '../entities/electronic-document.entity';
@@ -51,5 +52,19 @@ describe('buscar referencia de factura de compra', () => {
     const term = '%' + search.trim().replace(/[\\%_]/g, '\\$&') + '%';
     expect(query.andWhere).toHaveBeenCalledWith("(document.cufe ILIKE :term OR document.payload->'invoice'->>'number' ILIKE :term)", { term });
     expect(query.andWhere).toHaveBeenCalledWith('document.companyId = :companyId', { companyId: 'company-1' });
+  });
+});
+
+describe('supplier siblings without a source document', () => {
+  it.each([undefined, '', '  ', '11111111-1111-4111-8111-111111111111'])('handles excluded ID %s without sending an empty UUID to Postgres', async excludeId => {
+    const query = { where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getMany: jest.fn().mockResolvedValue([]) };
+    const repository = new ElectronicDocumentsRepository({ createQueryBuilder: () => query } as never);
+    await repository.findByCompanySupplierAndStatus('company-1', '123456789', ElectronicDocumentStatus.SUPPLIER_NOT_FOUND, excludeId);
+    expect(query.where).toHaveBeenCalledWith('document.companyId = :companyId', { companyId: 'company-1' });
+    expect(query.andWhere).toHaveBeenCalledWith('document.documentNumberThird = :documentNumberThird', { documentNumberThird: '123456789' });
+    expect(query.andWhere).toHaveBeenCalledWith('document.status = :status', { status: ElectronicDocumentStatus.SUPPLIER_NOT_FOUND });
+    const exclusions = query.andWhere.mock.calls.filter(([clause]) => clause.includes('excludeId'));
+    expect(exclusions).toEqual(excludeId?.trim() ? [['document.id != :excludeId', { excludeId }]] : []);
+    expect(query.getMany).toHaveBeenCalled();
   });
 });

@@ -447,3 +447,18 @@ describe('NextPymeApiClient credit-note', () => {
     await expect(client.createCreditNote({}, 'company-token')).rejects.toThrow();
   });
 });
+
+describe('NextPymeApiClient debit-note', () => {
+  it('usa endpoint debit-note y token de la empresa', async () => {
+    const { client, httpService } = buildClient();
+    const response = { success: true, ResponseDian: { IsValid: true } };
+    httpService.post.mockReturnValue(of({ status: 200, data: response }));
+    await expect(client.createDebitNote({ type_document_id: 5 }, ' company-debit ')).resolves.toEqual(response);
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/debit-note', { type_document_id: 5 }, expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-debit' }) }));
+  });
+  it.each([false, undefined])('rechaza respuesta sin confirmacion DIAN (%s)', async IsValid => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { success: true, ResponseDian: { IsValid } } }));
+    await expect(client.createDebitNote({}, 'company-token')).rejects.toThrow();
+  });
+});
