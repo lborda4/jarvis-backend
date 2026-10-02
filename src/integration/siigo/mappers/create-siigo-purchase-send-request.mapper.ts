@@ -7,7 +7,6 @@ import { truncateSiigoObservations } from '../helpers/siigo-observations.helper'
 import {
   calculateSiigoSupportDocumentPaymentValue,
   roundMoney,
-  roundSiigoAmount,
 } from '../helpers/siigo-purchase-total.helper';
 import {
   mapSiigoDocumentSendItem,
@@ -52,11 +51,12 @@ export function mapCreatePurchaseSendRequestToSiigo(
     {
       retentionIds: allRetentionIds,
       taxIncluded: request.tax_included === true,
-      // Los descuentos por línea requieren conservar sus bases a centavos.
-      // Mantener el comportamiento existente para compras sin descuentos.
-      roundAmount: request.tax_included === true || items.some((item) => (item.discount ?? 0) > 0)
-        ? roundMoney
-        : roundSiigoAmount,
+      // SIIGO documenta el total de compra con Redondear(..., 2) por línea
+      // (ValorBase, IVA, TotalItem). Usar pesos enteros (roundSiigoAmount)
+      // aquí producía off-by-one reales: p.ej. price 151176.47 + IVA 19% →
+      // nosotros 179899, SIIGO 179900 → invalid_total_payments. El reintento
+      // con el total que reporta SIIGO sigue como red de seguridad.
+      roundAmount: roundMoney,
     },
   );
 

@@ -23,11 +23,45 @@ describe('mapCreatePurchaseSendRequestToSiigo', () => {
     expect(result.payments[0].value).toBe(1171);
   });
 
-  it('redondea payments[0].value a pesos enteros aunque el precio del ítem tenga decimales reales', () => {
-    // Mismo caso reportado en producción: item.price = 105882.33 con IVA
-    // 5% da 111176.45 con redondeo a centavos, pero SIIGO valida
-    // /v1/purchases contra un total en pesos enteros (111176) y rechaza
-    // cualquier otro valor con invalid_total_payments.
+  it('calcula payments con Redondear a 2 decimales (fórmula documentada por SIIGO)', () => {
+    // Caso reportado: price 151176.47 + IVA 19%. Con redondeo a pesos
+    // enteros salía 179899 y SIIGO respondía total purchase = 179900.
+    const taxesCatalog: SiigoTaxCatalogItemDto[] = [
+      { id: 19365, name: 'IVA 19%', type: 'IVA', percentage: 19, active: true },
+    ];
+
+    const request: CreateSiigoPurchaseSendRequestDto = {
+      documentId: 'doc-cents',
+      date: '2026-08-01',
+      supplier: { identification: '800242106', branch_office: 0 },
+      provider_invoice: { prefix: 'DIAN', number: '90071004585' },
+      items: [
+        {
+          type: 'Account',
+          code: '51602001',
+          description: 'SOPORTE TV AJUSTABLE',
+          quantity: 1,
+          price: 151176.47,
+          taxes: [{ id: 19365 }],
+        },
+      ],
+      payments: [{ id: 4609, value: 179899 }],
+    };
+
+    const siigoPayload = mapCreatePurchaseSendRequestToSiigo(
+      request,
+      20005,
+      taxesCatalog,
+    );
+
+    expect(siigoPayload.payments[0].value).toBe(179900);
+  });
+
+  it('conserva centavos en payments cuando el precio del ítem tiene decimales (fórmula SIIGO a 2 decimales)', () => {
+    // Antes se forzaba peso entero (111176) y en otros casos SIIGO pedía
+    // centavos (179900). La fórmula oficial Redondear(..., 2) da 111176.45;
+    // si SIIGO en algún tenant pide entero, el reintento de
+    // invalid_total_payments corrige el valor.
     const taxesCatalog: SiigoTaxCatalogItemDto[] = [
       { id: 11792, name: 'IVA 5%', type: 'IVA', percentage: 5, active: true },
     ];
@@ -55,8 +89,7 @@ describe('mapCreatePurchaseSendRequestToSiigo', () => {
       taxesCatalog,
     );
 
-    expect(siigoPayload.payments[0].value).toBe(111176);
-    expect(Number.isInteger(siigoPayload.payments[0].value)).toBe(true);
+    expect(siigoPayload.payments[0].value).toBe(111176.45);
   });
 
   it('limpia el residuo de punto flotante de items[].price antes de enviarlo a SIIGO', () => {
@@ -92,7 +125,7 @@ describe('mapCreatePurchaseSendRequestToSiigo', () => {
     );
 
     expect(siigoPayload.items[0].price).toBe(3564706.35);
-    expect(siigoPayload.payments[0].value).toBe(3742941);
+    expect(siigoPayload.payments[0].value).toBe(3742941.67);
   });
 
   it('trunca observations a 1000 caracteres antes de enviarlo a SIIGO (caso real reportado: boilerplate legal de autorretención ICA de ~5000 caracteres)', () => {
