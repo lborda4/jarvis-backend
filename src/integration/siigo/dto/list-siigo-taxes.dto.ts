@@ -9,8 +9,8 @@ export class ListSiigoTaxesQueryDto {
 
   @ApiPropertyOptional({
     description:
-      'Filtra por tipo de impuesto en SIIGO (por ejemplo, IVA, ReteIVA, ReteICA, Retefuente, Autorretención).',
-    examples: ['IVA', 'ReteIVA', 'ReteICA', 'Retefuente'],
+      'Filtra por tipo de impuesto en SIIGO (por ejemplo, IVA, Impoconsumo, ReteIVA, ReteICA, Retefuente, Autorretención).',
+    examples: ['IVA', 'Impoconsumo', 'ReteIVA', 'ReteICA', 'Retefuente'],
   })
   type?: string;
 }

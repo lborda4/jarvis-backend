@@ -195,9 +195,9 @@ export class JarvisSetupService {
    * rango por prefijo y no dice cuál es de factura y cuál de documento
    * soporte, así que adivinarlo (por el prefijo o por si trae clave técnica)
    * sería una corazonada, no un dato. */
-  async listAvailableResolutions(): Promise<ListJarvisAvailableResolutionsResponseDto> {
+  async listAvailableResolutions(companyId?: string): Promise<ListJarvisAvailableResolutionsResponseDto> {
     const resolutions =
-      await this.nextPymeMasterCatalogService.listResolutions();
+      await this.nextPymeMasterCatalogService.listResolutions(companyId);
     const today = new Date().toISOString().slice(0, 10);
 
     const available = resolutions
@@ -394,6 +394,7 @@ export class JarvisSetupService {
         ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId()
         : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId());
 
+    const companyToken = await this.nextPymeMasterCatalogService.requireCompanyToken(trimmedCompanyId);
     await this.nextPymeApiClient.putConfigResolution({
       type_document_id: typeDocumentId,
       prefix,
@@ -405,9 +406,7 @@ export class JarvisSetupService {
       generated_to_date: 0,
       date_from: dateFrom,
       date_to: dateTo,
-    });
-
-    this.nextPymeMasterCatalogService.invalidateResolutionsCache();
+    }, companyToken);
 
     // Persistimos en integrations.credentials todo lo necesario para emitir
     // (número de resolución DIAN, clave técnica, vigencia, rango y consecutivo).
@@ -609,7 +608,7 @@ export class JarvisSetupService {
     const localSupport = credentials.resolutions?.support_document ?? null;
     const localInvoice = credentials.resolutions?.electronic_invoice ?? null;
 
-    const nextPymeResolutions = await this.loadNextPymeResolutions();
+    const nextPymeResolutions = await this.loadNextPymeResolutions(trimmedCompanyId);
     const supportDocumentResolution = this.mergeResolutionForStatus(
       localSupport,
       nextPymeResolutions.support,
@@ -653,13 +652,13 @@ export class JarvisSetupService {
     };
   }
 
-  private async loadNextPymeResolutions(): Promise<{
+  private async loadNextPymeResolutions(companyId: string): Promise<{
     support: NextPymeResolution | null;
     invoice: NextPymeResolution | null;
   }> {
     try {
       const resolutions =
-        await this.nextPymeMasterCatalogService.listResolutions();
+        await this.nextPymeMasterCatalogService.listResolutions(companyId);
       const supportTypeId =
         this.nextPymeMasterCatalogService.getSupportDocumentTypeId();
       const invoiceTypeId =

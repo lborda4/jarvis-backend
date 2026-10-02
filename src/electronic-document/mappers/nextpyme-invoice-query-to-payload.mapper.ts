@@ -302,12 +302,19 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
         const price = toNumber(line.price_amount);
         const total = toNumber(line.line_extension_amount);
         // INC puede aparecer antes del IVA o ser el único impuesto de la línea.
-        const firstTax = line.tax_totals?.find(
+        const firstIvaTax = line.tax_totals?.find(
           (tax) => resolveTaxType(tax) === 'IVA',
         );
+        const firstConsumptionTax = line.tax_totals?.find(
+          (tax) => resolveTaxType(tax) === 'INC',
+        );
         const ivaPercentage =
-          firstTax?.percent !== undefined
-            ? toNumber(firstTax.percent)
+          firstIvaTax?.percent !== undefined
+            ? toNumber(firstIvaTax.percent)
+            : undefined;
+        const consumptionTaxPercentage =
+          firstConsumptionTax?.percent !== undefined
+            ? toNumber(firstConsumptionTax.percent)
             : undefined;
         const lineCharges = line.allowance_charges ?? [];
         const discount = lineCharges.reduce((sum, charge) => {
@@ -328,6 +335,9 @@ export function mapNextPymeInvoiceQueryToElectronicDocumentPayload(
           total: total > 0 ? total : price,
           ...(line.code?.trim() ? { codigo: line.code.trim() } : {}),
           ...(ivaPercentage !== undefined ? { ivaPercentage } : {}),
+          ...(consumptionTaxPercentage !== undefined
+            ? { consumptionTaxPercentage }
+            : {}),
           ...(discount > 0 ? { discount } : {}),
           ...(surcharge > 0 ? { surcharge } : {}),
         };

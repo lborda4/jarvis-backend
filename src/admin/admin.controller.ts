@@ -95,8 +95,11 @@ export class AdminController {
     description:
       'Catálogo de municipios (código DANE + nombre) para elegir la ciudad de una empresa.',
   })
-  listCities(): Promise<ListAdminCitiesResponseDto> {
-    return this.adminService.listCities();
+  listCities(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('companyId') companyId?: string,
+  ): Promise<ListAdminCitiesResponseDto> {
+    return this.adminService.listCities(companyId ?? user.companyId ?? undefined);
   }
 
   @Get('companies/lookup-name')
@@ -107,8 +110,10 @@ export class AdminController {
   })
   lookupCompanyName(
     @Query('nit') nit: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('companyId') companyId?: string,
   ): Promise<LookupAdminCompanyNameResponseDto> {
-    return this.adminService.lookupCompanyName(nit ?? '');
+    return this.adminService.lookupCompanyName(nit ?? '', companyId ?? user.companyId ?? undefined);
   }
 
   @Post('companies/rut/parse')

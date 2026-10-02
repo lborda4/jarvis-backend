@@ -36,7 +36,7 @@ export class JarvisPaymentMethodsService {
     const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const missing = defaults.filter(preset => !items.some(item => item.name.trim().toLowerCase() === preset.name.toLowerCase()));
     if (missing.length) {
-      const catalog = await this.catalogs.getPaymentMethods();
+      const catalog = await this.catalogs.getPaymentMethods(companyId);
       const values = missing.flatMap(preset => {
         const master = catalog.find(row => String(row.code ?? '').trim().toUpperCase() === preset.code)
           ?? catalog.find(row => normalize(row.name) === normalize(preset.masterName));
@@ -64,7 +64,7 @@ export class JarvisPaymentMethodsService {
     if (!Number.isInteger(request.nextpymeMethodId) || request.nextpymeMethodId <= 0) {
       throw new BadRequestException('Selecciona una forma de pago válida del catálogo.');
     }
-    const master = (await this.catalogs.getPaymentMethods()).find(row => row.id === request.nextpymeMethodId);
+    const master = (await this.catalogs.getPaymentMethods(companyId)).find(row => row.id === request.nextpymeMethodId);
     if (!master) throw new BadRequestException('La forma de pago seleccionada no existe en NextPyme.');
     item.name = name;
     item.nextpymeMethodId = master.id;

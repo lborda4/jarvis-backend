@@ -77,6 +77,7 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     ]);
     expect(payload.totals).toEqual({ subtotal: 3201.75, total: 3938.15, iva: 608.33 });
     expect(payload.items[0].ivaPercentage).toBe(19);
+    expect(payload.items[0].consumptionTaxPercentage).toBe(4);
     const document = {
       payload: JSON.parse(JSON.stringify(payload)),
       createdAt: new Date('2026-09-28T00:00:00Z'),
@@ -97,7 +98,51 @@ describe('mapNextPymeInvoiceQueryToElectronicDocumentPayload', () => {
     );
     expect(payload.totals.iva).toBe(0);
     expect(payload.items[0].ivaPercentage).toBeUndefined();
+    expect(payload.items[0].consumptionTaxPercentage).toBe(4);
     expect(payload.taxes).toEqual([{ type: 'INC', amount: 128.07 }]);
+  });
+
+  it('sugiere Impoconsumo del catálogo SIIGO cuando la factura trae INC', () => {
+    const payload = mapNextPymeInvoiceQueryToElectronicDocumentPayload(
+      buildResult({
+        tax_totals: [consumptionTax],
+        invoice_lines: [{ tax_totals: [consumptionTax] }],
+      }),
+      'cufe-inc-suggest',
+    );
+    const document = {
+      payload,
+      createdAt: new Date('2026-09-28T00:00:00Z'),
+      updatedAt: new Date('2026-09-28T00:00:00Z'),
+    } as ElectronicDocument;
+    const dto = mapElectronicDocumentToListItem(
+      document,
+      null,
+      null,
+      [],
+      null,
+      [null],
+      null,
+      [],
+      null,
+      true,
+      undefined,
+      [
+        {
+          id: 41,
+          name: 'Impoconsumo 4%',
+          percentage: 4,
+        },
+      ],
+    );
+
+    expect(dto.documentConsumptionTax).toBe(128.07);
+    expect(dto.items?.[0].consumptionTaxPercentage).toBe(4);
+    expect(dto.items?.[0].suggestedConsumptionTax).toEqual({
+      id: 41,
+      name: 'Impoconsumo 4%',
+      percentage: 4,
+    });
   });
 
   it('aggregates consumption tax at document level without counting line taxes again', () => {

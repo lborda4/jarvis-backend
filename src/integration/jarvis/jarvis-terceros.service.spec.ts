@@ -338,7 +338,7 @@ describe('JarvisTercerosService.createBulk', () => {
 });
 
 describe('JarvisTercerosService.lookupNit', () => {
-  it('usa el token de las credenciales Jarvis cuando la empresa las tiene', async () => {
+  it('usa el token de la empresa aunque existan credenciales Jarvis con otro token', async () => {
     const lookupDocument = jest
       .fn()
       .mockResolvedValue({ found: true, document_number: '900123456' });
@@ -358,7 +358,7 @@ describe('JarvisTercerosService.lookupNit', () => {
     expect(lookupDocument).toHaveBeenCalledWith(
       JarvisDocumentType.NIT,
       '900123456',
-      'token-jarvis',
+      'token-empresa',
     );
   });
 

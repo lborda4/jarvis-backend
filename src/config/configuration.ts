@@ -63,7 +63,6 @@ export interface SiigoPurchaseHistoryAutoSyncConfig {
 
 export interface NextPymeConfig {
   baseUrl: string;
-  apiToken?: string;
   invoiceQueryUrl: string;
 }
 
@@ -209,7 +208,6 @@ export default (): AppConfiguration => ({
     baseUrl:
       trimOptional(process.env.NEXTPYME_BASE_URL) ??
       'https://api.nextpyme.plus/api/ubl2.1',
-    apiToken: trimOptional(process.env.NEXTPYME_API_TOKEN),
     invoiceQueryUrl:
       trimOptional(process.env.NEXTPYME_INVOICE_QUERY_URL) ??
       'https://api.nextpyme.plus/api/return-invoice-data',

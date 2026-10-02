@@ -118,6 +118,7 @@ export class AdminService {
 
   async lookupCompanyName(
     nit: string,
+    companyId?: string,
   ): Promise<LookupAdminCompanyNameResponseDto> {
     const normalizedNit = nit.replace(/[^\d]/g, '');
 
@@ -129,6 +130,7 @@ export class AdminService {
       const result = await this.nextPymeRutService.lookupDocument(
         JarvisDocumentType.NIT,
         normalizedNit,
+        await this.nextPymeMasterCatalogService.requireCompanyToken(companyId),
       );
 
       return { name: result.found ? (result.name?.trim() ?? null) : null };
@@ -137,9 +139,9 @@ export class AdminService {
     }
   }
 
-  async listCities(): Promise<ListAdminCitiesResponseDto> {
+  async listCities(companyId?: string): Promise<ListAdminCitiesResponseDto> {
     const municipalities =
-      await this.nextPymeMasterCatalogService.getMunicipalities();
+      await this.nextPymeMasterCatalogService.getMunicipalities(companyId);
 
     return {
       items: municipalities

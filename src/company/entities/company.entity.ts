@@ -43,7 +43,7 @@ export class Company {
   @Column({ type: 'jsonb', nullable: true })
   responsible: CompanyResponsible | null;
 
-  /** Token Bearer propio de la empresa para NextPyme — si no está, se usa NEXTPYME_API_TOKEN global. */
+  /** Token Bearer propio de la empresa para NextPyme. Es obligatorio para consultar o emitir documentos. */
   @Column({ name: 'next_pyme_token', type: 'varchar', nullable: true })
   nextPymeToken: string | null;
 

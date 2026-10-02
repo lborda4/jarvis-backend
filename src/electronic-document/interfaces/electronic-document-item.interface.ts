@@ -20,6 +20,8 @@ export interface ElectronicDocumentItem {
   itemType?: 'Product' | 'FixedAsset' | 'Account';
   /** % de IVA del ítem tal como viene en la factura original (DIAN/NextPyme). */
   ivaPercentage?: number;
+  /** % de Impuesto al consumo (INC / Impoconsumo) de la línea, si la factura lo trae. */
+  consumptionTaxPercentage?: number;
   /** Descuento propio de la línea (DIAN allowance_charges), si trae. */
   discount?: number;
   /** Recargo propio de la línea (allowance_charges con charge_indicator). */

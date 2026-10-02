@@ -14,9 +14,15 @@ export function buildTaxCatalogById(
 
 const IMPUESTOS_BUCKET_BY_TAX_TYPE: Record<
   string,
-  keyof Pick<HistorialFacturaImpuestos, 'iva' | 'retefuente' | 'reteica' | 'autorretencion'>
+  keyof Pick<
+    HistorialFacturaImpuestos,
+    'iva' | 'impoconsumo' | 'retefuente' | 'reteica' | 'autorretencion'
+  >
 > = {
   iva: 'iva',
+  impoconsumo: 'impoconsumo',
+  'impuesto al consumo': 'impoconsumo',
+  inc: 'impoconsumo',
   retefuente: 'retefuente',
   reteica: 'reteica',
   autorretencion: 'autorretencion',
@@ -40,7 +46,11 @@ function classifyTaxEntries(
 
   for (const entry of entries) {
     const catalogTax = taxCatalogById.get(entry.id);
-    const normalizedType = catalogTax?.type?.trim().toLowerCase();
+    const normalizedType = catalogTax?.type
+      ?.trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
     const bucket = normalizedType
       ? IMPUESTOS_BUCKET_BY_TAX_TYPE[normalizedType]
       : undefined;

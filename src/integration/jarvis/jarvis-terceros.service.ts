@@ -75,8 +75,8 @@ export class JarvisTercerosService {
 
   /** Catálogo real de NextPyme (tabla maestra type_liabilities) para el
    * desplegable "Tipo de responsabilidad" al crear un tercero. */
-  async listTypeLiabilities(): Promise<ListJarvisTypeLiabilitiesResponseDto> {
-    const rows = await this.nextPymeMasterCatalogService.getTypeLiabilities();
+  async listTypeLiabilities(companyId?: string): Promise<ListJarvisTypeLiabilitiesResponseDto> {
+    const rows = await this.nextPymeMasterCatalogService.getTypeLiabilities(companyId);
 
     return {
       items: rows
@@ -91,8 +91,8 @@ export class JarvisTercerosService {
 
   /** Catálogo real de NextPyme (tabla maestra municipalities) para el
    * desplegable "Municipio" al crear un tercero. */
-  async listMunicipalities(): Promise<ListJarvisMunicipalitiesResponseDto> {
-    const rows = await this.nextPymeMasterCatalogService.getMunicipalities();
+  async listMunicipalities(companyId?: string): Promise<ListJarvisMunicipalitiesResponseDto> {
+    const rows = await this.nextPymeMasterCatalogService.getMunicipalities(companyId);
 
     return {
       items: rows
@@ -110,8 +110,8 @@ export class JarvisTercerosService {
 
   /** Catálogo real de NextPyme (tabla maestra type_regime) para el
    * desplegable "Tipo de régimen" al crear un tercero. */
-  async listTypeRegimes(): Promise<ListJarvisTypeRegimesResponseDto> {
-    const rows = await this.nextPymeMasterCatalogService.getTypeRegimes();
+  async listTypeRegimes(companyId?: string): Promise<ListJarvisTypeRegimesResponseDto> {
+    const rows = await this.nextPymeMasterCatalogService.getTypeRegimes(companyId);
 
     return {
       items: rows
@@ -137,7 +137,7 @@ export class JarvisTercerosService {
     );
     let regimeNames = new Map<number, string>();
     try {
-      regimeNames = await this.getTypeRegimeNameMap();
+      regimeNames = await this.getTypeRegimeNameMap(trimmedCompanyId);
     } catch {
       regimeNames = new Map();
     }
@@ -441,32 +441,10 @@ export class JarvisTercerosService {
     );
   }
 
-  /**
-   * Token de NextPyme de la empresa: primero el de las credenciales Jarvis
-   * (`token_nextpyme`) y, si la empresa no tiene integración Jarvis, el de
-   * `companies.next_pyme_token` — este lookup también lo usa el modal de
-   * crear tercero de las empresas SIIGO (ver CreateJarvisTerceroModal con
-   * provider SIIGO), que es el mismo token con el que la creación masiva
-   * consulta los proveedores pendientes. Si no hay ninguno,
-   * NextPymeRutService cae al NEXTPYME_API_TOKEN global.
-   */
+  /** Usa exclusivamente companies.next_pyme_token de la empresa activa. */
   private async resolveCompanyNextPymeToken(
     companyId: string,
   ): Promise<string | undefined> {
-    const integration =
-      await this.integrationsRepository.findByCompanyAndProvider(
-        companyId,
-        IntegrationProvider.JARVIS,
-      );
-
-    if (integration?.credentials) {
-      const credentials = normalizeJarvisCredentials(integration.credentials);
-      const jarvisToken = credentials.token_nextpyme?.trim();
-      if (jarvisToken) {
-        return jarvisToken;
-      }
-    }
-
     const company = await this.companiesRepository.findById(companyId);
     return company?.nextPymeToken?.trim() || undefined;
   }
@@ -499,8 +477,8 @@ export class JarvisTercerosService {
     return integration;
   }
 
-  private async getTypeRegimeNameMap(): Promise<Map<number, string>> {
-    const rows = await this.nextPymeMasterCatalogService.getTypeRegimes();
+  private async getTypeRegimeNameMap(companyId: string): Promise<Map<number, string>> {
+    const rows = await this.nextPymeMasterCatalogService.getTypeRegimes(companyId);
     return new Map(
       rows
         .filter((row) => row.name)

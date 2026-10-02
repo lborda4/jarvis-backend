@@ -39,6 +39,7 @@ function buildService(overrides: {
     getSupportDocumentTypeId: jest.fn().mockReturnValue(11),
     getElectronicInvoiceTypeId: jest.fn().mockReturnValue(1),
     invalidateResolutionsCache: jest.fn(),
+    requireCompanyToken: jest.fn().mockResolvedValue("company-token"),
     listResolutions:
       overrides.listResolutions ?? jest.fn().mockResolvedValue([]),
   };
@@ -82,6 +83,7 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
 
     expect(putConfigResolution).toHaveBeenCalledWith(
       expect.objectContaining({ type_document_id: 42 }),
+      "company-token",
     );
   });
 
@@ -96,6 +98,7 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
 
     expect(putConfigResolution).toHaveBeenCalledWith(
       expect.objectContaining({ type_document_id: 11 }),
+      "company-token",
     );
   });
 
@@ -107,6 +110,7 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
 
     expect(putConfigResolution).toHaveBeenCalledWith(
       expect.objectContaining({ type_document_id: 1 }),
+      "company-token",
     );
   });
 
@@ -121,6 +125,7 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
 
     expect(putConfigResolution).toHaveBeenCalledWith(
       expect.objectContaining({ type_document_id: 1 }),
+      "company-token",
     );
   });
 });
@@ -168,7 +173,7 @@ describe('Numeracion independiente de notas credito', () => {
   it('guarda NC sin clave tecnica y conserva factura y soporte al avanzar', async () => {
     const {service, integrationsRepository, nextPymeApiClient} = buildService({});
     const saved = await service.saveResolution(buildRequest({ kind: JarvisResolutionKind.CREDIT_NOTE, prefix: 'NC', technicalKey: undefined }), 'company-1');
-    expect(nextPymeApiClient.putConfigResolution).toHaveBeenCalledWith(expect.objectContaining({ type_document_id: 4 }));
+    expect(nextPymeApiClient.putConfigResolution).toHaveBeenCalledWith(expect.objectContaining({ type_document_id: 4 }), "company-token");
     const integration = integrationsRepository.save.mock.calls[0][0];
     const invoice = { ...saved.resolution, kind: JarvisResolutionKind.ELECTRONIC_INVOICE, prefix: 'FV', nextConsecutive: 50 };
     integration.credentials.resolutions.electronic_invoice = invoice;
@@ -185,7 +190,7 @@ describe('Numeracion independiente de notas debito', () => {
   it('guarda NC sin clave tecnica y conserva factura y soporte al avanzar', async () => {
     const {service, integrationsRepository, nextPymeApiClient} = buildService({});
     const saved = await service.saveResolution(buildRequest({ kind: JarvisResolutionKind.DEBIT_NOTE, prefix: 'ND', technicalKey: undefined }), 'company-1');
-    expect(nextPymeApiClient.putConfigResolution).toHaveBeenCalledWith(expect.objectContaining({ type_document_id: 5 }));
+    expect(nextPymeApiClient.putConfigResolution).toHaveBeenCalledWith(expect.objectContaining({ type_document_id: 5 }), "company-token");
     const integration = integrationsRepository.save.mock.calls[0][0];
     const invoice = { ...saved.resolution, kind: JarvisResolutionKind.ELECTRONIC_INVOICE, prefix: 'FV', nextConsecutive: 50 };
     integration.credentials.resolutions.electronic_invoice = invoice;

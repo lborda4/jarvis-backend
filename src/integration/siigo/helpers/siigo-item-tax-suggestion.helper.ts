@@ -8,6 +8,19 @@ export interface SuggestedItemTax {
 
 const IVA_MATCH_TOLERANCE = 0.01;
 
+export function isImpoconsumoTaxType(type?: string): boolean {
+  const normalized = (type?.trim() ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  return (
+    normalized === 'impoconsumo' ||
+    normalized === 'impuesto al consumo' ||
+    normalized === 'inc'
+  );
+}
+
 /** Menor puntaje = mejor candidato. "IVA Activo Fijo" no puede ganar si
  * existe otro IVA a la misma tarifa: al enviar, SIIGO lo aplica como
  * impuesto de activo y el contador ve la compra contabilizada mal. */
@@ -74,6 +87,45 @@ export function resolveSuggestedTaxForItem(
   const match = pickPreferredIvaTax(
     findActiveIvaTaxesByRate(ivaPercentage, taxesCatalog),
   );
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    id: match.id,
+    name: match.name,
+    percentage: match.percentage,
+  };
+}
+
+/**
+ * Busca en el catálogo SIIGO un Impoconsumo cuya tarifa coincida con el
+ * INC de la factura. Si hay varios al mismo %, elige el primero activo
+ * (orden estable por nombre).
+ */
+export function resolveSuggestedConsumptionTaxForItem(
+  consumptionTaxPercentage: number | undefined,
+  taxesCatalog: SiigoTaxCatalogItemDto[],
+): SuggestedItemTax | null {
+  if (
+    consumptionTaxPercentage === undefined ||
+    consumptionTaxPercentage === null ||
+    !Number.isFinite(consumptionTaxPercentage)
+  ) {
+    return null;
+  }
+
+  const matches = taxesCatalog
+    .filter(
+      (tax) =>
+        tax.active !== false &&
+        isImpoconsumoTaxType(tax.type) &&
+        Math.abs(tax.percentage - consumptionTaxPercentage) < IVA_MATCH_TOLERANCE,
+    )
+    .sort((left, right) => left.name.localeCompare(right.name, 'es'));
+
+  const match = matches[0];
 
   if (!match) {
     return null;

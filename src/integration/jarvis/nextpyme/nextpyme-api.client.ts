@@ -395,8 +395,8 @@ export class NextPymeApiClient {
     tokenOverride?: string,
   ): Promise<NextPymeMasterRow[]> {
     // Prioriza el token propio de la empresa (companies.next_pyme_token); si
-    // no tiene uno configurado, cae al NEXTPYME_API_TOKEN global.
-    const token = tokenOverride?.trim() || this.requireToken();
+    // no tiene uno configurado, se rechaza la operación.
+    const token = this.requireToken(tokenOverride);
     const baseUrl = this.getBaseUrl();
 
     try {
@@ -449,8 +449,9 @@ export class NextPymeApiClient {
 
   async listResolutions(
     filters?: Partial<{ type_document_id: number; prefix: string }>,
+    companyToken?: string,
   ): Promise<NextPymeResolution[]> {
-    const token = this.requireToken();
+    const token = this.requireToken(companyToken);
     const baseUrl = this.getBaseUrl();
     const params: Record<string, string | number> = {};
 
@@ -501,8 +502,9 @@ export class NextPymeApiClient {
 
   async putConfigResolution(
     payload: NextPymeConfigResolutionPayload,
+    companyToken?: string,
   ): Promise<UnknownRecord> {
-    const token = this.requireToken();
+    const token = this.requireToken(companyToken);
     const baseUrl = this.getBaseUrl();
 
     this.logger.log(
@@ -555,7 +557,7 @@ export class NextPymeApiClient {
     payload: NextPymeSupportDocumentCreatePayload,
     companyToken?: string,
   ): Promise<UnknownRecord> {
-    if (companyToken !== undefined && !companyToken.trim()) throw new ServiceUnavailableException("La empresa no tiene un token de NextPyme configurado.");
+    const token = this.requireToken(companyToken);
     return this.postDianUblDocument(
       'support-document',
       {
@@ -567,8 +569,8 @@ export class NextPymeApiClient {
         },
       },
       'el documento soporte',
-      companyToken?.trim() ?? this.requireToken(),
-      companyToken !== undefined,
+      token,
+      true,
     );
   }
 
@@ -825,8 +827,8 @@ export class NextPymeApiClient {
     tokenOverride?: string,
   ): Promise<NextPymeAttemptOutcome> {
     // Prioriza el token propio de la empresa (companies.next_pyme_token); si
-    // no tiene uno configurado, cae al NEXTPYME_API_TOKEN global.
-    const token = tokenOverride?.trim() || this.requireToken();
+    // no tiene uno configurado, se rechaza la operación.
+    const token = this.requireToken(tokenOverride);
     const url = this.getInvoiceQueryUrl();
 
     try {
@@ -1139,14 +1141,12 @@ export class NextPymeApiClient {
     return null;
   }
 
-  private requireToken(): string {
-    const token = this.configService
-      .get('nextPyme.apiToken', { infer: true })
-      ?.trim();
+  private requireToken(companyToken?: string): string {
+    const token = companyToken?.trim();
 
     if (!token) {
       throw new ServiceUnavailableException(
-        'La integración de facturación electrónica no está configurada. Contacta al administrador.',
+        'La empresa no tiene un token de NextPyme configurado.',
       );
     }
 

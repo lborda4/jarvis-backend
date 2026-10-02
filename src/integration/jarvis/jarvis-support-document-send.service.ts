@@ -74,18 +74,18 @@ export class JarvisSupportDocumentSendService {
     private readonly jarvisSetupService: JarvisSetupService,
   ) {}
 
-  async listTypeRejections() {
-    const rows = await this.nextPymeMasterCatalogService.getTypeRejections();
+  async listTypeRejections(companyId?: string) {
+    const rows = await this.nextPymeMasterCatalogService.getTypeRejections(companyId);
     return rows.map(({ id, name, code }) => ({ id, name, code: code ?? null }));
   }
 
-  async listCatalogs(): Promise<JarvisCatalogsResponseDto> {
+  async listCatalogs(companyId?: string): Promise<JarvisCatalogsResponseDto> {
     const [taxes, paymentMethods, paymentForms, currencies] = await Promise.all(
       [
-        this.nextPymeMasterCatalogService.getTaxes(),
-        this.nextPymeMasterCatalogService.getPaymentMethods(),
-        this.nextPymeMasterCatalogService.getPaymentForms(),
-        this.nextPymeMasterCatalogService.getTypeCurrencies(),
+        this.nextPymeMasterCatalogService.getTaxes(companyId),
+        this.nextPymeMasterCatalogService.getPaymentMethods(companyId),
+        this.nextPymeMasterCatalogService.getPaymentForms(companyId),
+        this.nextPymeMasterCatalogService.getTypeCurrencies(companyId),
       ],
     );
 
@@ -414,11 +414,13 @@ export class JarvisSupportDocumentSendService {
               credentials.municipality,
               credentials.city ?? company?.name,
               electronicDocument.payload.supplier.cityCode,
+              companyId,
             ));
           const liabilityId =
             await this.nextPymeMasterCatalogService.resolveLiabilityId(
               credentials.tax_responsibility ??
                 JarvisTaxResponsibility.NOT_APPLICABLE,
+              companyId,
             );
           const terceroVatRegime =
             tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
@@ -430,6 +432,7 @@ export class JarvisSupportDocumentSendService {
             tercero.typeRegimeId ??
             (await this.nextPymeMasterCatalogService.resolveRegimeId(
               terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
+              companyId,
             ));
 
           this.logger.log(
@@ -460,6 +463,7 @@ export class JarvisSupportDocumentSendService {
           const currencyId =
             await this.nextPymeMasterCatalogService.resolveCurrencyId(
               electronicDocument.payload.invoice.currency,
+              companyId,
             );
 
           const payload = {
@@ -525,7 +529,7 @@ export class JarvisSupportDocumentSendService {
           );
 
           const created =
-            await this.nextPymeApiClient.createSupportDocument(payload).catch(async (error: unknown) => {
+            await this.nextPymeApiClient.createSupportDocument(payload, await this.nextPymeMasterCatalogService.requireCompanyToken(companyId)).catch(async (error: unknown) => {
               if (
                 error instanceof BadGatewayException &&
                 /documento\s+procesado\s+anteriormente/i.test(error.message)

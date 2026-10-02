@@ -42,7 +42,7 @@ export class ProductsService {
   /**
    * Unidades de medida DIAN (tabla maestra `unit_measure` de NextPyme). Usa el
    * token propio de la empresa (companies.next_pyme_token) para la carga; si
-   * no lo tiene, el cliente cae al token global. El catálogo se cachea en el
+   * no lo tiene, se rechaza la consulta. El catálogo se cachea en el
    * servicio de catálogo, así que solo la primera empresa dispara la llamada.
    */
   async listUnitMeasures(
@@ -60,7 +60,7 @@ export class ProductsService {
   }
 
   /** Token propio de NextPyme de la empresa, si un admin lo configuró; si no,
-   * undefined (el cliente cae al NEXTPYME_API_TOKEN global). */
+   * undefined (el cliente rechaza la consulta). */
   private async resolveCompanyNextPymeToken(
     companyId: string,
   ): Promise<string | undefined> {

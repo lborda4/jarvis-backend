@@ -72,6 +72,7 @@ export function mapElectronicDocumentToListItem(
    * computeElectronicDocumentRequiresReview), se usa ese valor en vez de
    * recalcularlo acá — evita el doble cálculo en el camino de filtrado. */
   precomputedRequiresReview?: boolean,
+  itemConsumptionTaxSuggestions: Array<SuggestedItemTax | null> = [],
 ): ElectronicDocumentListItemDto {
   const aiConfidence =
     summarizeDocumentAiSuggestion(document.payload)?.confidence ?? null;
@@ -137,6 +138,7 @@ export function mapElectronicDocumentToListItem(
       document,
       itemTaxSuggestions,
       itemAccountSuggestions,
+      itemConsumptionTaxSuggestions,
     ),
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
@@ -147,6 +149,7 @@ function mapDocumentItems(
   document: ElectronicDocument,
   itemTaxSuggestions: Array<SuggestedItemTax | null>,
   itemAccountSuggestions: Array<SuggestedItemAccount | null>,
+  itemConsumptionTaxSuggestions: Array<SuggestedItemTax | null> = [],
 ): ElectronicDocumentListItemDto['items'] {
   const items = document.payload?.items;
 
@@ -160,6 +163,9 @@ function mapDocumentItems(
     unitValue: item.valorUnitario > 0 ? item.valorUnitario : item.total,
     total: item.total,
     ivaPercentage: item.ivaPercentage,
+    ...(item.consumptionTaxPercentage !== undefined
+      ? { consumptionTaxPercentage: item.consumptionTaxPercentage }
+      : {}),
     ...(item.codigo?.trim() ? { code: item.codigo.trim() } : {}),
     ...(item.productMapping?.code?.trim()
       ? { productMapping: { code: item.productMapping.code.trim() } }
@@ -177,6 +183,7 @@ function mapDocumentItems(
     ...(item.itemType ? { itemType: item.itemType } : {}),
     ...(item.discount ? { discount: item.discount } : {}),
     suggestedTax: itemTaxSuggestions[index] ?? null,
+    suggestedConsumptionTax: itemConsumptionTaxSuggestions[index] ?? null,
     suggestedAccount: itemAccountSuggestions[index] ?? null,
     suggestedProduct: resolveAiSuggestedProductForItem(document, index),
   }));

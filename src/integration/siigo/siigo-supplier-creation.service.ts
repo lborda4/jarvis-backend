@@ -410,8 +410,8 @@ export class SiigoSupplierCreationService {
 
   /**
    * Consulta RUT/RUES en NextPyme por NIT, con el token propio de la
-   * empresa (companies.next_pyme_token) si lo tiene configurado, si no cae
-   * al token global. Devuelve null (no lanza) si falla o no encuentra
+   * empresa (companies.next_pyme_token). Devuelve null (no lanza) si falta
+   * el token, falla la consulta o no encuentra
    * nada — el llamador cae al dato del Excel importado en ese caso, en vez
    * de bloquear la creación del tercero.
    */

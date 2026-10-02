@@ -1,6 +1,7 @@
 import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import {
   resolveFallbackIvaTaxId,
+  resolveSuggestedConsumptionTaxForItem,
   resolveSuggestedTaxForItem,
 } from './siigo-item-tax-suggestion.helper';
 
@@ -17,6 +18,20 @@ function buildCatalog(): SiigoTaxCatalogItemDto[] {
       active: true,
     },
     { id: 5, name: 'IVA 19% inactivo', type: 'IVA', percentage: 19, active: false },
+    {
+      id: 40,
+      name: 'Impoconsumo 8%',
+      type: 'Impoconsumo',
+      percentage: 8,
+      active: true,
+    },
+    {
+      id: 41,
+      name: 'Impoconsumo 4%',
+      type: 'Impoconsumo',
+      percentage: 4,
+      active: true,
+    },
   ];
 }
 
@@ -124,5 +139,35 @@ describe('resolveFallbackIvaTaxId', () => {
         ],
       }),
     ).toBeNull();
+  });
+});
+
+describe('resolveSuggestedConsumptionTaxForItem', () => {
+  it('elige Impoconsumo del catálogo por la tarifa de INC de la factura', () => {
+    expect(resolveSuggestedConsumptionTaxForItem(8, buildCatalog())).toEqual({
+      id: 40,
+      name: 'Impoconsumo 8%',
+      percentage: 8,
+    });
+  });
+
+  it('no confunde IVA con Impoconsumo a la misma tarifa', () => {
+    const catalog = [
+      ...buildCatalog(),
+      {
+        id: 99,
+        name: 'IVA 8%',
+        type: 'IVA',
+        percentage: 8,
+        active: true,
+      },
+    ];
+
+    expect(resolveSuggestedConsumptionTaxForItem(8, catalog)?.id).toBe(40);
+  });
+
+  it('devuelve null si la factura no trae INC o no hay match', () => {
+    expect(resolveSuggestedConsumptionTaxForItem(undefined, buildCatalog())).toBeNull();
+    expect(resolveSuggestedConsumptionTaxForItem(12, buildCatalog())).toBeNull();
   });
 });

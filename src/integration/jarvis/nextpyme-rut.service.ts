@@ -46,7 +46,7 @@ export class NextPymeRutService {
     documentNumber: string,
     tokenOverride?: string,
   ): Promise<LookupJarvisTerceroNitResponseDto> {
-    const token = tokenOverride?.trim() || this.requireToken();
+    const token = this.requireToken(tokenOverride);
     const baseUrl = this.getBaseUrl();
     const typeDocumentIdentificationId = await this.resolveDocumentTypeId(
       documentType,
@@ -237,14 +237,11 @@ export class NextPymeRutService {
     return null;
   }
 
-  private requireToken(): string {
-    const token = this.configService
-      .get('nextPyme.apiToken', { infer: true })
-      ?.trim();
-
+  private requireToken(companyToken?: string): string {
+    const token = companyToken?.trim();
     if (!token) {
       throw new ServiceUnavailableException(
-        'La consulta de documentos no está configurada. Contacta al administrador.',
+        'La empresa no tiene un token de NextPyme configurado.',
       );
     }
 

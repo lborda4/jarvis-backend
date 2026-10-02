@@ -23,6 +23,13 @@ export class SaveElectronicDocumentDraftItemDto {
   @ApiPropertyOptional({ example: 13, nullable: true })
   ivaTaxId?: number | null;
 
+  @ApiPropertyOptional({
+    example: 42,
+    nullable: true,
+    description: 'Id del Impoconsumo del catálogo SIIGO (type Impoconsumo).',
+  })
+  impoconsumoTaxId?: number | null;
+
   @ApiPropertyOptional({ example: 21, nullable: true })
   retefuenteTaxId?: number | null;
 }

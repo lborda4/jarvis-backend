@@ -557,7 +557,7 @@ export class PurchaseInvoiceImportWorkerService
   }
 
   /** Token propio de NextPyme de la empresa, si lo configuró un admin; si
-   * no, `undefined` (el cliente cae al NEXTPYME_API_TOKEN global). */
+   * no, `undefined` (el cliente rechaza la consulta). */
   private async resolveCompanyNextPymeToken(
     companyId: string,
   ): Promise<string | undefined> {

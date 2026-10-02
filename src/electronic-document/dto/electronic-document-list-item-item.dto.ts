@@ -11,6 +11,8 @@ export class ElectronicDocumentListItemItemDto {
   total: number;
   /** Tarifa de IVA de esta línea; no se hereda del total de la factura. */
   ivaPercentage?: number;
+  /** Tarifa de Impuesto al consumo (INC) de esta línea, si la factura lo trae. */
+  consumptionTaxPercentage?: number;
   /** Código del producto/ítem tal como viene en la factura original (DIAN/NextPyme). */
   code?: string;
   /** Producto SIIGO confirmado; no es el código del proveedor. */
@@ -27,6 +29,12 @@ export class ElectronicDocumentListItemItemDto {
    * null si el ítem no trae IVA en la factura original o no hubo match.
    */
   suggestedTax: SuggestedItemTax | null;
+  /**
+   * Impoconsumo del catálogo SIIGO sugerido para esta línea (type
+   * Impoconsumo), cuando la factura trae INC. null si no hay INC o no
+   * hubo match de tarifa.
+   */
+  suggestedConsumptionTax: SuggestedItemTax | null;
   /**
    * Cuenta PUC sugerida para ESTE ítem puntual, resuelta por
    * proveedor + descripción normalizada. `source: 'exact'` = regla

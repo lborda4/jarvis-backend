@@ -73,6 +73,9 @@ function formatImpuestosSummary(impuestos: HistorialFacturaImpuestos): string {
   if (impuestos.iva) {
     parts.push(`IVA ${impuestos.iva.percentage}%`);
   }
+  if (impuestos.impoconsumo) {
+    parts.push(`Impoconsumo ${impuestos.impoconsumo.percentage}%`);
+  }
   if (impuestos.retefuente) {
     parts.push(`Retefuente ${impuestos.retefuente.percentage}%`);
   }

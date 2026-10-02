@@ -127,4 +127,42 @@ describe('mapCreatePurchaseSendRequestToSiigo', () => {
       true,
     );
   });
+
+  it('envía Impoconsumo junto con IVA en items[].taxes del body de SIIGO', () => {
+    const taxesCatalog: SiigoTaxCatalogItemDto[] = [
+      { id: 19, name: 'IVA 19%', type: 'IVA', percentage: 19, active: true },
+      {
+        id: 40,
+        name: 'Impoconsumo 8%',
+        type: 'Impoconsumo',
+        percentage: 8,
+        active: true,
+      },
+    ];
+
+    const request: CreateSiigoPurchaseSendRequestDto = {
+      documentId: 'doc-impoconsumo',
+      date: '2026-09-26',
+      supplier: { identification: '900123456', branch_office: 0 },
+      provider_invoice: { prefix: 'FV', number: '100' },
+      items: [
+        {
+          code: '51050601',
+          description: 'Bebida gravada',
+          quantity: 1,
+          price: 589166.68,
+          taxes: [{ id: 19 }, { id: 40 }],
+        },
+      ],
+      payments: [{ id: 5056, value: 695200 }],
+    };
+
+    const siigoPayload = mapCreatePurchaseSendRequestToSiigo(
+      request,
+      40779,
+      taxesCatalog,
+    );
+
+    expect(siigoPayload.items[0].taxes).toEqual([{ id: 19 }, { id: 40 }]);
+  });
 });

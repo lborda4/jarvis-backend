@@ -69,6 +69,7 @@ import { SupplierConfigurationsRepository } from '../integration/repositories/su
 import { getSiigoIntegration } from '../integration/siigo/helpers/siigo-context.helper';
 import { resolveProviderInvoiceParts } from '../integration/siigo/mappers/electronic-document-to-siigo-purchase.mapper';
 import {
+  resolveSuggestedConsumptionTaxForItem,
   resolveSuggestedTaxForItem,
   SuggestedItemTax,
 } from '../integration/siigo/helpers/siigo-item-tax-suggestion.helper';
@@ -133,6 +134,22 @@ import type { ElectronicDocumentItem } from './interfaces/electronic-document-it
  * warning en vez de fallar en silencio. */
 const PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT = 5000;
 
+/** Tarifa de INC a nivel documento cuando las líneas no traen percent. */
+function resolveDocumentConsumptionTaxRate(
+  payload: ElectronicDocumentPayload | null | undefined,
+): number | undefined {
+  const amount = (payload?.taxes ?? [])
+    .filter((tax) => tax.type === 'INC')
+    .reduce((sum, tax) => sum + Number(tax.amount || 0), 0);
+  const subtotal = Number(payload?.totals?.subtotal ?? 0);
+
+  if (!(amount > 0) || !(subtotal > 0)) {
+    return undefined;
+  }
+
+  return Math.round((amount / subtotal) * 10000) / 100;
+}
+
 /** Replica en payload.items la cuenta/producto que el contador guardó, para
  * que el listado pueda reconstruir las líneas aunque `draft` no llegue. El
  * SKU del vendedor (codigo original) se conserva: la asignación vive en
@@ -168,6 +185,7 @@ function applyDraftCodesToPayloadItems(
       codigo: existing?.codigo,
       aiSuggestion: existing?.aiSuggestion,
       ivaPercentage: existing?.ivaPercentage,
+      consumptionTaxPercentage: existing?.consumptionTaxPercentage,
       discount: existing ? existing.discount : saved.discount,
       itemType: saved.tipo,
       accountMapping:
@@ -1434,6 +1452,7 @@ export class ElectronicDocumentService {
           supplierPreferences.products.get(document.id) ?? null,
           isSiigoCompany,
           precomputedRequiresReview?.get(document.id),
+          supplierPreferences.itemConsumptionTaxes.get(document.id) ?? [],
         ),
       ),
       total,
@@ -1553,6 +1572,7 @@ export class ElectronicDocumentService {
     retentions: Map<string, SupplierRetentionPreference[]>;
     costCenters: Map<string, SupplierCostCenterPreference | null>;
     itemTaxes: Map<string, Array<SuggestedItemTax | null>>;
+    itemConsumptionTaxes: Map<string, Array<SuggestedItemTax | null>>;
     itemConfigs: Map<string, SuggestedPurchaseItemConfig | null>;
     itemAccounts: Map<string, Array<SuggestedItemAccount | null>>;
   }> {
@@ -1565,6 +1585,10 @@ export class ElectronicDocumentService {
     const retentions = new Map<string, SupplierRetentionPreference[]>();
     const costCenters = new Map<string, SupplierCostCenterPreference | null>();
     const itemTaxes = new Map<string, Array<SuggestedItemTax | null>>();
+    const itemConsumptionTaxes = new Map<
+      string,
+      Array<SuggestedItemTax | null>
+    >();
     const itemConfigs = new Map<string, SuggestedPurchaseItemConfig | null>();
     const itemAccounts = new Map<string, Array<SuggestedItemAccount | null>>();
 
@@ -1576,6 +1600,7 @@ export class ElectronicDocumentService {
         retentions,
         costCenters,
         itemTaxes,
+        itemConsumptionTaxes,
         itemConfigs,
         itemAccounts,
       };
@@ -1738,12 +1763,26 @@ export class ElectronicDocumentService {
     await mapWithConcurrency(documents, 8, async (document) => {
       const integrationId = integrationIdByCompanyId.get(document.companyId);
       const taxesCatalog = taxesCatalogByCompanyId.get(document.companyId);
+      const documentConsumptionRate = resolveDocumentConsumptionTaxRate(
+        document.payload,
+      );
 
       itemTaxes.set(
         document.id,
         (document.payload?.items ?? []).map((item) =>
           taxesCatalog
             ? resolveSuggestedTaxForItem(item.ivaPercentage, taxesCatalog)
+            : null,
+        ),
+      );
+      itemConsumptionTaxes.set(
+        document.id,
+        (document.payload?.items ?? []).map((item) =>
+          taxesCatalog
+            ? resolveSuggestedConsumptionTaxForItem(
+                item.consumptionTaxPercentage ?? documentConsumptionRate,
+                taxesCatalog,
+              )
             : null,
         ),
       );
@@ -2019,6 +2058,7 @@ export class ElectronicDocumentService {
       retentions,
       costCenters,
       itemTaxes,
+      itemConsumptionTaxes,
       itemConfigs,
       itemAccounts,
     };

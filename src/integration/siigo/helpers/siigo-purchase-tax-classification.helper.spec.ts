@@ -12,6 +12,7 @@ describe('classifySiigoPurchaseTaxes', () => {
     { id: 11811, name: 'Retefuente 1% Transp mercancía', type: 'Retefuente', percentage: 1, active: true },
     { id: 11798, name: 'ReteICA 11.04 Compras bienes', type: 'ReteICA', percentage: 11.04, active: true },
     { id: 11805, name: 'ReteIVA 15%', type: 'ReteIVA', percentage: 15, active: true },
+    { id: 40, name: 'Impoconsumo 8%', type: 'Impoconsumo', percentage: 8, active: true },
   ];
   const catalogById = buildTaxCatalogById(catalog);
 
@@ -37,6 +38,29 @@ describe('classifySiigoPurchaseTaxes', () => {
       percentage: 11.04,
     });
     expect(impuestos.autorretencion).toBeUndefined();
+    expect(impuestos.tarifas).toBeUndefined();
+  });
+
+  it('clasifica Impoconsumo en su propio balde y no lo manda a tarifas', () => {
+    const impuestos = classifySiigoPurchaseTaxes(
+      [
+        { id: 18900, name: 'IVA Activo Fijo', type: 'IVA', percentage: 19, value: 1 },
+        { id: 40, name: 'Impoconsumo 8%', type: 'Impoconsumo', percentage: 8, value: 1 },
+      ],
+      undefined,
+      catalogById,
+    );
+
+    expect(impuestos.iva).toEqual({
+      id: 18900,
+      name: 'IVA Activo Fijo',
+      percentage: 19,
+    });
+    expect(impuestos.impoconsumo).toEqual({
+      id: 40,
+      name: 'Impoconsumo 8%',
+      percentage: 8,
+    });
     expect(impuestos.tarifas).toBeUndefined();
   });
 

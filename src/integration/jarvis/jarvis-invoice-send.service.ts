@@ -150,7 +150,7 @@ export class JarvisInvoiceSendService {
     const defaultTaxId = this.nextPymeMasterCatalogService.getIvaTaxId();
     const allowedTaxIds = new Set([defaultTaxId]);
     if (items.some((item) => item.taxId != null && item.taxId !== defaultTaxId)) {
-      const catalogTaxes = await this.nextPymeMasterCatalogService.getTaxes();
+      const catalogTaxes = await this.nextPymeMasterCatalogService.getTaxes(companyId);
       for (const tax of catalogTaxes) allowedTaxIds.add(tax.id);
     }
 
@@ -223,11 +223,14 @@ export class JarvisInvoiceSendService {
             (await this.nextPymeMasterCatalogService.resolveMunicipalityId(
               credentials.municipality,
               credentials.city ?? company?.name,
+              undefined,
+              companyId,
             ));
           const liabilityId =
             await this.nextPymeMasterCatalogService.resolveLiabilityId(
               credentials.tax_responsibility ??
                 JarvisTaxResponsibility.NOT_APPLICABLE,
+              companyId,
             );
           const terceroVatRegime =
             tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
@@ -239,9 +242,10 @@ export class JarvisInvoiceSendService {
             tercero.typeRegimeId ??
             (await this.nextPymeMasterCatalogService.resolveRegimeId(
               terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
+              companyId,
             ));
           const currencyId =
-            await this.nextPymeMasterCatalogService.resolveCurrencyId(currency);
+            await this.nextPymeMasterCatalogService.resolveCurrencyId(currency, companyId);
 
           this.logger.log(
             `[companyId=${companyId}] Numeración local ${documentLabel} ${JSON.stringify(

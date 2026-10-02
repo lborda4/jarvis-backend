@@ -116,7 +116,7 @@ export class AdminCompanyListItemDto {
   @ApiPropertyOptional({
     nullable: true,
     description:
-      'Token Bearer propio de la empresa para NextPyme. Si es null, la consulta de factura de compra por CUFE usa el token global (NEXTPYME_API_TOKEN).',
+      'Token Bearer propio de la empresa para NextPyme. Si es null, no se pueden consultar documentos en NextPyme.',
   })
   nextPymeToken: string | null;
 
@@ -214,7 +214,7 @@ export class CreateAdminCompanyRequestDto {
 
   @ApiPropertyOptional({
     description:
-      'Token Bearer propio de la empresa para NextPyme. Si se omite, la consulta de factura de compra por CUFE usa el token global (NEXTPYME_API_TOKEN).',
+      'Token Bearer propio de la empresa para NextPyme. Es necesario para consultar documentos en NextPyme.',
   })
   nextPymeToken?: string;
 }

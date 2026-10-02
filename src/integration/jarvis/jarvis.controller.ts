@@ -144,8 +144,8 @@ export class JarvisController {
     description:
       'Consulta en NextPyme las resoluciones vigentes de la empresa para elegir cuál usar en factura electrónica y en documento soporte.',
   })
-  listAvailableResolutions(): Promise<ListJarvisAvailableResolutionsResponseDto> {
-    return this.jarvisSetupService.listAvailableResolutions();
+  listAvailableResolutions(@CurrentUser() user: AuthenticatedUser): Promise<ListJarvisAvailableResolutionsResponseDto> {
+    return this.jarvisSetupService.listAvailableResolutions(getAuthenticatedCompanyId(user));
   }
 
   @Post('resolutions')
@@ -166,8 +166,8 @@ export class JarvisController {
 
   @Get('catalogs/type-rejections')
   @ApiOperation({ summary: 'Motivos de las notas desde la tabla maestra type_rejections' })
-  listTypeRejections() {
-    return this.jarvisSupportDocumentSendService.listTypeRejections();
+  listTypeRejections(@CurrentUser() user: AuthenticatedUser) {
+    return this.jarvisSupportDocumentSendService.listTypeRejections(getAuthenticatedCompanyId(user));
   }
 
   @Get('catalogs')
@@ -176,8 +176,8 @@ export class JarvisController {
     description:
       'Devuelve impuestos, medios de pago y formas de pago desde las tablas maestras de NextPyme.',
   })
-  listCatalogs(): Promise<JarvisCatalogsResponseDto> {
-    return this.jarvisSupportDocumentSendService.listCatalogs();
+  listCatalogs(@CurrentUser() user: AuthenticatedUser): Promise<JarvisCatalogsResponseDto> {
+    return this.jarvisSupportDocumentSendService.listCatalogs(getAuthenticatedCompanyId(user));
   }
 
   @Get('terceros')
@@ -202,8 +202,8 @@ export class JarvisController {
     description:
       'Devuelve la tabla maestra type_liabilities de NextPyme para el desplegable al crear un tercero. El valor por defecto es R-99-PN (id 117).',
   })
-  listTerceroTypeLiabilities(): Promise<ListJarvisTypeLiabilitiesResponseDto> {
-    return this.jarvisTercerosService.listTypeLiabilities();
+  listTerceroTypeLiabilities(@CurrentUser() user: AuthenticatedUser): Promise<ListJarvisTypeLiabilitiesResponseDto> {
+    return this.jarvisTercerosService.listTypeLiabilities(getAuthenticatedCompanyId(user));
   }
 
   @Get('terceros/municipalities')
@@ -212,8 +212,8 @@ export class JarvisController {
     description:
       'Devuelve la tabla maestra municipalities de NextPyme para el desplegable al crear un tercero.',
   })
-  listTerceroMunicipalities(): Promise<ListJarvisMunicipalitiesResponseDto> {
-    return this.jarvisTercerosService.listMunicipalities();
+  listTerceroMunicipalities(@CurrentUser() user: AuthenticatedUser): Promise<ListJarvisMunicipalitiesResponseDto> {
+    return this.jarvisTercerosService.listMunicipalities(getAuthenticatedCompanyId(user));
   }
 
   @Get('terceros/type-regimes')
@@ -222,8 +222,8 @@ export class JarvisController {
     description:
       'Devuelve la tabla maestra type_regime de NextPyme para el desplegable al crear un tercero. El valor por defecto es id 2 (No Responsable de IVA).',
   })
-  listTerceroTypeRegimes(): Promise<ListJarvisTypeRegimesResponseDto> {
-    return this.jarvisTercerosService.listTypeRegimes();
+  listTerceroTypeRegimes(@CurrentUser() user: AuthenticatedUser): Promise<ListJarvisTypeRegimesResponseDto> {
+    return this.jarvisTercerosService.listTypeRegimes(getAuthenticatedCompanyId(user));
   }
 
   @Post('terceros/lookup-nit')

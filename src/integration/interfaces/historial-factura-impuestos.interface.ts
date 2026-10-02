@@ -13,6 +13,7 @@ export interface HistorialFacturaTaxDetail {
  */
 export interface HistorialFacturaImpuestos {
   iva?: HistorialFacturaTaxDetail | null;
+  impoconsumo?: HistorialFacturaTaxDetail | null;
   retefuente?: HistorialFacturaTaxDetail | null;
   reteica?: HistorialFacturaTaxDetail | null;
   autorretencion?: HistorialFacturaTaxDetail | null;

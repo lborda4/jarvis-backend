@@ -1,6 +1,28 @@
 import { of, throwError } from 'rxjs';
 import { NextPymeApiClient } from './nextpyme-api.client';
 
+describe('NextPyme company authentication', () => {
+  it.each([undefined, '', '   '])('rejects a missing company token even with a global token (%s)', async token => {
+    const { client, httpService } = buildClient({ 'nextPyme.apiToken': 'global-token' });
+    await expect(client.listResolutions(undefined, token)).rejects.toThrow('token de NextPyme');
+    await expect(client.putConfigResolution({} as any, token)).rejects.toThrow('token de NextPyme');
+    await expect(client.fetchMasterTable('taxes', token)).rejects.toThrow('token de NextPyme');
+    await expect(client.getInvoiceByCufe('cufe', token)).rejects.toThrow('token de NextPyme');
+    await expect(client.createSupportDocument({} as any, token)).rejects.toThrow('token de NextPyme');
+    expect(httpService.request).not.toHaveBeenCalled();
+    expect(httpService.put).not.toHaveBeenCalled();
+    expect(httpService.post).not.toHaveBeenCalled();
+  });
+
+  it('configures resolutions with the supplied company token', async () => {
+    const { client, httpService } = buildClient();
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: true } }));
+    await client.putConfigResolution({} as any, ' company-a ');
+    await client.putConfigResolution({} as any, 'company-b');
+    expect(httpService.put.mock.calls.map(call => call[2].headers.Authorization)).toEqual(['Bearer company-a', 'Bearer company-b']);
+  });
+});
+
 const VALID_NEXTPYME_RESPONSE = {
   data: {
     seller: { identification_number: '900123456' },
@@ -169,7 +191,7 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
     httpService.request.mockReturnValue(of({ status: 400, data: {} }));
 
     const result = await runWithFakeTimers(() =>
-      client.getInvoiceByCufe('cufe-1'),
+      client.getInvoiceByCufe('cufe-1', 'company-token'),
     );
 
     expect(httpService.request).toHaveBeenCalledTimes(1);
@@ -185,7 +207,7 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
     httpService.request.mockReturnValue(of({ status: 404, data: {} }));
 
     const result = await runWithFakeTimers(() =>
-      client.getInvoiceByCufe('cufe-1'),
+      client.getInvoiceByCufe('cufe-1', 'company-token'),
     );
 
     expect(httpService.request).toHaveBeenCalledTimes(1);
@@ -199,7 +221,7 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
     httpService.request.mockReturnValue(of({ status: 503, data: {} }));
 
     const result = await runWithFakeTimers(() =>
-      client.getInvoiceByCufe('cufe-1'),
+      client.getInvoiceByCufe('cufe-1', 'company-token'),
     );
 
     // 1 intento original + 2 reintentos = 3 llamadas, no 4 (comportamiento
@@ -223,7 +245,7 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
       .mockReturnValueOnce(of({ status: 200, data: VALID_NEXTPYME_RESPONSE }));
 
     const result = await runWithFakeTimers(() =>
-      client.getInvoiceByCufe('cufe-1'),
+      client.getInvoiceByCufe('cufe-1', 'company-token'),
     );
 
     expect(httpService.request).toHaveBeenCalledTimes(2);
@@ -246,7 +268,7 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
     httpService.request.mockReturnValue(throwError(() => timeoutError));
 
     const result = await runWithFakeTimers(() =>
-      client.getInvoiceByCufe('cufe-1'),
+      client.getInvoiceByCufe('cufe-1', 'company-token'),
     );
 
     // 1 intento + 1 reintento configurado.
@@ -259,7 +281,7 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
     httpService.request.mockReturnValue(of({ status: 200, data: {} }));
 
     const result = await runWithFakeTimers(() =>
-      client.getInvoiceByCufe('cufe-1'),
+      client.getInvoiceByCufe('cufe-1', 'company-token'),
     );
 
     expect(httpService.request).toHaveBeenCalledTimes(1);
@@ -325,7 +347,7 @@ describe('NextPymeApiClient.listResolutions', () => {
   it('lee el sobre DIAN, que no trae id ni type_document_id', async () => {
     const { client } = buildClientWithGet(DIAN_NUMBERING_RANGE_RESPONSE);
 
-    const resolutions = await client.listResolutions();
+    const resolutions = await client.listResolutions(undefined, "company-token");
 
     expect(resolutions).toHaveLength(2);
     expect(resolutions[0]).toMatchObject({
@@ -356,7 +378,7 @@ describe('NextPymeApiClient.listResolutions', () => {
       ],
     });
 
-    const resolutions = await client.listResolutions();
+    const resolutions = await client.listResolutions(undefined, "company-token");
 
     expect(resolutions).toEqual([
       expect.objectContaining({ id: 7, type_document_id: 11, number: 42 }),

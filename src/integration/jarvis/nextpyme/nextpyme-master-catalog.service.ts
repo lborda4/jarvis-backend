@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { CompaniesRepository } from '../../../company/repositories/companies.repository';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import {
   NextPymeApiClient,
   NextPymeMasterRow,
@@ -26,10 +27,23 @@ export class NextPymeMasterCatalogService {
     string,
     Promise<NextPymeMasterRow[]>
   >();
-  private resolutionsCache: CacheEntry<NextPymeResolution[]> | null = null;
-  private resolutionsInFlight: Promise<NextPymeResolution[]> | null = null;
 
-  constructor(private readonly nextPymeApiClient: NextPymeApiClient) {}
+  constructor(
+    private readonly nextPymeApiClient: NextPymeApiClient,
+    private readonly companies: CompaniesRepository,
+  ) {}
+
+  async requireCompanyToken(companyId?: string): Promise<string> {
+    const company = companyId?.trim()
+      ? await this.companies.findById(companyId.trim())
+      : null;
+    const token = company?.nextPymeToken?.trim();
+    if (!token)
+      throw new ServiceUnavailableException(
+        'La empresa no tiene un token de NextPyme configurado.',
+      );
+    return token;
+  }
 
   getSupportDocumentTypeId(): number {
     return SUPPORT_DOCUMENT_TYPE_ID;
@@ -39,12 +53,11 @@ export class NextPymeMasterCatalogService {
     return ELECTRONIC_INVOICE_TYPE_ID;
   }
 
-  invalidateResolutionsCache(): void {
-    this.resolutionsCache = null;
-  }
-
-  async listResolutions(): Promise<NextPymeResolution[]> {
-    return this.getResolutions();
+  async listResolutions(companyId?: string): Promise<NextPymeResolution[]> {
+    return this.nextPymeApiClient.listResolutions(
+      undefined,
+      await this.requireCompanyToken(companyId),
+    );
   }
 
   getDefaultUnitMeasureId(): number {
@@ -63,28 +76,43 @@ export class NextPymeMasterCatalogService {
     return IVA_TAX_ID;
   }
 
-  async getTypeRejections(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('type_rejections');
+  async getTypeRejections(companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable(
+      'type_rejections',
+      await this.requireCompanyToken(companyId),
+    );
   }
 
-  async getTaxes(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('taxes');
+  async getTaxes(companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable('taxes', await this.requireCompanyToken(companyId));
   }
 
-  async getPaymentMethods(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('payment_methods');
+  async getPaymentMethods(companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable(
+      'payment_methods',
+      await this.requireCompanyToken(companyId),
+    );
   }
 
-  async getPaymentForms(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('payment_forms');
+  async getPaymentForms(companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable(
+      'payment_forms',
+      await this.requireCompanyToken(companyId),
+    );
   }
 
-  async getTypeCurrencies(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('type_currencies');
+  async getTypeCurrencies(companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable(
+      'type_currencies',
+      await this.requireCompanyToken(companyId),
+    );
   }
 
-  async resolveCurrencyId(codeOrName?: string | null): Promise<number | null> {
-    const currencies = await this.getTypeCurrencies();
+  async resolveCurrencyId(
+    codeOrName?: string | null,
+    companyId?: string,
+  ): Promise<number | null> {
+    const currencies = await this.getTypeCurrencies(companyId);
     const needle = this.normalizeText(codeOrName);
 
     if (!needle) {
@@ -104,36 +132,48 @@ export class NextPymeMasterCatalogService {
     return byName?.id ?? null;
   }
 
-  async getMunicipalities(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('municipalities');
+  async getMunicipalities(companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable(
+      'municipalities',
+      await this.requireCompanyToken(companyId),
+    );
   }
 
   /** Unidades de medida DIAN (tabla maestra `unit_measures`). El catálogo es
-   * el mismo para todas las empresas (dato maestro DIAN), por eso se cachea
-   * global; el token solo se usa en la primera carga contra NextPyme. */
+   * se consulta y cachea con el token propio de cada empresa. */
   async getUnitMeasures(tokenOverride?: string): Promise<NextPymeMasterRow[]> {
     return this.getTable('unit_measures', tokenOverride);
   }
 
-  async getTypeLiabilities(): Promise<NextPymeMasterRow[]> {
-    return this.getTable('type_liabilities');
+  async getTypeLiabilities(companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable(
+      'type_liabilities',
+      await this.requireCompanyToken(companyId),
+    );
   }
 
-  async getTypeRegimes(): Promise<NextPymeMasterRow[]> {
-    const rows = await this.getTable('type_regime');
+  async getTypeRegimes(companyId?: string): Promise<NextPymeMasterRow[]> {
+    const rows = await this.getTable(
+      'type_regime',
+      await this.requireCompanyToken(companyId),
+    );
     if (rows.length > 0) {
       return rows;
     }
 
-    return this.getTable('type_regimes');
+    return this.getTable(
+      'type_regimes',
+      await this.requireCompanyToken(companyId),
+    );
   }
 
   async resolveMunicipalityId(
     municipalityName?: string | null,
     cityName?: string | null,
     cityCode?: string | null,
+    companyId?: string,
   ): Promise<number> {
-    const municipalities = await this.getMunicipalities();
+    const municipalities = await this.getMunicipalities(companyId);
     const code = cityCode?.replace(/\D/g, '');
 
     if (code) {
@@ -170,8 +210,11 @@ export class NextPymeMasterCatalogService {
     return DEFAULT_MUNICIPALITY_ID;
   }
 
-  async resolveLiabilityId(codeOrName?: string | null): Promise<number> {
-    const liabilities = await this.getTypeLiabilities();
+  async resolveLiabilityId(
+    codeOrName?: string | null,
+    companyId?: string,
+  ): Promise<number> {
+    const liabilities = await this.getTypeLiabilities(companyId);
     const needle = this.normalizeText(codeOrName);
 
     if (needle) {
@@ -196,8 +239,11 @@ export class NextPymeMasterCatalogService {
     return fallback?.id ?? 117;
   }
 
-  async resolveRegimeId(vatRegime?: string | null): Promise<number> {
-    const regimes = await this.getTypeRegimes();
+  async resolveRegimeId(
+    vatRegime?: string | null,
+    companyId?: string,
+  ): Promise<number> {
+    const regimes = await this.getTypeRegimes(companyId);
     const needle = this.normalizeText(vatRegime);
 
     if (
@@ -224,47 +270,23 @@ export class NextPymeMasterCatalogService {
     return responsible?.id ?? 1;
   }
 
-  private async getResolutions(): Promise<NextPymeResolution[]> {
-    const now = Date.now();
-
-    if (
-      this.resolutionsCache &&
-      now - this.resolutionsCache.loadedAt < CACHE_TTL_MS
-    ) {
-      return this.resolutionsCache.value;
-    }
-
-    // Comparte la misma promesa entre llamadas concurrentes en vez de
-    // disparar una request por cada una mientras el caché está frío.
-    if (this.resolutionsInFlight) {
-      return this.resolutionsInFlight;
-    }
-
-    this.resolutionsInFlight = this.nextPymeApiClient
-      .listResolutions()
-      .then((value) => {
-        this.resolutionsCache = { loadedAt: now, value };
-        return value;
-      })
-      .finally(() => {
-        this.resolutionsInFlight = null;
-      });
-
-    return this.resolutionsInFlight;
-  }
-
   private async getTable(
     table: string,
     tokenOverride?: string,
   ): Promise<NextPymeMasterRow[]> {
+    if (!tokenOverride?.trim())
+      throw new ServiceUnavailableException(
+        'La empresa no tiene un token de NextPyme configurado.',
+      );
+    const cacheKey = tokenOverride.trim() + ':' + table;
     const now = Date.now();
-    const cached = this.cache.get(table);
+    const cached = this.cache.get(cacheKey);
 
     if (cached && now - cached.loadedAt < CACHE_TTL_MS) {
       return cached.value;
     }
 
-    const inFlight = this.tableInFlight.get(table);
+    const inFlight = this.tableInFlight.get(cacheKey);
     if (inFlight) {
       return inFlight;
     }
@@ -272,14 +294,14 @@ export class NextPymeMasterCatalogService {
     const request = this.nextPymeApiClient
       .fetchMasterTable(table, tokenOverride)
       .then((value) => {
-        this.cache.set(table, { loadedAt: now, value });
+        this.cache.set(cacheKey, { loadedAt: now, value });
         return value;
       })
       .finally(() => {
-        this.tableInFlight.delete(table);
+        this.tableInFlight.delete(cacheKey);
       });
 
-    this.tableInFlight.set(table, request);
+    this.tableInFlight.set(cacheKey, request);
     return request;
   }
 

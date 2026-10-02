@@ -21,6 +21,8 @@ export interface ElectronicDocumentDraftItem {
   unitValue: number;
   discount: number;
   ivaTaxId?: number | null;
+  /** Impuesto al consumo (SIIGO type Impoconsumo) elegido para esta línea. */
+  impoconsumoTaxId?: number | null;
   retefuenteTaxId?: number | null;
 }
 
