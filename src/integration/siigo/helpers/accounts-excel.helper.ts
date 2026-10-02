@@ -7,7 +7,7 @@ export interface AccountsExcelRow {
 }
 
 export interface ParseAccountsExcelResult {
-  /** Cuentas que pasaron los cuatro filtros y se van a guardar. */
+  /** Cuentas que pasaron los filtros y se van a guardar. */
   rows: AccountsExcelRow[];
   /** Filas con datos que se descartaron por no cumplir algún filtro. */
   skippedRows: number;
@@ -21,6 +21,7 @@ const ALLOWED_ACCOUNT_CLASSES = new Set(['1', '2', '5', '6', '7']);
 const COLUMN_ALIASES = {
   accountCode: ['codigo', 'código'],
   accountName: ['nombre'],
+  relationWith: ['relacion con', 'relación con'],
   dueDates: ['maneja vencimientos', 'maneja vencimiento'],
   active: ['activo'],
   groupingLevel: [
@@ -112,6 +113,13 @@ function isTransactional(value: string): boolean {
   return normalize(value) === 'transaccional';
 }
 
+/** Solo se importan cuentas sin relación especial del catálogo SIIGO
+ * ("Formas de pago", inventarios, etc.). Las que ya están ligadas a otro
+ * módulo no sirven como cuenta libre de gasto/costo en compras. */
+function isUnassignedRelation(value: string): boolean {
+  return normalize(value) === 'sin asignar';
+}
+
 const CELL_ADDRESS_PATTERN = /^([A-Z]+)(\d+)$/;
 
 /** Recalcula `sheet['!ref']` a partir de las claves de celda que realmente
@@ -151,10 +159,11 @@ export function fixWorksheetRange(sheet: XLSX.WorkSheet): void {
 
 /**
  * Lee el Excel de cuentas contables y devuelve SOLO las que se deben guardar:
- * de clase 1, 2, 5, 6 o 7, sin manejo de vencimientos, activas y de nivel
- * transaccional. Las cuentas de agrupación (las que en el archivo vienen sin
- * categoría ni nivel, como "1", "11", "1105") existen para dar la jerarquía
- * del PUC, pero no se pueden usar para contabilizar un documento.
+ * de clase 1, 2, 5, 6 o 7, Relación con = "Sin asignar", sin manejo de
+ * vencimientos, activas y de nivel transaccional. Las cuentas de agrupación
+ * (las que en el archivo vienen sin categoría ni nivel, como "1", "11",
+ * "1105") existen para dar la jerarquía del PUC, pero no se pueden usar
+ * para contabilizar un documento.
  */
 export function parseAccountsExcel(buffer: Buffer): ParseAccountsExcelResult {
   let workbook: XLSX.WorkBook;
@@ -208,7 +217,7 @@ export function parseAccountsExcel(buffer: Buffer): ParseAccountsExcelResult {
 
   if (!columnIndexes) {
     throw new InvalidExcelFormatException(
-      'No se encontraron las columnas requeridas del archivo de cuentas contables (Código, Nombre, Maneja vencimientos, Activo, Nivel agrupación).',
+      'No se encontraron las columnas requeridas del archivo de cuentas contables (Código, Nombre, Relación con, Maneja vencimientos, Activo, Nivel agrupación).',
     );
   }
 
@@ -230,6 +239,7 @@ export function parseAccountsExcel(buffer: Buffer): ParseAccountsExcelResult {
       Boolean(accountCode) &&
       Boolean(accountName) &&
       ALLOWED_ACCOUNT_CLASSES.has(accountCode[0]) &&
+      isUnassignedRelation(String(row[columnIndexes.relationWith] ?? '')) &&
       hasNoDueDates(String(row[columnIndexes.dueDates] ?? '')) &&
       isAffirmative(String(row[columnIndexes.active] ?? '')) &&
       isTransactional(String(row[columnIndexes.groupingLevel] ?? ''));

@@ -39,7 +39,7 @@ function validRow(overrides: Partial<Record<number, string>> = {}): string[] {
     'Caja general',
     'Caja - Bancos',
     'Activo',
-    'Formas de pago',
+    'Sin asignar',
     'No maneja vencimiento',
     'No',
     'Sí',
@@ -54,7 +54,7 @@ function validRow(overrides: Partial<Record<number, string>> = {}): string[] {
 }
 
 describe('parseAccountsExcel', () => {
-  it('guarda la cuenta que cumple los cuatro filtros', () => {
+  it('guarda la cuenta que cumple todos los filtros', () => {
     const result = parseAccountsExcel(buildWorkbookBuffer([validRow()]));
 
     expect(result.rows).toEqual([
@@ -114,6 +114,23 @@ describe('parseAccountsExcel', () => {
 
     expect(result.rows.map((row) => row.accountCode)).toEqual(['11050501']);
     expect(result.skippedRows).toBe(3);
+  });
+
+  it('solo guarda las cuentas con Relación con = Sin asignar', () => {
+    const result = parseAccountsExcel(
+      buildWorkbookBuffer([
+        validRow({ 0: '11050502', 4: 'Formas de pago' }),
+        validRow({ 0: '51050501', 4: 'Inventarios' }),
+        validRow({ 0: '51359501', 4: 'Sin asignar' }),
+        validRow(),
+      ]),
+    );
+
+    expect(result.rows.map((row) => row.accountCode)).toEqual([
+      '51359501',
+      '11050501',
+    ]);
+    expect(result.skippedRows).toBe(2);
   });
 
   it('no repite una cuenta que venga dos veces en el archivo', () => {
