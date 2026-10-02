@@ -21,6 +21,31 @@ function truncateContactName(value: string): string {
   return value.trim().slice(0, SIIGO_CONTACT_NAME_MAX_LENGTH);
 }
 
+/**
+ * SIIGO rechaza Address con caracteres no alfanuméricos
+ * (`invalid_alphanumeric_value`). Direcciones colombianas suelen traer `#`,
+ * `N°`, `°`, etc. Se normalizan a texto que SIIGO acepta.
+ */
+export function sanitizeSiigoAddress(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? '';
+
+  if (!trimmed) {
+    return '0000';
+  }
+
+  const sanitized = trimmed
+    .replace(/n[°ºª]/gi, 'No.')
+    .replace(/#/g, 'No.')
+    .replace(/[°ºª]/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s.,\-\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return sanitized || '0000';
+}
+
 /** Ciudad propia de la empresa (companies.city_code), usada como default
  * cuando el proveedor no trae ciudad — en vez de un Bogotá fijo sin
  * relación con la empresa que está creando el tercero. */
@@ -78,7 +103,7 @@ function buildAddress(
   // Bogotá queda como último recurso si ni el proveedor ni la empresa la
   // tienen.
   return {
-    address: addressText || '0000',
+    address: sanitizeSiigoAddress(addressText),
     city: {
       country_code: isColombia ? 'Co' : countryCode!,
       state_code: isColombia ? resolveStateCodeFromCity(resolvedCity) : stateCode || fallbackStateCode || '11',

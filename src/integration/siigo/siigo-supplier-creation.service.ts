@@ -126,6 +126,7 @@ export class SiigoSupplierCreationService {
     const profileEmail = request?.email?.trim();
     const profilePhone = request?.phone?.trim();
     const profileAddress = request?.address?.trim();
+    const profileCityCode = request?.city_code?.trim();
 
     if (
       profileName ||
@@ -134,7 +135,8 @@ export class SiigoSupplierCreationService {
       profileCheckDigit ||
       profileEmail ||
       profilePhone ||
-      profileAddress
+      profileAddress ||
+      profileCityCode
     ) {
       await this.electronicDocumentService.updatePayload(
         documentId,
@@ -155,6 +157,7 @@ export class SiigoSupplierCreationService {
             ...(profileEmail ? { email: profileEmail } : {}),
             ...(profilePhone ? { phone: profilePhone } : {}),
             ...(profileAddress ? { address: profileAddress } : {}),
+            ...(profileCityCode ? { cityCode: profileCityCode } : {}),
           },
         },
         companyId,
@@ -189,29 +192,41 @@ export class SiigoSupplierCreationService {
       refreshedDocument.payload.supplier.documentType,
       company?.nextPymeToken?.trim() || undefined,
     );
-    const supplierPayload = rutRues
+    const mergedSupplier = rutRues
       ? {
-          ...refreshedDocument.payload,
-          supplier: {
-            ...refreshedDocument.payload.supplier,
-            ...(rutRues.name
-              ? { name: rutRues.name, commercialName: rutRues.name }
-              : {}),
-            ...(rutRues.check_digit ? { checkDigit: rutRues.check_digit } : {}),
-            ...(rutRues.address ? { address: rutRues.address } : {}),
-            ...(rutRues.email ? { email: rutRues.email } : {}),
-            ...(rutRues.phone ? { phone: rutRues.phone } : {}),
-            ...(rutRues.cityCode ? { cityCode: rutRues.cityCode } : {}),
-            ...(rutRues.stateCode ? { stateCode: rutRues.stateCode } : {}),
-          },
+          ...refreshedDocument.payload.supplier,
+          ...(rutRues.name
+            ? { name: rutRues.name, commercialName: rutRues.name }
+            : {}),
+          ...(rutRues.check_digit ? { checkDigit: rutRues.check_digit } : {}),
+          ...(rutRues.address ? { address: rutRues.address } : {}),
+          ...(rutRues.email ? { email: rutRues.email } : {}),
+          ...(rutRues.phone ? { phone: rutRues.phone } : {}),
+          ...(rutRues.cityCode ? { cityCode: rutRues.cityCode } : {}),
+          ...(rutRues.stateCode ? { stateCode: rutRues.stateCode } : {}),
         }
-      : refreshedDocument.payload;
+      : refreshedDocument.payload.supplier;
+    const supplierPayload = {
+      ...refreshedDocument.payload,
+      supplier: {
+        ...mergedSupplier,
+        ...(profileCityCode ? { cityCode: profileCityCode } : {}),
+      },
+    };
 
     const siigoPayload = mapElectronicDocumentPayloadToSiigoSupplier(
       supplierPayload,
       personType,
       { cityCode: company?.cityCode ?? null },
     );
+
+    const taxResponsibility = request?.tax_responsibility?.trim();
+    if (taxResponsibility) {
+      siigoPayload.fiscal_responsibilities = [{ code: taxResponsibility }];
+    }
+    if (typeof request?.vat_responsible === 'boolean') {
+      siigoPayload.vat_responsible = request.vat_responsible;
+    }
 
     this.logger.log(
       `[documentId=${documentId}] Creando tercero en SIIGO (identification=${siigoPayload.identification}, idType=${siigoPayload.id_type}, personType=${siigoPayload.person_type})`,

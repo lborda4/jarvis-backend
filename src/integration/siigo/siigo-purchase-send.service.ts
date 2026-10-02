@@ -26,6 +26,7 @@ import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
 import { SiigoPurchaseRequestDto } from './dto/siigo-purchase-request.dto';
 import { SiigoPurchaseResponse } from './interfaces/siigo-api.interface';
 import { validateSupportDocumentRetentions } from './helpers/siigo-support-document-retention.helper';
+import { assertSendAccountCodesExistInCatalog } from '../helpers/supplier-accounts-catalog.helper';
 import {
   buildSupplierPreferenceSnapshotFromSendRequest,
   persistHistorialFacturaFromSendRequest,
@@ -37,6 +38,7 @@ import { HistorialFacturasRepository } from '../repositories/historial-facturas.
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoAuthService } from './siigo-auth.service';
+import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
 import { SiigoConfigurationCacheService } from './siigo-configuration-cache.service';
 import { SiigoHttpClient } from './clients/siigo-http.client';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
@@ -54,6 +56,7 @@ export class SiigoPurchaseSendService {
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
     private readonly siigoHttpClient: SiigoHttpClient,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
+    private readonly siigoAccountsCatalogService: SiigoAccountsCatalogService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
     private readonly planSubscriptionService: PlanSubscriptionService,
@@ -109,6 +112,9 @@ export class SiigoPurchaseSendService {
       (request.retentions ?? []).map((retention) => retention.id),
       taxesCatalog,
     );
+    const accountsCatalog =
+      await this.siigoAccountsCatalogService.listAccounts(companyId);
+    assertSendAccountCodesExistInCatalog(request.items, accountsCatalog);
 
     const payload = electronicDocument.payload;
     // El formulario indica explícitamente si envía precios con IVA incluido.

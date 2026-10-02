@@ -11,12 +11,19 @@ import { mapElectronicDocumentToResponse } from '../../../electronic-document/ma
 import { ElectronicDocumentService } from '../../../electronic-document/electronic-document.service';
 import { CreateSiigoDocumentResponseDto } from '../dto/create-siigo-document.dto';
 import { executeSiigoRequestWithRetries } from '../helpers/siigo-request-retry.helper';
+import {
+  extractSiigoCalculatedTotalFromApiError,
+  isSiigoInvalidTotalPaymentsApiError,
+} from '../helpers/siigo-error.helper';
+import { applySiigoCorrectedPaymentsTotal } from '../helpers/siigo-purchase-total.helper';
 import { SiigoDocumentCreationHandler } from '../interfaces/siigo-document-creation.handler';
 import { mapElectronicDocumentToSiigoPurchase } from '../mappers/electronic-document-to-siigo-purchase.mapper';
+import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
 import { SiigoAuthService } from '../siigo-auth.service';
 import { SiigoHttpClient } from '../clients/siigo-http.client';
 import { SiigoConfigurationCacheService } from '../siigo-configuration-cache.service';
 import { AppConfiguration } from '../../../config/configuration';
+import { SiigoPurchaseResponse } from '../interfaces/siigo-api.interface';
 
 const ALLOWED_STATUSES = new Set<ElectronicDocumentStatus>([
   ElectronicDocumentStatus.ACCOUNT_MAPPED,
@@ -82,17 +89,9 @@ export class SiigoPurchaseDocumentCreationHandler implements SiigoDocumentCreati
         documentId,
         companyId,
         async () => {
-          const purchase = await executeSiigoRequestWithRetries(
-            this.siigoAuthService,
+          const purchase = await this.createPurchaseInSiigo(
             companyId,
-            this.logger,
-            'crear factura de compra',
-            (accessToken, partnerId) =>
-              this.siigoHttpClient.createPurchase(
-                accessToken,
-                purchasePayload,
-                partnerId,
-              ),
+            purchasePayload,
           );
 
           const updatedDocument =
@@ -141,6 +140,56 @@ export class SiigoPurchaseDocumentCreationHandler implements SiigoDocumentCreati
         message: 'Error inesperado al crear factura de compra en SIIGO',
         detail: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  private async createPurchaseInSiigo(
+    companyId: string,
+    siigoPayload: SiigoPurchaseRequestDto,
+    alreadyRetriedWithCorrectedTotal = false,
+  ): Promise<SiigoPurchaseResponse> {
+    try {
+      return await executeSiigoRequestWithRetries(
+        this.siigoAuthService,
+        companyId,
+        this.logger,
+        'crear factura de compra',
+        (accessToken, partnerId) =>
+          this.siigoHttpClient.createPurchase(
+            accessToken,
+            siigoPayload,
+            partnerId,
+          ),
+      );
+    } catch (error) {
+      if (
+        alreadyRetriedWithCorrectedTotal ||
+        !isSiigoInvalidTotalPaymentsApiError(error)
+      ) {
+        throw error;
+      }
+
+      const correctedTotal = extractSiigoCalculatedTotalFromApiError(error);
+
+      if (correctedTotal === null || siigoPayload.payments.length === 0) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `[companyId=${companyId}] SIIGO rechazó el total de pagos; reintentando con el total reportado (${correctedTotal}).`,
+      );
+
+      return this.createPurchaseInSiigo(
+        companyId,
+        {
+          ...siigoPayload,
+          payments: applySiigoCorrectedPaymentsTotal(
+            siigoPayload.payments,
+            correctedTotal,
+          ),
+        },
+        true,
+      );
     }
   }
 }

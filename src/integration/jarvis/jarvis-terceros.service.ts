@@ -210,8 +210,7 @@ export class JarvisTercerosService {
 
     const taxResponsibility =
       request.tax_responsibility?.trim() || DEFAULT_TAX_RESPONSIBILITY;
-    const municipalityId =
-      parseCatalogId(request.municipality_id) ?? DEFAULT_MUNICIPALITY_ID;
+    const municipalityId = parseCatalogId(request.municipality_id);
     const typeRegimeId =
       parseCatalogId(request.type_regime_id) ?? DEFAULT_TYPE_REGIME_ID;
 

@@ -19,6 +19,7 @@ describe('Envío de compra: los precios del formulario son base sin IVA', () => 
       { getPurchaseConfig: jest.fn(async () => ({ documentId: 1 })), getPurchaseDocumentTypeId: jest.fn(async () => 1) } as never,
       {} as never,
       { listTaxes: jest.fn(async () => [{ id: 19, type: 'IVA', percentage: 19, active: true }]) } as never,
+      { listAccounts: jest.fn(async () => [{ code: '51451001', name: 'Gastos' }]) } as never,
       {} as never, {} as never,
       { assertCanCreateDocuments: jest.fn(), withSiigoQuotaLock: jest.fn((_company, work) => work()) } as never,
       {} as never, {} as never,

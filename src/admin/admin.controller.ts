@@ -35,6 +35,8 @@ import {
   UpdateCompanyNextPymeTokenResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
   UpdateIntegrationSubscriptionResponseDto,
+  UpdateSiigoDocumentQuotasRequestDto,
+  UpdateSiigoDocumentQuotasResponseDto,
 } from './dto/admin-company.dto';
 import { ParseRutResponseDto, ParseRutUploadDto } from './dto/parse-rut.dto';
 import { AdminGuard } from './guards/admin.guard';
@@ -232,5 +234,18 @@ export class AdminController {
       request,
       user.userId,
     );
+  }
+
+  @Patch('companies/:companyId/integrations/SIIGO/document-quotas')
+  @ApiOperation({
+    summary: 'Configurar cupos de documentos SIIGO',
+    description:
+      'Define cuántas facturas de compra y documentos soporte puede crear la empresa. Solo admin; el cliente solo visualiza.',
+  })
+  updateSiigoDocumentQuotas(
+    @Param('companyId') companyId: string,
+    @Body() request: UpdateSiigoDocumentQuotasRequestDto,
+  ): Promise<UpdateSiigoDocumentQuotasResponseDto> {
+    return this.adminService.updateSiigoDocumentQuotas(companyId, request);
   }
 }

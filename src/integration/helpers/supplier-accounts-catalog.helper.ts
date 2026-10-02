@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { SupplierConfiguration } from '../entities/supplier-configuration.entity';
 import { SiigoAccount } from '../entities/siigo-account.entity';
 import { normalizeSupplierDocument } from '../siigo/helpers/siigo-context.helper';
@@ -48,6 +49,78 @@ export function resolveAccountNameFromCatalog(
   accountNameByCode: Map<string, string>,
 ): string | null {
   return accountNameByCode.get(code.trim()) ?? fallbackName;
+}
+
+/**
+ * Si el código ya no está en el catálogo usable (cuenta borrada, padre no
+ * transaccional, etc.), no se sugiere — el picker solo ofrece cuentas de
+ * ese catálogo; sugerir una fuera de él es lo que termina en el 400 de
+ * SIIGO "la cuenta no existe" hasta que el usuario reelige a mano.
+ */
+export function resolveCatalogBoundAccountSuggestion<
+  T extends { code: string; name?: string | null },
+>(
+  suggestion: T | null | undefined,
+  accountNameByCode: Map<string, string> | null | undefined,
+): T | null {
+  const code = suggestion?.code?.trim();
+
+  if (!code || !suggestion) {
+    return null;
+  }
+
+  if (!accountNameByCode) {
+    return suggestion;
+  }
+
+  const catalogName = accountNameByCode.get(code);
+
+  if (!catalogName) {
+    return null;
+  }
+
+  return { ...suggestion, name: catalogName };
+}
+
+const ACCOUNT_ITEM_TYPE = 'Account';
+
+/**
+ * Valida que los ítems tipo Account del envío apunten a códigos que
+ * existen en el catálogo usable de la empresa (mismo filtro del picker).
+ * Sin esto, un draft/sugerencia stale llega a SIIGO y falla con 400.
+ */
+export function assertSendAccountCodesExistInCatalog(
+  items: Array<{ type?: string | null; code?: string | null }>,
+  catalogAccounts: Array<{ code: string }>,
+): void {
+  const catalogCodes = new Set(
+    catalogAccounts
+      .map((account) => account.code?.trim())
+      .filter((code): code is string => Boolean(code)),
+  );
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const type = item.type?.trim() || ACCOUNT_ITEM_TYPE;
+
+    if (type !== ACCOUNT_ITEM_TYPE) {
+      continue;
+    }
+
+    const code = item.code?.trim();
+
+    if (!code) {
+      throw new BadRequestException(
+        `El ítem ${index + 1} no tiene código de cuenta contable.`,
+      );
+    }
+
+    if (!catalogCodes.has(code)) {
+      throw new BadRequestException(
+        `La cuenta contable "${code}" del ítem ${index + 1} no existe en el plan de cuentas de SIIGO para esta empresa. Elige otra cuenta del catálogo.`,
+      );
+    }
+  }
 }
 
 /** Elige SIEMPRE una cuenta si el catálogo no está vacío: primero un

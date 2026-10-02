@@ -267,4 +267,40 @@ describe('resolveSuggestedAccountForItem', () => {
     expect(resolveSuggestedAccountForItem(null, null)).toBeNull();
     expect(resolveSuggestedAccountForItem(undefined, undefined)).toBeNull();
   });
+
+  it('descarta regla exacta stale y cae al fallback si ese sí está en catálogo', () => {
+    const catalog = new Map([['51356001', 'Servicio internet']]);
+    const result = resolveSuggestedAccountForItem(
+      { accountCode: '99999999', accountName: 'Borrada' },
+      {
+        preference: {
+          account: { code: '51356001', name: 'Servicio internet' },
+          retentions: [],
+        },
+      },
+      catalog,
+    );
+
+    expect(result).toEqual({
+      code: '51356001',
+      name: 'Servicio internet',
+      source: 'fallback',
+    });
+  });
+
+  it('retorna null si exacta y fallback están fuera del catálogo usable', () => {
+    const catalog = new Map([['71050511', 'EMPAQUES']]);
+    expect(
+      resolveSuggestedAccountForItem(
+        { accountCode: '99999999', accountName: 'Borrada' },
+        {
+          preference: {
+            account: { code: '88888888', name: 'También borrada' },
+            retentions: [],
+          },
+        },
+        catalog,
+      ),
+    ).toBeNull();
+  });
 });

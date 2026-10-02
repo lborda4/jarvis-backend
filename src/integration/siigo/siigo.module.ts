@@ -1,6 +1,5 @@
 import { SiigoDocumentQuotasController } from './siigo-document-quotas.controller';
 import { AuthModule } from '../../auth/auth.module';
-import { AdminGuard } from '../../admin/guards/admin.guard';
 import { SiigoPurchaseAiRecoveryService } from './siigo-purchase-ai-recovery.service';
 import { SiigoCompanyAiContextController } from './siigo-company-ai-context.controller';
 import { Module, forwardRef } from '@nestjs/common';
@@ -55,7 +54,7 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     JarvisModule,
   ],
   controllers: [SiigoDocumentQuotasController,SiigoController, SiigoCompanyAiContextController],
-  providers: [AdminGuard,
+  providers: [
     SiigoPurchaseAiRecoveryService,
     SiigoHttpClient,
     SiigoAuthService,

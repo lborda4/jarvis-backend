@@ -1,6 +1,8 @@
 import {
+  assertSendAccountCodesExistInCatalog,
   buildAccountNameByCode,
   resolveAccountNameFromCatalog,
+  resolveCatalogBoundAccountSuggestion,
   resolveRequiredAccountFromCatalog,
 } from './supplier-accounts-catalog.helper';
 
@@ -73,6 +75,65 @@ describe('resolveAccountNameFromCatalog', () => {
     expect(
       resolveAccountNameFromCatalog(' 71050511 ', '71050511', catalog),
     ).toBe('EMPAQUES/BOLSAS');
+  });
+});
+
+describe('resolveCatalogBoundAccountSuggestion', () => {
+  it('descarta códigos que ya no están en el catálogo usable', () => {
+    const catalog = buildAccountNameByCode([
+      { code: '71050511', name: 'EMPAQUES/BOLSAS' },
+    ]);
+
+    expect(
+      resolveCatalogBoundAccountSuggestion(
+        { code: '99999999', name: 'Cuenta borrada' },
+        catalog,
+      ),
+    ).toBeNull();
+  });
+
+  it('usa el nombre real del catálogo cuando el código sí existe', () => {
+    const catalog = buildAccountNameByCode([
+      { code: '71050511', name: 'EMPAQUES/BOLSAS' },
+    ]);
+
+    expect(
+      resolveCatalogBoundAccountSuggestion(
+        { code: '71050511', name: '71050511' },
+        catalog,
+      ),
+    ).toEqual({ code: '71050511', name: 'EMPAQUES/BOLSAS' });
+  });
+});
+
+describe('assertSendAccountCodesExistInCatalog', () => {
+  const catalog = [{ code: '51451001', name: 'Gastos' }];
+
+  it('rechaza cuentas Account fuera del catálogo', () => {
+    expect(() =>
+      assertSendAccountCodesExistInCatalog(
+        [{ type: 'Account', code: '99999999' }],
+        catalog,
+      ),
+    ).toThrow(/no existe en el plan de cuentas/);
+  });
+
+  it('acepta cuentas presentes en el catálogo', () => {
+    expect(() =>
+      assertSendAccountCodesExistInCatalog(
+        [{ type: 'Account', code: '51451001' }],
+        catalog,
+      ),
+    ).not.toThrow();
+  });
+
+  it('no valida códigos de Product (no son cuentas PUC)', () => {
+    expect(() =>
+      assertSendAccountCodesExistInCatalog(
+        [{ type: 'Product', code: 'PROD-1' }],
+        catalog,
+      ),
+    ).not.toThrow();
   });
 });
 

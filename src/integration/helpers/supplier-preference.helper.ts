@@ -160,13 +160,26 @@ export function resolveSuggestedAccountForItem(
     | null
     | undefined,
   configuration: Pick<SupplierConfiguration, 'preference'> | null | undefined,
+  /**
+   * Catálogo usable (mismo del picker). Si se pasa, un código que ya no
+   * exista ahí no se sugiere — evita autoaplicar cuentas borradas/padres
+   * que SIIGO rechaza al enviar.
+   */
+  accountNameByCode?: Map<string, string> | null,
 ): SuggestedItemAccount | null {
-  if (itemMapping?.accountCode?.trim()) {
-    return {
-      code: itemMapping.accountCode,
-      name: itemMapping.accountName?.trim() || itemMapping.accountCode,
-      source: 'exact',
-    };
+  const exactCode = itemMapping?.accountCode?.trim();
+
+  if (exactCode) {
+    if (!accountNameByCode || accountNameByCode.has(exactCode)) {
+      return {
+        code: exactCode,
+        name:
+          accountNameByCode?.get(exactCode) ??
+          (itemMapping?.accountName?.trim() || exactCode),
+        source: 'exact',
+      };
+    }
+    // Regla exacta stale → cae al fallback de proveedor (si ese sí existe).
   }
 
   const fallback = resolveSuggestedAccountFromPreference(configuration);
@@ -175,7 +188,15 @@ export function resolveSuggestedAccountForItem(
     return null;
   }
 
-  return { code: fallback.code, name: fallback.name, source: 'fallback' };
+  if (accountNameByCode && !accountNameByCode.has(fallback.code)) {
+    return null;
+  }
+
+  return {
+    code: fallback.code,
+    name: accountNameByCode?.get(fallback.code) ?? fallback.name,
+    source: 'fallback',
+  };
 }
 
 export function resolveSuggestedPaymentMethodFromPreference(

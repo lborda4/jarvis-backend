@@ -50,6 +50,9 @@ describe('original UBL to PDF data', () => {
       amount: 5,
       percentage: 2.5,
     });
+    expect(dto.items[0].withholdings).toEqual([
+      { dianTaxCode: '06', name: 'ReteFuente', percentage: 2.5, amount: null },
+    ]);
     expect(dto.dianQrText).toBe(
       'CUFE: cufe-123\nhttps://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=cufe-123&test=1',
     );

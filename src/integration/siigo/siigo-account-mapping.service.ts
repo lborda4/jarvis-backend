@@ -22,6 +22,7 @@ import {
 import { normalizeItemDescription } from '../helpers/supplier-item-account-mapping.helper';
 import {
   buildAccountNameByCode,
+  collectUniqueAccountsCatalog,
   resolveAccountNameFromCatalog,
 } from '../helpers/supplier-accounts-catalog.helper';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
@@ -104,6 +105,13 @@ export class SiigoAccountMappingService {
         documentType,
         supplier.normalizedDocumentNumber,
       );
+    const catalogAccounts = collectUniqueAccountsCatalog(
+      await this.siigoAccountsRepository.findByCompanyAndIntegration(
+        electronicDocument.companyId,
+        integration.id,
+      ),
+    );
+    const accountNameByCode = buildAccountNameByCode(catalogAccounts);
 
     const items = electronicDocument.payload.items ?? [];
 
@@ -114,7 +122,7 @@ export class SiigoAccountMappingService {
         normalizeSupplierPreferenceSnapshot(configuration?.preference)?.account
           .code ?? null;
 
-      if (!accountCode?.trim()) {
+      if (!accountCode?.trim() || !accountNameByCode.has(accountCode.trim())) {
         return { status: ACCOUNT_MAPPING_REQUIRED_STATUS };
       }
 
@@ -144,7 +152,21 @@ export class SiigoAccountMappingService {
 
     for (const item of items) {
       if (electronicDocument.electronicDocumentType === 'SUPPORT_DOCUMENT' && item.accountMapping?.code) {
-        accountByDescription.set(normalizeItemDescription(item.descripcion), item.accountMapping);
+        const mappedCode = item.accountMapping.code.trim();
+
+        if (!accountNameByCode.has(mappedCode)) {
+          this.logger.log(
+            `[documentId=${documentId}] Ítem "${item.descripcion}" con cuenta "${mappedCode}" fuera del catálogo usable — requiere asignación manual`,
+          );
+
+          return { status: ACCOUNT_MAPPING_REQUIRED_STATUS };
+        }
+
+        accountByDescription.set(normalizeItemDescription(item.descripcion), {
+          code: mappedCode,
+          description:
+            accountNameByCode.get(mappedCode) ?? item.accountMapping.description,
+        });
         continue;
       }
       const itemMapping =
@@ -158,6 +180,7 @@ export class SiigoAccountMappingService {
       const resolved = resolveSuggestedAccountForItem(
         itemMapping,
         configuration,
+        accountNameByCode,
       );
 
       if (!resolved || resolved.source !== 'exact') {
@@ -540,9 +563,11 @@ export class SiigoAccountMappingService {
 
     // El nombre guardado en supplier_item_account_mappings puede venir de
     // una fuente que solo conocía el código (ej. el backfill de historial,
-    // o una regla nunca confirmada a mano) — el catálogo real de SIIGO
+    // o una regla nunca confirmada a mano) — el catálogo usable de SIIGO
     // SIEMPRE tiene la última palabra sobre el nombre mostrado.
-    const accountNameByCode = buildAccountNameByCode(siigoAccounts);
+    const accountNameByCode = buildAccountNameByCode(
+      collectUniqueAccountsCatalog(siigoAccounts),
+    );
 
     const supplierNameByDocument = new Map(
       configurations.map((configuration) => [

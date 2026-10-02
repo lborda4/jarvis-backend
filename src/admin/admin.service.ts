@@ -53,6 +53,8 @@ import {
   UpdateCompanyNextPymeTokenResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
   UpdateIntegrationSubscriptionResponseDto,
+  UpdateSiigoDocumentQuotasRequestDto,
+  UpdateSiigoDocumentQuotasResponseDto,
 } from './dto/admin-company.dto';
 
 const ALLOWED_INTEGRATIONS = new Set<IntegrationProvider>([
@@ -545,6 +547,67 @@ export class AdminService {
     };
   }
 
+  async updateSiigoDocumentQuotas(
+    companyId: string,
+    request: UpdateSiigoDocumentQuotasRequestDto,
+  ): Promise<UpdateSiigoDocumentQuotasResponseDto> {
+    const company = await this.companiesRepository.findById(companyId);
+
+    if (!company) {
+      throw new NotFoundException('Empresa no encontrada.');
+    }
+
+    if (
+      request.purchaseInvoice === undefined &&
+      request.supportDocument === undefined
+    ) {
+      throw new BadRequestException(
+        'Debe indicar al menos un cupo (purchaseInvoice y/o supportDocument).',
+      );
+    }
+
+    const integration =
+      await this.integrationsRepository.findByCompanyAndProviderWithPlan(
+        companyId,
+        IntegrationProvider.SIIGO,
+      );
+
+    if (!integration) {
+      throw new NotFoundException(
+        'La integración SIIGO no existe para esta empresa.',
+      );
+    }
+
+    const currentLimits = integration.documentLimits ?? {};
+    const purchaseInvoice =
+      request.purchaseInvoice !== undefined
+        ? request.purchaseInvoice
+        : (currentLimits.PURCHASE_INVOICE ?? null);
+    const supportDocument =
+      request.supportDocument !== undefined
+        ? request.supportDocument
+        : (currentLimits.SUPPORT_DOCUMENT ?? null);
+
+    await this.planSubscriptionService.saveSiigoDocumentLimits(companyId, {
+      purchaseInvoice,
+      supportDocument,
+    });
+
+    const updated =
+      await this.integrationsRepository.findByCompanyAndProviderWithPlan(
+        companyId,
+        IntegrationProvider.SIIGO,
+      );
+
+    if (!updated) {
+      throw new BadRequestException('No se pudieron actualizar los cupos.');
+    }
+
+    return {
+      integration: this.mapIntegration(updated),
+    };
+  }
+
   private mapPlan(plan: Plan): AdminPlanDto {
     return {
       id: plan.id,
@@ -566,6 +629,10 @@ export class AdminService {
         integration.subscriptionStartedAt?.toISOString() ?? null,
       includedDocumentTypes:
         this.planSubscriptionService.resolveIncludedDocumentTypes(integration),
+      documentLimits:
+        integration.provider === IntegrationProvider.SIIGO
+          ? (integration.documentLimits ?? null)
+          : null,
       plan: integration.plan ? this.mapPlan(integration.plan) : null,
     };
   }

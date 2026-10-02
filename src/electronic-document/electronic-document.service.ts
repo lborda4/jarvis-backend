@@ -1,7 +1,6 @@
 import { normalizeSupplierCostCenterPreference } from '../integration/helpers/supplier-mapping-value.helper';
 import { summarizeDocumentAiSuggestion } from './helpers/electronic-document-ai-suggestion.helper';
 import { applySupportDocumentExcelAccounts } from '../invoices/helpers/support-document-accounts.helper';
-import { collectUniqueAccountsCatalog } from '../integration/helpers/supplier-accounts-catalog.helper';
 import {
   BadRequestException,
   ForbiddenException,
@@ -20,8 +19,10 @@ import { CompaniesRepository } from '../company/repositories/companies.repositor
 import {
   buildAccountNameByCode,
   buildSupplierNameLookup,
+  collectUniqueAccountsCatalog,
   indexSupplierConfigurations,
   resolveAccountNameFromCatalog,
+  resolveCatalogBoundAccountSuggestion,
   resolveSuggestedAccountForDocument,
   SuggestedAccount,
 } from '../integration/helpers/supplier-accounts-catalog.helper';
@@ -1672,11 +1673,11 @@ export class ElectronicDocumentService {
           itemMappingIndex.set(key, mapping);
         }
 
-        // Fuente de verdad del NOMBRE de una cuenta — cualquier sugerencia
-        // (historial de compras, regla item-level, preferencia guardada)
-        // solo conoce el código; el nombre real se resuelve acá contra el
-        // catálogo de SIIGO, nunca se asume ni se usa el código como
-        // nombre (ver resolveAccountNameFromCatalog más abajo).
+        // Fuente de verdad del NOMBRE (y de existencia usable) de una
+        // cuenta — mismo filtro del picker (clases 5/6/7 + hoja/transaccional).
+        // Si una sugerencia aprendida apunta a un código fuera de este set
+        // (borrada, padre, etc.), se descarta más abajo en vez de enviarla
+        // a SIIGO y fallar con 400.
         const siigoAccounts =
           await this.siigoAccountsRepository.findByCompanyAndIntegration(
             companyId,
@@ -1684,7 +1685,7 @@ export class ElectronicDocumentService {
           );
         accountNameByCodeByCompanyId.set(
           companyId,
-          buildAccountNameByCode(siigoAccounts),
+          buildAccountNameByCode(collectUniqueAccountsCatalog(siigoAccounts)),
         );
 
         // *FromCacheOnly (no bloqueante): esta función arma sugerencias para
@@ -1858,27 +1859,17 @@ export class ElectronicDocumentService {
           : null,
       );
 
-      const suggestedAccount =
+      const suggestedAccount = resolveCatalogBoundAccountSuggestion(
         historialSnapshot?.account ??
-        resolveSuggestedAccountForDocument(
-          document,
-          configurationIndex,
-          itemMappingIndex,
-          integrationId,
+          resolveSuggestedAccountForDocument(
+            document,
+            configurationIndex,
+            itemMappingIndex,
+            integrationId,
+          ),
+        accountNameByCode,
       );
-      accounts.set(
-        document.id,
-        suggestedAccount && accountNameByCode
-          ? {
-              ...suggestedAccount,
-              name: resolveAccountNameFromCatalog(
-                suggestedAccount.code,
-                suggestedAccount.name,
-                accountNameByCode,
-              )!,
-            }
-          : suggestedAccount,
-      );
+      accounts.set(document.id, suggestedAccount);
 
       const suggestedItemAccounts = resolveSuggestedAccountsForDocumentItems(
           document,
@@ -1889,16 +1880,7 @@ export class ElectronicDocumentService {
       itemAccounts.set(
         document.id,
         suggestedItemAccounts.map((itemAccount) =>
-          itemAccount && accountNameByCode
-            ? {
-                ...itemAccount,
-                name: resolveAccountNameFromCatalog(
-                  itemAccount.code,
-                  itemAccount.name,
-                  accountNameByCode,
-                )!,
-              }
-            : itemAccount,
+          resolveCatalogBoundAccountSuggestion(itemAccount, accountNameByCode),
         ),
       );
       const suggestedPaymentMethod =
@@ -2031,20 +2013,26 @@ export class ElectronicDocumentService {
             suggestedItemConfig.productName)
           : suggestedItemConfig?.productName;
 
+      const itemConfigAccountCode =
+        suggestedItemConfig?.accountCode &&
+        accountNameByCode &&
+        !accountNameByCode.has(suggestedItemConfig.accountCode)
+          ? null
+          : suggestedItemConfig?.accountCode ?? null;
       itemConfigs.set(
         document.id,
         suggestedItemConfig
           ? {
               ...suggestedItemConfig,
               retefuenteTax: suggestedItemConfig.retefuenteTax ?? invoiceRetefuente,
-              accountName:
-                suggestedItemConfig.accountCode && accountNameByCode
-                  ? resolveAccountNameFromCatalog(
-                      suggestedItemConfig.accountCode,
-                      suggestedItemConfig.accountName,
-                      accountNameByCode,
-                    )
-                  : suggestedItemConfig.accountName,
+              accountCode: itemConfigAccountCode,
+              accountName: itemConfigAccountCode
+                ? resolveAccountNameFromCatalog(
+                    itemConfigAccountCode,
+                    suggestedItemConfig.accountName,
+                    accountNameByCode ?? new Map(),
+                  )
+                : null,
               productName: resolvedProductName ?? null,
             }
           : suggestedItemConfig,

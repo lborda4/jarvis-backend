@@ -189,13 +189,14 @@ describe('JarvisTercerosService.listPendingSuppliers', () => {
 describe('JarvisTercerosService.create', () => {
   it('guarda el tercero sin buscar documentos pendientes del proveedor', async () => {
     const resolveSiblingsForSupplier = jest.fn().mockResolvedValue(undefined);
+    const save = jest.fn().mockImplementation((entity) => ({
+      ...entity,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    }));
     const { service } = buildService({
       resolveSiblingsForSupplier,
-      save: jest.fn().mockImplementation((entity) => ({
-        ...entity,
-        createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-      })),
+      save,
     });
 
     await service.create(
@@ -208,6 +209,34 @@ describe('JarvisTercerosService.create', () => {
     );
 
     expect(resolveSiblingsForSupplier).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ municipalityId: null }),
+    );
+  });
+
+  it('guarda la ciudad del tercero cuando el usuario la elige', async () => {
+    const save = jest.fn().mockImplementation((entity) => ({
+      ...entity,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    }));
+    const { service } = buildService({
+      save,
+    });
+
+    await service.create(
+      {
+        document_type: JarvisDocumentType.NIT,
+        document_number: '900123456',
+        name: 'Proveedor Nuevo SAS',
+        municipality_id: 1,
+      },
+      'company-1',
+    );
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ municipalityId: 1 }),
+    );
   });
 });
 

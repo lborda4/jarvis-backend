@@ -184,6 +184,12 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
     );
   }
   const taxes = taxRows(invoice);
+  const withholdings = taxRows(invoice, 'WithholdingTaxTotal').map((t) => ({
+    dianTaxCode: t.code,
+    name: t.name,
+    percentage: t.percentage ?? 0,
+    amount: t.amount,
+  }));
   const iva = taxes
     .filter((t) => t.code === '01')
     .reduce((sum, t) => sum + t.amount, 0);
@@ -269,10 +275,25 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
           'El XML contiene un item sin cantidad, precio o total.',
         );
       }
+      const lineWithholdings = taxRows(line, 'WithholdingTaxTotal').map((t) => ({
+        dianTaxCode: t.code,
+        name: t.name,
+        percentage: t.percentage ?? 0,
+        amount: t.amount,
+      }));
+      const lineCodes = new Set(
+        lineWithholdings.map((row) => row.dianTaxCode).filter(Boolean),
+      );
+      // NextPyme manda WithholdingTaxTotal solo a nivel factura. La línea
+      // hereda la tarifa para el PDF; el monto se deja en null para no
+      // restarlo otra vez del valor total de la línea.
+      const inheritedWithholdings = withholdings
+        .filter((row) => row.dianTaxCode && !lineCodes.has(row.dianTaxCode))
+        .map((row) => ({ ...row, amount: null }));
       return {
         name: str(line, 'Item.Name'),
         taxes: taxRows(line).map(t => ({ type: t.name, amount: t.amount })),
-        withholdings: taxRows(line, 'WithholdingTaxTotal').map(t => ({ dianTaxCode: t.code, name: t.name, percentage: t.percentage ?? 0, amount: t.amount })),
+        withholdings: [...lineWithholdings, ...inheritedWithholdings],
         description:
           list(at(line, 'Item.Description'))
             .map(text)
@@ -320,12 +341,7 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
     surcharge:
       num(invoice, 'LegalMonetaryTotal.ChargeTotalAmount') ??
       adjustment(invoice, true),
-    withholdings: taxRows(invoice, 'WithholdingTaxTotal').map((t) => ({
-      dianTaxCode: t.code,
-      name: t.name,
-      percentage: t.percentage ?? 0,
-      amount: t.amount,
-    })),
+    withholdings,
     dianQrUrl: buildDianCatalogQrUrl(cufe),
     dianQrText:
       qr ??

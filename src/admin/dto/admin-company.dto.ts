@@ -65,6 +65,16 @@ export class AdminIntegrationItemDto {
   })
   includedDocumentTypes: ElectronicDocumentType[];
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Cupos manuales SIIGO por tipo (null = ilimitado). Solo aplica a Siigo.',
+    example: { PURCHASE_INVOICE: 100, SUPPORT_DOCUMENT: 50 },
+  })
+  documentLimits?: Partial<
+    Record<ElectronicDocumentType, number | null>
+  > | null;
+
   @ApiPropertyOptional({ type: AdminPlanDto, nullable: true })
   plan: AdminPlanDto | null;
 }
@@ -244,6 +254,29 @@ export class UpdateIntegrationSubscriptionRequestDto {
       'Si es true, reinicia la fecha de inicio de suscripción al asignar plan.',
   })
   restartSubscription?: boolean;
+}
+
+export class UpdateSiigoDocumentQuotasRequestDto {
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 100,
+    description:
+      'Cupo de facturas de compra. null = ilimitado. 0 = bloqueado.',
+  })
+  purchaseInvoice?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 50,
+    description:
+      'Cupo de documentos soporte. null = ilimitado. 0 = bloqueado.',
+  })
+  supportDocument?: number | null;
+}
+
+export class UpdateSiigoDocumentQuotasResponseDto {
+  @ApiProperty({ type: AdminIntegrationItemDto })
+  integration: AdminIntegrationItemDto;
 }
 
 export class CreateAdminCompanyResponseDto {

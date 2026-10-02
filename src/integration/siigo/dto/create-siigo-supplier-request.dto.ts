@@ -14,4 +14,10 @@ export class CreateSiigoSupplierRequestDto {
   email?: string;
   phone?: string;
   address?: string;
+  /** Código DANE de ciudad (tabla municipalities de NextPyme). Opcional. */
+  city_code?: string;
+  /** Código DIAN de responsabilidad fiscal (ej. R-99-PN). */
+  tax_responsibility?: string;
+  /** Si el tercero es responsable de IVA (tabla type_regime de NextPyme). */
+  vat_responsible?: boolean;
 }

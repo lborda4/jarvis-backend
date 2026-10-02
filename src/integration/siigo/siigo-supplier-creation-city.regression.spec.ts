@@ -66,10 +66,41 @@ describe('Regresión: ciudad del tercero enviado a SIIGO', () => {
     });
   });
 
+  it('prioriza la ciudad que elige el usuario en el modal sobre RUT y documento', async () => {
+    const { service, http } = setup('document', '1111001');
+    await service.createSupplier(
+      { documentId: 'doc-1', city_code: '05001' },
+      'company-1',
+    );
+    expect(http.createCustomer.mock.calls[0][1].address.city).toEqual({
+      country_code: 'Co',
+      state_code: '05',
+      city_code: '05001',
+    });
+  });
+
   it('no llama a creación en SIIGO ni marca al proveedor creado con un código inválido', async () => {
     const { service, http, documents } = setup('document', '9911001');
     await expect(service.createSupplier({ documentId: 'doc-1' }, 'company-1')).rejects.toThrow('código DANE');
     expect(http.createCustomer).not.toHaveBeenCalled();
     expect(documents.updateSupplierExistsInSiigo).not.toHaveBeenCalled();
+  });
+
+  it('envía al SIIGO la responsabilidad fiscal y el régimen IVA del modal', async () => {
+    const { service, http } = setup('document', '11001');
+    await service.createSupplier(
+      {
+        documentId: 'doc-1',
+        tax_responsibility: 'O-13',
+        vat_responsible: true,
+      },
+      'company-1',
+    );
+    expect(http.createCustomer.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        fiscal_responsibilities: [{ code: 'O-13' }],
+        vat_responsible: true,
+      }),
+    );
   });
 });

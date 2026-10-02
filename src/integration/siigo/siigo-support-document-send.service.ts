@@ -22,6 +22,7 @@ import { SiigoDocumentTypesService } from './siigo-document-types.service';
 import { SiigoHttpClient } from './clients/siigo-http.client';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { validateSupportDocumentRetentions } from './helpers/siigo-support-document-retention.helper';
+import { assertSendAccountCodesExistInCatalog } from '../helpers/supplier-accounts-catalog.helper';
 import {
   buildSupplierPreferenceSnapshotFromSendRequest,
   persistHistorialFacturaFromSendRequest,
@@ -34,6 +35,7 @@ import { SiigoAccountMappingService } from './siigo-account-mapping.service';
 import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
 import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
+import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
 import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
 import { resolveSiigoCostCenterId } from './helpers/siigo-cost-center-match.helper';
 
@@ -47,6 +49,7 @@ export class SiigoSupportDocumentSendService {
     private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
     private readonly siigoHttpClient: SiigoHttpClient,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
+    private readonly siigoAccountsCatalogService: SiigoAccountsCatalogService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
     private readonly planSubscriptionService: PlanSubscriptionService,
@@ -102,6 +105,9 @@ export class SiigoSupportDocumentSendService {
       (request.retentions ?? []).map((retention) => retention.id),
       taxesCatalog,
     );
+    const accountsCatalog =
+      await this.siigoAccountsCatalogService.listAccounts(companyId);
+    assertSendAccountCodesExistInCatalog(request.items, accountsCatalog);
     const siigoPayload = mapCreateSupportDocumentRequestToSiigo(
       request,
       0,

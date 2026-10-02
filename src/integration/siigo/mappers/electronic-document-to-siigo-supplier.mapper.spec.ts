@@ -33,4 +33,22 @@ describe('Dirección del tercero SIIGO', () => {
     source.supplier.countryCode = 'US';
     expect(mapElectronicDocumentPayloadToSiigoSupplier(source).address?.city).toEqual({ country_code: 'US', state_code: 'CA', city_code: '1234567' });
   });
+
+  it('sanitiza # y N° para que SIIGO no rechace la dirección', () => {
+    const source = payload('11001', '11');
+    source.supplier.address = 'Calle 45 # 57 - 47 N° 2';
+
+    expect(mapElectronicDocumentPayloadToSiigoSupplier(source).address?.address).toBe(
+      'Calle 45 No. 57 - 47 No. 2',
+    );
+  });
+
+  it('usa 0000 cuando la dirección queda vacía tras sanitizar', () => {
+    const source = payload('11001', '11');
+    source.supplier.address = '@@@';
+
+    expect(mapElectronicDocumentPayloadToSiigoSupplier(source).address?.address).toBe(
+      '0000',
+    );
+  });
 });
