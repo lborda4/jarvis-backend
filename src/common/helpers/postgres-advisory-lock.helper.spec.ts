@@ -36,13 +36,11 @@ describe('withPostgresAdvisoryLock', () => {
     expect(queryRunner.commitTransaction).toHaveBeenCalledTimes(1);
     expect(queryRunner.rollbackTransaction).not.toHaveBeenCalled();
     expect(queryRunner.release).toHaveBeenCalledTimes(1);
-    // Un solo query: pg_advisory_xact_lock. A diferencia de
-    // pg_advisory_lock/unlock (alcance sesión, inseguro detrás de un pooler
-    // en modo transacción), el lock de transacción se libera solo al hacer
-    // commit/rollback — no hace falta un unlock explícito.
-    expect(calls).toHaveLength(1);
-    expect(calls[0][0]).toContain('pg_advisory_xact_lock');
-    expect(calls[0][1]).toEqual(['company-1:SUPPORT_DOCUMENT']);
+    expect(calls).toHaveLength(3);
+    expect(calls[0][0]).toContain('SET LOCAL lock_timeout');
+    expect(calls[1][0]).toContain('idle_in_transaction_session_timeout');
+    expect(calls[2][0]).toContain('pg_advisory_xact_lock');
+    expect(calls[2][1]).toEqual(['company-1:SUPPORT_DOCUMENT']);
   });
 
   it('hace rollback y libera la conexión igual si fn lanza', async () => {
@@ -69,5 +67,31 @@ describe('withPostgresAdvisoryLock', () => {
       expect.stringContaining('pg_advisory_xact_lock'),
       ['company-1:SUPPORT_DOCUMENT'],
     );
+  });
+
+  it('no deja la conexión colgada: si el lock no se obtiene a tiempo, falla en vez de esperar indefinido', async () => {
+    const queryRunner: Partial<QueryRunner> = {
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      query: jest.fn().mockImplementation((sql: string) => {
+        if (String(sql).includes('pg_advisory_xact_lock')) {
+          return Promise.reject(new Error('canceling statement due to lock timeout'));
+        }
+        return Promise.resolve([]);
+      }),
+      release: jest.fn().mockResolvedValue(undefined),
+    };
+    const dataSource = buildFakeDataSource(queryRunner);
+
+    await expect(
+      withPostgresAdvisoryLock(dataSource, 'company-1:SUPPORT_DOCUMENT', () =>
+        Promise.resolve('done'),
+      ),
+    ).rejects.toThrow(/otro envío de este documento en curso/i);
+
+    expect(queryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+    expect(queryRunner.release).toHaveBeenCalledTimes(1);
   });
 });

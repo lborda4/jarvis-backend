@@ -15,4 +15,15 @@ describe('impuestos cargo de factura de venta', () => {
       { tax_id: 4, tax_amount: '8.00', taxable_amount: '100.00', percent: '8.00' },
     ]);
   });
+
+  it('incluye IVA 0% cuando se pide (DSAU04 en documento soporte)', () => {
+    expect(
+      buildJarvisInvoiceChargeTaxTotals(
+        [{ taxId: 1, taxAmount: 0, quantity: 1, unitValue: 150000, discount: 0 }],
+        { includeZeroAmount: true },
+      ),
+    ).toEqual([
+      { tax_id: 1, tax_amount: '0.00', taxable_amount: '150000.00', percent: '0.00' },
+    ]);
+  });
 });

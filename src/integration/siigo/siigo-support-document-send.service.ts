@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
@@ -59,7 +60,15 @@ export class SiigoSupportDocumentSendService {
   ) {}
 
   async sendSupportDocument(request: CreateSiigoSupportDocumentRequestDto, companyId: string): Promise<CreateSiigoSupportDocumentResponseDto> {
-    return this.planSubscriptionService.withSiigoQuotaLock(companyId, () => this.sendSupportDocumentWithQuota(request, companyId));
+    await this.planSubscriptionService.withSiigoQuotaLock(companyId, () =>
+      this.planSubscriptionService.assertCanCreateDocuments({
+        companyId,
+        provider: IntegrationProvider.SIIGO,
+        documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+        quantity: 1,
+      }),
+    );
+    return this.sendSupportDocumentWithQuota(request, companyId);
   }
 
   private async sendSupportDocumentWithQuota(
@@ -275,11 +284,13 @@ export class SiigoSupportDocumentSendService {
         },
       );
     } catch (error) {
-      await this.electronicDocumentService.updateStatus(
-        documentId,
-        ElectronicDocumentStatus.PURCHASE_FAILED,
-        companyId,
-      );
+      if (!(error instanceof ServiceUnavailableException)) {
+        await this.electronicDocumentService.updateStatus(
+          documentId,
+          ElectronicDocumentStatus.PURCHASE_FAILED,
+          companyId,
+        );
+      }
 
       this.logger.error(
         `[documentId=${documentId}] Error al enviar Documento Soporte a SIIGO`,
@@ -291,6 +302,10 @@ export class SiigoSupportDocumentSendService {
       }
 
       if (error instanceof BadGatewayException) {
+        throw error;
+      }
+
+      if (error instanceof ServiceUnavailableException) {
         throw error;
       }
 

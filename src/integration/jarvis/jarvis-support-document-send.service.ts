@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { withPostgresAdvisoryLock } from '../../common/helpers/postgres-advisory-lock.helper';
@@ -36,6 +37,7 @@ import {
 import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
+import { toNextPymePartyName } from './helpers/nextpyme-party-name.helper';
 import { JarvisSetupService } from './jarvis-setup.service';
 import {
   daysBetweenLocalDates,
@@ -377,18 +379,50 @@ export class JarvisSupportDocumentSendService {
       electronicDocument.payload.invoice.issueDate ||
       new Date().toISOString().slice(0, 10);
 
+    const municipalityId =
+      tercero.municipalityId ??
+      (await this.nextPymeMasterCatalogService.resolveMunicipalityId(
+        credentials.municipality,
+        credentials.city ?? company?.name,
+        electronicDocument.payload.supplier.cityCode,
+        companyId,
+      ));
+    const liabilityId =
+      await this.nextPymeMasterCatalogService.resolveLiabilityId(
+        credentials.tax_responsibility ??
+          JarvisTaxResponsibility.NOT_APPLICABLE,
+        companyId,
+      );
+    const terceroVatRegime =
+      tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
+        ? JarvisVatRegime.NON_RESPONSIBLE
+        : tercero.taxRegime
+          ? JarvisVatRegime.RESPONSIBLE
+          : credentials.vat_regime;
+    const regimeId =
+      tercero.typeRegimeId ??
+      (await this.nextPymeMasterCatalogService.resolveRegimeId(
+        terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
+        companyId,
+      ));
+    const organizationTypeId =
+      tercero.entityType === JarvisEntityType.NATURAL_PERSON ||
+      (!tercero.entityType && documentType !== JarvisDocumentType.NIT)
+        ? 2
+        : 1;
+    const currencyId =
+      await this.nextPymeMasterCatalogService.resolveCurrencyId(
+        electronicDocument.payload.invoice.currency,
+        companyId,
+      );
+
     const resolutionLockKey = `jarvis-resolution:${companyId}:${JarvisResolutionKind.SUPPORT_DOCUMENT}`;
 
     try {
-      return await withPostgresAdvisoryLock(
+      const numbering = await withPostgresAdvisoryLock(
         this.dataSource,
         resolutionLockKey,
         async () => {
-          // Relee el estado DENTRO del lock (no el `electronicDocument` de
-          // arriba, ya viejo) — si otro intento concurrente para ESTE mismo
-          // documento ganó la carrera mientras esperábamos el lock (ej.
-          // doble clic en "Enviar"), aborta acá en vez de numerar y enviar
-          // un segundo documento duplicado a NextPyme.
           const freshDocument =
             await this.electronicDocumentService.requireById(
               documentId,
@@ -403,37 +437,19 @@ export class JarvisSupportDocumentSendService {
             );
           }
 
-          const numbering =
+          const allocated =
             await this.jarvisSetupService.allocateResolutionNumber(
               companyId,
               JarvisResolutionKind.SUPPORT_DOCUMENT,
             );
-          const municipalityId =
-            tercero.municipalityId ??
-            (await this.nextPymeMasterCatalogService.resolveMunicipalityId(
-              credentials.municipality,
-              credentials.city ?? company?.name,
-              electronicDocument.payload.supplier.cityCode,
-              companyId,
-            ));
-          const liabilityId =
-            await this.nextPymeMasterCatalogService.resolveLiabilityId(
-              credentials.tax_responsibility ??
-                JarvisTaxResponsibility.NOT_APPLICABLE,
-              companyId,
-            );
-          const terceroVatRegime =
-            tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
-              ? JarvisVatRegime.NON_RESPONSIBLE
-              : tercero.taxRegime
-                ? JarvisVatRegime.RESPONSIBLE
-                : credentials.vat_regime;
-          const regimeId =
-            tercero.typeRegimeId ??
-            (await this.nextPymeMasterCatalogService.resolveRegimeId(
-              terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
-              companyId,
-            ));
+          await this.jarvisSetupService.commitResolutionNumber(
+            companyId,
+            JarvisResolutionKind.SUPPORT_DOCUMENT,
+            allocated.number,
+          );
+          return allocated;
+        },
+      );
 
           this.logger.log(
             `[documentId=${documentId}] Numeración local ${JSON.stringify({
@@ -460,11 +476,6 @@ export class JarvisSupportDocumentSendService {
             issueDate,
             taxTotals,
           );
-          const currencyId =
-            await this.nextPymeMasterCatalogService.resolveCurrencyId(
-              electronicDocument.payload.invoice.currency,
-              companyId,
-            );
 
           const payload = {
             type_document_id:
@@ -486,7 +497,7 @@ export class JarvisSupportDocumentSendService {
               ...(tercero.checkDigit
                 ? { dv: Number(tercero.checkDigit) || tercero.checkDigit }
                 : {}),
-              name: tercero.name,
+              name: toNextPymePartyName(tercero.name, organizationTypeId),
               phone: tercero.phone || credentials.phone || '0000000000',
               address:
                 tercero.address || credentials.address || 'SIN DIRECCION',
@@ -494,8 +505,7 @@ export class JarvisSupportDocumentSendService {
                 tercero.email || credentials.email || 'sin-email@example.com',
               type_document_identification_id:
                 DOCUMENT_TYPE_IDENTIFICATION_FALLBACK[documentType] ?? 6,
-              type_organization_id:
-                tercero.entityType === JarvisEntityType.NATURAL_PERSON ? 2 : 1,
+              type_organization_id: organizationTypeId,
               municipality_id: municipalityId,
               type_liability_id: liabilityId,
               type_regime_id: regimeId,
@@ -529,19 +539,12 @@ export class JarvisSupportDocumentSendService {
           );
 
           const created =
-            await this.nextPymeApiClient.createSupportDocument(payload, await this.nextPymeMasterCatalogService.requireCompanyToken(companyId)).catch(async (error: unknown) => {
-              if (
-                error instanceof BadGatewayException &&
-                /documento\s+procesado\s+anteriormente/i.test(error.message)
-              ) {
-                await this.jarvisSetupService.commitResolutionNumber(
-                  companyId,
-                  JarvisResolutionKind.SUPPORT_DOCUMENT,
-                  numbering.number,
-                );
-              }
-              throw error;
-            });
+            await this.nextPymeApiClient.createSupportDocument(
+              payload,
+              await this.nextPymeMasterCatalogService.requireCompanyToken(
+                companyId,
+              ),
+            );
 
           this.logger.log(
             `[documentId=${documentId}] Respuesta NextPyme ${JSON.stringify(created)}`,
@@ -563,11 +566,13 @@ export class JarvisSupportDocumentSendService {
           );
           const createdCude = readNextPymeCreatedUniqueCode(created);
 
-          await this.jarvisSetupService.commitResolutionNumber(
-            companyId,
-            JarvisResolutionKind.SUPPORT_DOCUMENT,
-            createdNumber,
-          );
+          if (createdNumber !== numbering.number) {
+            await this.jarvisSetupService.commitResolutionNumber(
+              companyId,
+              JarvisResolutionKind.SUPPORT_DOCUMENT,
+              createdNumber,
+            );
+          }
 
           const updatedDocument =
             await this.electronicDocumentService.markPurchaseCreated(
@@ -599,14 +604,14 @@ export class JarvisSupportDocumentSendService {
             },
             document: mapElectronicDocumentToResponse(updatedDocument),
           };
-        },
-      );
     } catch (error) {
-      await this.electronicDocumentService.updateStatus(
-        documentId,
-        ElectronicDocumentStatus.PURCHASE_FAILED,
-        companyId,
-      );
+      if (!(error instanceof ServiceUnavailableException)) {
+        await this.electronicDocumentService.updateStatus(
+          documentId,
+          ElectronicDocumentStatus.PURCHASE_FAILED,
+          companyId,
+        );
+      }
 
       this.logger.error(
         `[documentId=${documentId}] Error al enviar Documento Soporte a NextPyme`,
@@ -616,7 +621,8 @@ export class JarvisSupportDocumentSendService {
       if (
         error instanceof BadRequestException ||
         error instanceof BadGatewayException ||
-        error instanceof NotFoundException
+        error instanceof NotFoundException ||
+        error instanceof ServiceUnavailableException
       ) {
         throw error;
       }
@@ -667,8 +673,8 @@ export class JarvisSupportDocumentSendService {
     const taxable = toMoney(payload.totals.subtotal);
     const ivaAmount = toMoney(payload.totals.iva);
 
-    if (ivaAmount > 0 && taxable > 0) {
-      const percent = (ivaAmount / taxable) * 100;
+    if (taxable > 0) {
+      const percent = taxable > 0 && ivaAmount > 0 ? (ivaAmount / taxable) * 100 : 0;
       totals.push({
         tax_id: this.nextPymeMasterCatalogService.getIvaTaxId(),
         tax_amount: formatMoney(ivaAmount),
@@ -733,6 +739,12 @@ export class JarvisSupportDocumentSendService {
       const unitValue = toMoney(
         item.valorUnitario > 0 ? item.valorUnitario : lineExtension / quantity,
       );
+      const lineTax = ivaTax ?? {
+        tax_id: this.nextPymeMasterCatalogService.getIvaTaxId(),
+        tax_amount: '0.00',
+        taxable_amount: formatMoney(lineExtension),
+        percent: '0.00',
+      };
 
       return {
         unit_measure_id:
@@ -749,18 +761,14 @@ export class JarvisSupportDocumentSendService {
         type_generation_transmition_id:
           this.nextPymeMasterCatalogService.getDefaultGenerationTransmissionId(),
         start_date: issueDate,
-        ...(ivaTax
-          ? {
-              tax_totals: [
-                {
-                  tax_id: ivaTax.tax_id,
-                  tax_amount: ivaTax.tax_amount,
-                  taxable_amount: formatMoney(lineExtension),
-                  percent: ivaTax.percent,
-                },
-              ],
-            }
-          : {}),
+        tax_totals: [
+          {
+            tax_id: lineTax.tax_id,
+            tax_amount: lineTax.tax_amount,
+            taxable_amount: formatMoney(lineExtension),
+            percent: lineTax.percent,
+          },
+        ],
       };
     });
   }

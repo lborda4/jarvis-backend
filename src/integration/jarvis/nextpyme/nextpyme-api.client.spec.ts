@@ -21,6 +21,16 @@ describe('NextPyme company authentication', () => {
     await client.putConfigResolution({} as any, 'company-b');
     expect(httpService.put.mock.calls.map(call => call[2].headers.Authorization)).toEqual(['Bearer company-a', 'Bearer company-b']);
   });
+
+  it('omite technical_key vacía en el PUT (documento soporte no la admite)', async () => {
+    const { client, httpService } = buildClient();
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: true } }));
+    await client.putConfigResolution(
+      { type_document_id: 11, prefix: 'SEDS', technical_key: '  ' } as any,
+      'company-token',
+    );
+    expect(httpService.put.mock.calls[0][1]).not.toHaveProperty('technical_key');
+  });
 });
 
 const VALID_NEXTPYME_RESPONSE = {
@@ -383,6 +393,133 @@ describe('NextPymeApiClient.listResolutions', () => {
     expect(resolutions).toEqual([
       expect.objectContaining({ id: 7, type_document_id: 11, number: 42 }),
     ]);
+  });
+
+  it('prioriza ValidDate* DIAN cuando el sobre trae lista NextPyme y rangos DIAN', async () => {
+    const { client } = buildClientWithGet({
+      data: [
+        {
+          id: 7,
+          type_document_id: 11,
+          prefix: 'SEDS',
+          number: 984000000,
+          resolution: '18760000001',
+          date_from: '2020-01-01',
+          date_to: '2020-12-31',
+        },
+      ],
+      ResponseDian: {
+        Envelope: {
+          Body: {
+            GetNumberingRangeResponse: {
+              GetNumberingRangeResult: {
+                ResponseList: {
+                  NumberRangeResponse: {
+                    ResolutionNumber: '18760000001',
+                    ResolutionDate: '2019-01-19',
+                    Prefix: 'SEDS',
+                    FromNumber: '984000000',
+                    ToNumber: '985000000',
+                    ValidDateFrom: '2019-01-19',
+                    ValidDateTo: '2030-06-30',
+                    TechnicalKey: null,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const resolutions = await client.listResolutions(undefined, 'company-token');
+
+    expect(resolutions).toEqual([
+      expect.objectContaining({
+        prefix: 'SEDS',
+        resolution: '18760000001',
+        date_from: '2019-01-19',
+        date_to: '2030-06-30',
+        resolution_date: '2019-01-19',
+        type_document_id: 11,
+        dianVigency: true,
+      }),
+    ]);
+  });
+
+  it('conserva el rango SEDS de DIAN cuando NextPyme solo tiene la factura SETP (mismo ResolutionNumber)', async () => {
+    const { client } = buildClientWithGet({
+      data: [
+        {
+          id: 3,
+          type_document_id: 1,
+          prefix: 'SETP',
+          number: 990000008,
+          from: 990000000,
+          to: 995000000,
+          resolution: '18760000001',
+          technical_key: 'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+          date_from: '2019-01-19',
+          date_to: '2030-01-19',
+        },
+      ],
+      ResponseDian: {
+        Envelope: {
+          Body: {
+            GetNumberingRangeResponse: {
+              GetNumberingRangeResult: {
+                ResponseList: {
+                  NumberRangeResponse: [
+                    {
+                      ResolutionNumber: '18760000001',
+                      ResolutionDate: '2019-01-19',
+                      Prefix: 'SETP',
+                      FromNumber: '990000000',
+                      ToNumber: '995000000',
+                      ValidDateFrom: '2019-01-19',
+                      ValidDateTo: '2030-01-19',
+                      TechnicalKey: 'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+                    },
+                    {
+                      ResolutionNumber: '18760000001',
+                      ResolutionDate: '2019-01-19',
+                      Prefix: 'SEDS',
+                      FromNumber: '984000000',
+                      ToNumber: '985000000',
+                      ValidDateFrom: '2019-01-19',
+                      ValidDateTo: '2030-06-30',
+                      TechnicalKey: null,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const resolutions = await client.listResolutions(undefined, 'company-token');
+
+    expect(resolutions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          prefix: 'SETP',
+          resolution: '18760000001',
+          type_document_id: 1,
+        }),
+        expect.objectContaining({
+          prefix: 'SEDS',
+          resolution: '18760000001',
+          date_from: '2019-01-19',
+          date_to: '2030-06-30',
+          from: 984000000,
+          to: 985000000,
+          dianVigency: true,
+        }),
+      ]),
+    );
+    expect(resolutions).toHaveLength(2);
   });
 });
 

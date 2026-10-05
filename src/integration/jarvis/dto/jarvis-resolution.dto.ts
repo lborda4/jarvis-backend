@@ -146,16 +146,21 @@ export class SaveJarvisResolutionResponseDto {
   resolution: JarvisResolutionDto;
 }
 
-/** Resolución habilitada en la DIAN, tal como la reporta NextPyme. No trae
- * `kind`: la DIAN identifica cada rango por prefijo y no dice si es de
- * factura o de documento soporte, así que quién es cuál lo elige el usuario
- * en la pantalla de configuración. */
+/** Resolución vigente reportada por NextPyme para elegir en Configuración. */
 export class JarvisAvailableResolutionDto {
   @ApiProperty({
     example: 'DSJ-18764113677707',
     description: 'Clave estable para identificar la resolución en la lista',
   })
   id: string;
+
+  @ApiPropertyOptional({
+    enum: JarvisResolutionKind,
+    nullable: true,
+    description:
+      'Factura (type_document_id 1) o documento soporte (11). Null si NextPyme no informó el tipo.',
+  })
+  kind?: JarvisResolutionKind | null;
 
   @ApiProperty({ example: 'DSJ' })
   prefix: string;

@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -201,6 +202,7 @@ function applyDraftCodesToPayloadItems(
 @Injectable()
 export class ElectronicDocumentService {
   private readonly logger = new Logger(ElectronicDocumentService.name);
+  private readonly documentCreationInFlight = new Map<string, Promise<unknown>>();
 
   constructor(
     @InjectDataSource()
@@ -331,19 +333,39 @@ export class ElectronicDocumentService {
   /**
    * Serializa "crear el documento en SIIGO/Jarvis + guardar el resultado"
    * por documento — evita que dos intentos concurrentes para EL MISMO
-   * documento (doble clic en "Enviar", o el resume automático corriendo a
-   * la vez que un envío manual) llamen ambos al proveedor y se pisen. El
-   * segundo intento en tomar el lock relee el estado ya persistido por el
-   * primero y aborta ANTES de llamar al proveedor, en vez de arriesgarse a
-   * duplicar la factura o (junto con el guard de updateStatus de arriba)
-   * sobrescribir un éxito con un error tardío.
+   * documento (doble clic en "Enviar") llamen ambos al proveedor. El lock
+   * de Postgres solo cubre la relectura del estado: el HTTP a SIIGO va
+   * afuera. Si se deja el POST dentro de la transacción, Neon se queda
+   * sin pool (login incluido) cuando SIIGO tarda o el front reintenta.
    */
   async runExclusiveForDocumentCreation<T>(
     documentId: string,
     companyId: string | undefined,
     fn: () => Promise<T>,
   ): Promise<T> {
-    return withPostgresAdvisoryLock(
+    const existing = this.documentCreationInFlight.get(documentId);
+    if (existing) {
+      throw new ServiceUnavailableException(
+        'Hay otro envío de este documento en curso. Espera unos segundos e intenta de nuevo.',
+      );
+    }
+
+    const work = this.runClaimedDocumentCreation(documentId, companyId, fn);
+    this.documentCreationInFlight.set(documentId, work);
+
+    try {
+      return await work;
+    } finally {
+      this.documentCreationInFlight.delete(documentId);
+    }
+  }
+
+  private async runClaimedDocumentCreation<T>(
+    documentId: string,
+    companyId: string | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    await withPostgresAdvisoryLock(
       this.dataSource,
       `document-creation:${documentId}`,
       async () => {
@@ -354,10 +376,10 @@ export class ElectronicDocumentService {
             'El documento ya fue creado en SIIGO para este registro.',
           );
         }
-
-        return fn();
       },
     );
+
+    return fn();
   }
 
   async updatePayload(

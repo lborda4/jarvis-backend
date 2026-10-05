@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { extractNextPymeInvoiceXml } from './nextpyme/nextpyme-invoice-xml.helper';
@@ -11,6 +12,7 @@ import { withPostgresAdvisoryLock } from '../../common/helpers/postgres-advisory
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
+import { SiigoCreditNoteNumberingService } from '../siigo/siigo-credit-note-numbering.service';
 import { JarvisDocumentType } from './enums/jarvis-document-type.enum';
 import { JarvisEntityType } from './enums/jarvis-entity-type.enum';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
@@ -42,7 +44,9 @@ import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 
 import { buildJarvisInvoiceChargeTaxTotals } from './helpers/jarvis-invoice-tax.helper';
+import { toNextPymePartyName } from './helpers/nextpyme-party-name.helper';
 import { calculateJarvisRetention } from './helpers/jarvis-tax-calculation.helper';
+import { JarvisCredentials } from '../interfaces/integration-credentials.interface';
 
 const DOCUMENT_TYPE_IDENTIFICATION_FALLBACK: Record<string, number> = {
   [JarvisDocumentType.CC]: 3,
@@ -65,6 +69,7 @@ export class JarvisInvoiceSendService {
     private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
     private readonly jarvisSetupService: JarvisSetupService,
     private readonly invoiceHistory: JarvisInvoiceHistoryService,
+    private readonly siigoCreditNoteNumberingService: SiigoCreditNoteNumberingService,
   ) {}
 
   async createAndSendInvoice(
@@ -112,15 +117,25 @@ export class JarvisInvoiceSendService {
       request.customerDocumentType,
     );
 
-    const integration =
+    const jarvisIntegration =
       await this.integrationsRepository.findByCompanyAndProvider(
         companyId,
         IntegrationProvider.JARVIS,
       );
+    const siigoIntegration =
+      !jarvisIntegration && kind === JarvisResolutionKind.CREDIT_NOTE
+        ? await this.integrationsRepository.findByCompanyAndProvider(
+            companyId,
+            IntegrationProvider.SIIGO,
+          )
+        : null;
+    const usesSiigoCreditNote = Boolean(siigoIntegration) && !jarvisIntegration;
 
-    if (!integration) {
+    if (!jarvisIntegration && !usesSiigoCreditNote) {
       throw new NotFoundException(
-        'La empresa activa no tiene integración Jarvis configurada.',
+        kind === JarvisResolutionKind.CREDIT_NOTE
+          ? 'La empresa activa no tiene integración Jarvis ni SIIGO configurada para notas crédito.'
+          : 'La empresa activa no tiene integración Jarvis configurada.',
       );
     }
 
@@ -133,7 +148,7 @@ export class JarvisInvoiceSendService {
 
     if (!tercero) {
       throw new BadRequestException(
-        `Debe crear el tercero en Jarvis antes de enviar el documento.`,
+        `Debe crear el tercero antes de enviar el documento.`,
       );
     }
 
@@ -145,7 +160,9 @@ export class JarvisInvoiceSendService {
         `Configura el token de NextPyme de esta empresa antes de emitir ${documentLabel}.`,
       );
     }
-    const credentials = normalizeJarvisCredentials(integration.credentials);
+    const credentials: JarvisCredentials = jarvisIntegration
+      ? normalizeJarvisCredentials(jarvisIntegration.credentials)
+      : {};
 
     const defaultTaxId = this.nextPymeMasterCatalogService.getIvaTaxId();
     const allowedTaxIds = new Set([defaultTaxId]);
@@ -200,52 +217,93 @@ export class JarvisInvoiceSendService {
       };
     });
 
+    const municipalityId =
+      tercero.municipalityId ??
+      (await this.nextPymeMasterCatalogService.resolveMunicipalityId(
+        credentials.municipality,
+        credentials.city ?? company?.name,
+        undefined,
+        companyId,
+      ));
+    const liabilityId =
+      await this.nextPymeMasterCatalogService.resolveLiabilityId(
+        credentials.tax_responsibility ??
+          JarvisTaxResponsibility.NOT_APPLICABLE,
+        companyId,
+      );
+    const terceroVatRegime =
+      tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
+        ? JarvisVatRegime.NON_RESPONSIBLE
+        : tercero.taxRegime
+          ? JarvisVatRegime.RESPONSIBLE
+          : credentials.vat_regime;
+    const regimeId =
+      tercero.typeRegimeId ??
+      (await this.nextPymeMasterCatalogService.resolveRegimeId(
+        terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
+        companyId,
+      ));
+    const currencyId =
+      await this.nextPymeMasterCatalogService.resolveCurrencyId(currency, companyId);
+    const organizationTypeId =
+      tercero.entityType === JarvisEntityType.NATURAL_PERSON ||
+      (!tercero.entityType && documentType !== JarvisDocumentType.NIT)
+        ? 2
+        : 1;
+
+    const explicitCreditNumber =
+      kind === JarvisResolutionKind.CREDIT_NOTE && request.number != null;
+    if (
+      explicitCreditNumber &&
+      (!Number.isSafeInteger(request.number) || request.number! < 1)
+    ) {
+      throw new BadRequestException(
+        'Indique un consecutivo entero positivo para la nota crédito.',
+      );
+    }
+
     const resolutionLockKey = `jarvis-resolution:${companyId}:${kind}`;
 
     try {
-      return await withPostgresAdvisoryLock(
+      const numbering = await withPostgresAdvisoryLock(
         this.dataSource,
         resolutionLockKey,
         async () => {
-          const explicitCreditNumber = kind === JarvisResolutionKind.CREDIT_NOTE && request.number != null;
-          if (explicitCreditNumber && (!Number.isSafeInteger(request.number) || request.number! < 1)) {
-            throw new BadRequestException('Indique un consecutivo entero positivo para la nota crédito.');
-          }
-          const numbering = explicitCreditNumber
-            ? { number: request.number!, prefix: request.prefix ?? '', formNumber: null }
-            : await this.jarvisSetupService.allocateResolutionNumber(
-              companyId,
-              kind,
-            );
+          const allocated = explicitCreditNumber
+            ? {
+                number: request.number!,
+                prefix:
+                  request.prefix?.trim() ||
+                  (usesSiigoCreditNote ? 'NC' : ''),
+                formNumber: null as string | null,
+              }
+            : usesSiigoCreditNote
+              ? await this.siigoCreditNoteNumberingService.allocateNumber(
+                  companyId,
+                )
+              : await this.jarvisSetupService.allocateResolutionNumber(
+                  companyId,
+                  kind,
+                );
 
-          const municipalityId =
-            tercero.municipalityId ??
-            (await this.nextPymeMasterCatalogService.resolveMunicipalityId(
-              credentials.municipality,
-              credentials.city ?? company?.name,
-              undefined,
-              companyId,
-            ));
-          const liabilityId =
-            await this.nextPymeMasterCatalogService.resolveLiabilityId(
-              credentials.tax_responsibility ??
-                JarvisTaxResponsibility.NOT_APPLICABLE,
-              companyId,
-            );
-          const terceroVatRegime =
-            tercero.taxRegime === JarvisTaxRegime.SIMPLIFIED
-              ? JarvisVatRegime.NON_RESPONSIBLE
-              : tercero.taxRegime
-                ? JarvisVatRegime.RESPONSIBLE
-                : credentials.vat_regime;
-          const regimeId =
-            tercero.typeRegimeId ??
-            (await this.nextPymeMasterCatalogService.resolveRegimeId(
-              terceroVatRegime ?? JarvisVatRegime.RESPONSIBLE,
-              companyId,
-            ));
-          const currencyId =
-            await this.nextPymeMasterCatalogService.resolveCurrencyId(currency, companyId);
+          if (!explicitCreditNumber) {
+            if (usesSiigoCreditNote) {
+              await this.siigoCreditNoteNumberingService.commitNumber(
+                companyId,
+                allocated.number,
+              );
+            } else {
+              await this.jarvisSetupService.commitResolutionNumber(
+                companyId,
+                kind,
+                allocated.number,
+              );
+            }
+          }
+
+          return allocated;
+        },
+      );
 
           this.logger.log(
             `[companyId=${companyId}] Numeración local ${documentLabel} ${JSON.stringify(
@@ -278,7 +336,9 @@ export class JarvisInvoiceSendService {
           );
           const payable = toMoney(taxableBase + ivaTotal - (isDebitNote ? documentDiscount : 0));
 
-          const taxTotals = buildJarvisInvoiceChargeTaxTotals(parsedItems);
+          const taxTotals = isNote || isSupport
+            ? buildJarvisInvoiceChargeTaxTotals(parsedItems, { includeZeroAmount: true })
+            : buildJarvisInvoiceChargeTaxTotals(parsedItems);
           const withholdingTotals: typeof taxTotals = [];
           const retentionEntries = [
             ...(request.retentions ?? []).map(retention => ({ retention, base: taxableBase, iva: ivaTotal })),
@@ -314,40 +374,51 @@ export class JarvisInvoiceSendService {
             const lineExtension = toMoney(
               item.quantity * item.unitValue - item.discount,
             );
+            const lineTaxTotals =
+              isNote || isSupport || item.taxAmount > 0
+                ? [
+                    {
+                      tax_id: item.taxId,
+                      tax_amount: formatMoney(item.taxAmount),
+                      taxable_amount: formatMoney(lineExtension),
+                      percent: formatMoney(
+                        lineExtension > 0
+                          ? (item.taxAmount / lineExtension) * 100
+                          : 0,
+                      ),
+                    },
+                  ]
+                : undefined;
 
+            // Orden UBL CreditNoteLine: AllowanceCharge → TaxTotal → Item/Price.
             return {
               unit_measure_id:
                 this.nextPymeMasterCatalogService.getDefaultUnitMeasureId(),
-              invoiced_quantity: item.quantity,
+              invoiced_quantity: isNote && !isDebitNote ? String(item.quantity) : item.quantity,
               line_extension_amount: formatMoney(lineExtension),
               free_of_charge_indicator: false,
+              ...(isNote && item.discount > 0
+                ? {
+                    allowance_charges: [
+                      {
+                        charge_indicator: false,
+                        allowance_charge_reason: 'DESCUENTO',
+                        amount: formatMoney(item.discount),
+                        base_amount: formatMoney(item.quantity * item.unitValue),
+                      },
+                    ],
+                  }
+                : {}),
+              ...(lineTaxTotals ? { tax_totals: lineTaxTotals } : {}),
               description: item.description,
               ...(item.notes ? { notes: item.notes } : {}),
-              ...(isNote && item.discount > 0 ? { allowance_charges: [{
-                charge_indicator: false, allowance_charge_reason: 'DESCUENTO',
-                amount: formatMoney(item.discount), base_amount: formatMoney(item.quantity * item.unitValue),
-              }] } : {}),
               code: item.code,
               type_item_identification_id:
                 this.nextPymeMasterCatalogService.getDefaultItemIdentificationId(),
               price_amount: formatMoney(toMoney(item.unitValue)),
-              base_quantity: item.quantity,
-              ...(isSupport ? { type_generation_transmition_id: 1, start_date: issueDate } : {}),
-              ...(item.taxAmount > 0
-                ? {
-                    tax_totals: [
-                      {
-                        tax_id: item.taxId,
-                        tax_amount: formatMoney(item.taxAmount),
-                        taxable_amount: formatMoney(lineExtension),
-                        percent: formatMoney(
-                          lineExtension > 0
-                            ? (item.taxAmount / lineExtension) * 100
-                            : 0,
-                        ),
-                      },
-                    ],
-                  }
+              base_quantity: isNote && !isDebitNote ? String(item.quantity) : item.quantity,
+              ...(isSupport
+                ? { type_generation_transmition_id: 1, start_date: issueDate }
                 : {}),
             };
           });
@@ -386,7 +457,10 @@ export class JarvisInvoiceSendService {
               ...(tercero.checkDigit
                 ? { dv: Number(tercero.checkDigit) || tercero.checkDigit }
                 : {}),
-              name: request.customerName?.trim() || tercero.name,
+              name: toNextPymePartyName(
+                request.customerName?.trim() || tercero.name,
+                organizationTypeId,
+              ),
               phone: tercero.phone || credentials.phone || '0000000000',
               address:
                 tercero.address || credentials.address || 'SIN DIRECCION',
@@ -394,8 +468,7 @@ export class JarvisInvoiceSendService {
                 tercero.email || credentials.email || 'sin-email@example.com',
               type_document_identification_id:
                 DOCUMENT_TYPE_IDENTIFICATION_FALLBACK[documentType] ?? 6,
-              type_organization_id:
-                tercero.entityType === JarvisEntityType.NATURAL_PERSON ? 2 : 1,
+              type_organization_id: organizationTypeId,
               municipality_id: municipalityId,
               type_liability_id: liabilityId,
               type_regime_id: regimeId,
@@ -425,16 +498,27 @@ export class JarvisInvoiceSendService {
                   ],
                 }
               : {}),
-            legal_monetary_totals: {
-              line_extension_amount: formatMoney(lineExtensionTotal),
-              tax_exclusive_amount: formatMoney(taxableBase),
-              tax_inclusive_amount: formatMoney(payable),
-              payable_amount: formatMoney(payable),
-              allowance_total_amount: formatMoney(documentDiscount),
-              charge_total_amount: '0.00',
-            },
+            // UBL exige TaxTotal antes de LegalMonetaryTotal / RequestedMonetaryTotal.
             ...(taxTotals.length > 0 ? { tax_totals: taxTotals } : {}),
-            ...(withholdingTotals.length ? { with_holding_tax_total: withholdingTotals } : {}),
+            // Notas crédito/débito DIAN no admiten WithholdingTaxTotal en esa secuencia (ZB01).
+            ...(withholdingTotals.length && !isNote
+              ? { with_holding_tax_total: withholdingTotals }
+              : {}),
+            legal_monetary_totals: isNote && !isDebitNote
+              ? {
+                  line_extension_amount: formatMoney(lineExtensionTotal),
+                  tax_exclusive_amount: formatMoney(taxableBase),
+                  tax_inclusive_amount: formatMoney(payable),
+                  payable_amount: formatMoney(payable),
+                }
+              : {
+                  line_extension_amount: formatMoney(lineExtensionTotal),
+                  tax_exclusive_amount: formatMoney(taxableBase),
+                  tax_inclusive_amount: formatMoney(payable),
+                  payable_amount: formatMoney(payable),
+                  allowance_total_amount: formatMoney(documentDiscount),
+                  charge_total_amount: '0.00',
+                },
             invoice_lines: invoiceLines,
           };
 
@@ -448,32 +532,47 @@ export class JarvisInvoiceSendService {
 
           const { customer, ...supportPayload } = payload;
           const { invoice_lines, ...creditPayload } = payload;
-          const { legal_monetary_totals, prefix: _prefix, resolution_number: _resolution, ...debitPayload } = creditPayload;
           const created = await (isDebitNote
-            ? this.nextPymeApiClient.createDebitNote({ ...debitPayload,
-                requested_monetary_totals: { ...legal_monetary_totals,
-                  tax_exclusive_amount: formatMoney(lineExtensionTotal),
-                  tax_inclusive_amount: formatMoney(lineExtensionTotal + ivaTotal),
-                }, debit_note_lines: invoice_lines }, companyToken)
+            ? this.nextPymeApiClient.createDebitNote((() => {
+                const {
+                  invoice_lines: _lines,
+                  legal_monetary_totals,
+                  with_holding_tax_total: _withholding,
+                  payment_form: _payment,
+                  prefix: _prefix,
+                  resolution_number: _resolution,
+                  type_currency_id: _currency,
+                  ...debitBody
+                } = payload;
+                return {
+                  ...debitBody,
+                  requested_monetary_totals: {
+                    ...legal_monetary_totals,
+                    tax_exclusive_amount: formatMoney(lineExtensionTotal),
+                    tax_inclusive_amount: formatMoney(lineExtensionTotal + ivaTotal),
+                  },
+                  debit_note_lines: invoice_lines,
+                };
+              })(), companyToken)
             : isNote
-            ? this.nextPymeApiClient.createCreditNote({ ...creditPayload, credit_note_lines: invoice_lines }, companyToken)
+            ? this.nextPymeApiClient.createCreditNote((() => {
+                const {
+                  invoice_lines: _lines,
+                  with_holding_tax_total: _withholding,
+                  allowance_charges: _allowance,
+                  payment_form: _payment,
+                  resolution_number: _resolution,
+                  type_currency_id: _currency,
+                  ...creditBody
+                } = payload;
+                return {
+                  ...creditBody,
+                  credit_note_lines: invoice_lines,
+                };
+              })(), companyToken)
             : isSupport
             ? this.nextPymeApiClient.createSupportDocument({ ...supportPayload, seller: customer }, companyToken)
-            : this.nextPymeApiClient.createInvoice(payload, companyToken)).catch(async (error: unknown) => {
-                if (
-                  !explicitCreditNumber && error instanceof BadGatewayException &&
-                  /documento\s+procesado\s+anteriormente/i.test(error.message)
-                ) {
-                  // El número ya está ocupado en DIAN. Avanzar bajo el mismo
-                  // bloqueo de resolución, conservando el rechazo del envío.
-                  await this.jarvisSetupService.commitResolutionNumber(
-                    companyId,
-                    kind,
-                    numbering.number,
-                  );
-                }
-                throw error;
-              });
+            : this.nextPymeApiClient.createInvoice(payload, companyToken));
 
           this.logger.log(
             `[companyId=${companyId}] Respuesta NextPyme ${JSON.stringify(created)}`,
@@ -514,11 +613,23 @@ export class JarvisInvoiceSendService {
             this.logger.error('No se pudo registrar la factura aceptada ' + createdConsecutive, historyError);
           }
 
-          if (!explicitCreditNumber) await this.jarvisSetupService.commitResolutionNumber(
-            companyId,
-            kind,
-            createdNumber,
-          );
+          if (
+            !explicitCreditNumber &&
+            createdNumber !== numbering.number
+          ) {
+            if (usesSiigoCreditNote) {
+              await this.siigoCreditNoteNumberingService.commitNumber(
+                companyId,
+                createdNumber,
+              );
+            } else {
+              await this.jarvisSetupService.commitResolutionNumber(
+                companyId,
+                kind,
+                createdNumber,
+              );
+            }
+          }
 
           this.logger.log(
             `[companyId=${companyId}] ${documentLabel} enviado a NextPyme (id=${createdId}, consecutive=${createdConsecutive}, number=${createdNumber}, cufe=${createdCufe ?? 'n/a'})`,
@@ -536,8 +647,6 @@ export class JarvisInvoiceSendService {
               cufe: createdCufe,
             },
           };
-        },
-      );
     } catch (error) {
       this.logger.error(
         `[companyId=${companyId}] Error al enviar ${documentLabel} a NextPyme`,
@@ -547,7 +656,8 @@ export class JarvisInvoiceSendService {
       if (
         error instanceof BadRequestException ||
         error instanceof BadGatewayException ||
-        error instanceof NotFoundException
+        error instanceof NotFoundException ||
+        error instanceof ServiceUnavailableException
       ) {
         throw error;
       }

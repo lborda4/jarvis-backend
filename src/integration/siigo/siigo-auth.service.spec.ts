@@ -45,6 +45,17 @@ function buildService(overrides: {
     siigoAccountsRepository as any,
     planSubscriptionService as any,
     {} as any, // configService
+    {
+      findById: jest.fn().mockResolvedValue({ nextPymeToken: 'company-token' }),
+    } as any,
+    {
+      getOrEnsureNumbering: jest.fn().mockResolvedValue({
+        prefix: 'NC',
+        fromNumber: 1,
+        toNumber: 9_999_999,
+        nextConsecutive: 1,
+      }),
+    } as any,
   );
 
   return { service };

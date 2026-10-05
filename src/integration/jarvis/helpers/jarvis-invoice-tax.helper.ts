@@ -9,12 +9,15 @@ interface InvoiceChargeTaxLine {
 }
 
 /** Conserva el tipo y la tarifa de cada línea al agrupar los impuestos. */
-export function buildJarvisInvoiceChargeTaxTotals(lines: InvoiceChargeTaxLine[]) {
+export function buildJarvisInvoiceChargeTaxTotals(
+  lines: InvoiceChargeTaxLine[],
+  options?: { includeZeroAmount?: boolean },
+) {
   const totals = new Map<string, {
     taxId: number; taxAmount: number; taxableAmount: number; percent: string;
   }>();
   for (const line of lines) {
-    if (line.taxAmount <= 0) continue;
+    if (!options?.includeZeroAmount && line.taxAmount <= 0) continue;
     const base = toMoney(line.quantity * line.unitValue - line.discount);
     const percent = formatMoney(base > 0 ? line.taxAmount / base * 100 : 0);
     const key = `${line.taxId}:${percent}`;

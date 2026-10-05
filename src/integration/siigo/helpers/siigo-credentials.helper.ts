@@ -3,6 +3,7 @@ import {
   SiigoCredentials,
   SiigoDocumentTypeSelection,
 } from '../../interfaces/integration-credentials.interface';
+import { normalizeSiigoCreditNoteNumbering } from './siigo-credit-note-numbering.helper';
 import { isValidSiigoConfigurationId } from './siigo-document-type.helper';
 
 function normalizeDocumentTypes(
@@ -63,6 +64,9 @@ export function normalizeSiigoCredentials(
         : undefined,
     document_types: normalizeDocumentTypes(
       raw.document_types ?? raw.documentTypes,
+    ),
+    credit_note: normalizeSiigoCreditNoteNumbering(
+      raw.credit_note ?? raw.creditNote,
     ),
   };
 }

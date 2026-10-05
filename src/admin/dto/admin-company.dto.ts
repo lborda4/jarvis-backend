@@ -133,6 +133,14 @@ export class AdminCompanyListItemDto {
   @ApiPropertyOptional({
     nullable: true,
     description:
+      'Clave técnica DIAN persistida en integrations.credentials.technical_key.',
+    example: 'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+  })
+  technicalKey: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
       'Código DANE de la ciudad de la empresa. Se usa como default de ciudad al crear un tercero en SIIGO cuando el proveedor no trae dirección propia.',
     example: '11001',
   })
@@ -227,6 +235,13 @@ export class CreateAdminCompanyRequestDto {
       'Token Bearer propio de la empresa para NextPyme. Es necesario para consultar documentos en NextPyme.',
   })
   nextPymeToken?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Clave técnica DIAN. Se guarda en integrations.credentials.technical_key.',
+    example: 'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+  })
+  technicalKey?: string;
 }
 
 export class UpdateIntegrationSubscriptionRequestDto {
@@ -314,6 +329,21 @@ export class UpdateCompanyNextPymeTokenRequestDto {
 }
 
 export class UpdateCompanyNextPymeTokenResponseDto {
+  @ApiProperty({ type: AdminCompanyListItemDto })
+  company: AdminCompanyListItemDto;
+}
+
+export class UpdateCompanyTechnicalKeyRequestDto {
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Clave técnica DIAN. Vacío/null la elimina de integrations.credentials.',
+    example: 'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+  })
+  technicalKey: string | null;
+}
+
+export class UpdateCompanyTechnicalKeyResponseDto {
   @ApiProperty({ type: AdminCompanyListItemDto })
   company: AdminCompanyListItemDto;
 }

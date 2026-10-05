@@ -1,5 +1,5 @@
 import { DOWNLOAD_XML } from './mappers/invoice-xml-download.fixture';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { ElectronicDocumentService } from './electronic-document.service';
 import { ElectronicDocumentStatus } from './enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
@@ -343,6 +343,38 @@ describe('ElectronicDocumentService.runExclusiveForDocumentCreation', () => {
 
     expect(result).toEqual({ ok: true });
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('no deja el HTTP de SIIGO dentro del lock y rechaza un segundo envío en curso', async () => {
+    const { service } = buildService({
+      id: 'doc-5',
+      companyId: 'company-1',
+      status: ElectronicDocumentStatus.ACCOUNT_MAPPED,
+      siigoPurchaseId: null,
+    });
+    let releaseFirst!: () => void;
+    let firstEntered = false;
+    const first = service.runExclusiveForDocumentCreation(
+      'doc-5',
+      'company-1',
+      () =>
+        new Promise((resolve) => {
+          firstEntered = true;
+          releaseFirst = () => resolve({ ok: true });
+        }),
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(firstEntered).toBe(true);
+
+    await expect(
+      service.runExclusiveForDocumentCreation('doc-5', 'company-1', async () => ({
+        ok: false,
+      })),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    releaseFirst();
+    await expect(first).resolves.toEqual({ ok: true });
   });
 });
 

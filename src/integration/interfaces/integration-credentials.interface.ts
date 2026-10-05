@@ -3,6 +3,14 @@ export interface SiigoDocumentTypeSelection {
   purchase_invoice_id?: number;
 }
 
+/** Numeración local de notas crédito NextPyme para empresas SIIGO (sin resolución DIAN). */
+export interface SiigoCreditNoteNumbering {
+  prefix: string;
+  fromNumber: number;
+  toNumber: number;
+  nextConsecutive: number;
+}
+
 export interface SiigoCredentials {
   username: string;
   access_key: string;
@@ -11,6 +19,13 @@ export interface SiigoCredentials {
   expires_at?: string;
   /** Comprobantes de cargue seleccionados en el setup (DS / FC). */
   document_types?: SiigoDocumentTypeSelection;
+  /**
+   * Consecutivo soft de nota crédito (NextPyme).
+   * Arranca en 1 por empresa y avanza con cada envío aceptado.
+   */
+  credit_note?: SiigoCreditNoteNumbering;
+  /** Clave técnica DIAN de la empresa (opcional; la factura electrónica la usa). */
+  technical_key?: string;
 }
 
 import { JarvisResolutionKind } from '../jarvis/enums/jarvis-resolution-kind.enum';
@@ -61,6 +76,8 @@ export interface JarvisCredentials {
   phone?: string;
   /** Identificador de software DIAN/NextPyme de la empresa. */
   id_software?: string;
+  /** Clave técnica DIAN de la empresa (factura electrónica). */
+  technical_key?: string;
   /** Token Bearer de NextPyme propio de la empresa. */
   token_nextpyme?: string;
   /** @deprecated Conservado por compatibilidad con configuraciones previas. */

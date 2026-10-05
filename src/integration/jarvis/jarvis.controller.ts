@@ -152,7 +152,7 @@ export class JarvisController {
   @ApiOperation({
     summary: 'Guardar resolución DIAN de Jarvis',
     description:
-      'Persiste la resolución de factura electrónica o documento soporte en integrations.credentials.',
+      'PUT /config/resolution en NextPyme con el rango elegido y, si responde bien, persiste la numeración automática desde el Desde del rango.',
   })
   saveResolution(
     @CurrentUser() user: AuthenticatedUser,

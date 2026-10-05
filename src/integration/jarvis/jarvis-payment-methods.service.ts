@@ -18,9 +18,11 @@ export class JarvisPaymentMethodsService {
 
   private async requireCompany(companyId: string) {
     if (!companyId?.trim()) throw new BadRequestException('No se pudo determinar la empresa activa.');
-    if (!await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.JARVIS)) {
-      throw new NotFoundException('La empresa no tiene integración Jarvis configurada.');
-    }
+    const jarvis = await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.JARVIS);
+    if (jarvis) return;
+    const siigo = await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.SIIGO);
+    if (siigo) return;
+    throw new NotFoundException('La empresa no tiene integración Jarvis o SIIGO configurada.');
   }
 
   async list(companyId: string) {

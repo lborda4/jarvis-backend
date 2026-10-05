@@ -48,6 +48,10 @@ export interface NextPymeResolution {
   technical_key?: string;
   date_from?: string;
   date_to?: string;
+  /** true si date_from/date_to vienen de ValidDate* de GetNumberingRange.
+   * La lista propia de NextPyme a menudo trae la vigencia ya configurada
+   * (y desfasada del ABS); usarla en el PUT dispara DSAB07b/DSAB08b. */
+  dianVigency?: boolean;
   type_document?: {
     id: number;
     name: string;
@@ -83,7 +87,7 @@ export interface NextPymeSupportDocumentCreatePayload {
     merchant_registration?: string;
     postal_zone_code?: string;
     dv?: number | string;
-    name: string;
+    name: string | string[];
     phone?: string;
     address?: string;
     email?: string;
@@ -149,7 +153,7 @@ export interface NextPymeInvoiceCreatePayload {
   customer: {
     identification_number: number | string;
     dv?: number | string;
-    name: string;
+    name: string | string[];
     phone?: string;
     address?: string;
     email?: string;
@@ -507,9 +511,14 @@ export class NextPymeApiClient {
     const token = this.requireToken(companyToken);
     const baseUrl = this.getBaseUrl();
 
+    const { technical_key, ...payloadWithoutKey } = payload;
+    const body = technical_key?.trim()
+      ? { ...payloadWithoutKey, technical_key: technical_key.trim() }
+      : payloadWithoutKey;
+
     this.logger.log(
       `[config/resolution] PUT ${baseUrl}/config/resolution body=${JSON.stringify(
-        payload,
+        body,
         null,
         2,
       )}`,
@@ -517,7 +526,7 @@ export class NextPymeApiClient {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.put<unknown>(`${baseUrl}/config/resolution`, payload, {
+        this.httpService.put<unknown>(`${baseUrl}/config/resolution`, body, {
           headers: this.buildAuthHeaders(token),
           timeout: 30000,
           validateStatus: () => true,
@@ -961,15 +970,110 @@ export class NextPymeApiClient {
 
   /** GET /reports/resolutions responde en DOS formatos según la cuenta: la
    * lista propia de NextPyme (`{ data: [...] }`) o el sobre crudo de la DIAN
-   * (GetNumberingRangeResponse), que no trae id, type_document_id ni number y
-   * por eso el parseo de lista lo descartaba entero, dejando la consulta en
-   * cero resoluciones. Se intentan los dos. */
+   * (GetNumberingRangeResponse). Cuando vienen ambos (o solo uno), se
+   * combinan priorizando las fechas ValidDate* de la DIAN: la lista de
+   * NextPyme a veces trae la vigencia ya configurada (y desfasada), y eso
+   * es exactamente lo que dispara DSAB07b/DSAB08b al emitir DS. */
   private parseResolutions(payload: unknown): NextPymeResolution[] {
     const listResolutions = this.parseResolutionList(payload);
+    const dianResolutions = this.parseDianNumberingRanges(payload);
 
-    return listResolutions.length > 0
-      ? listResolutions
-      : this.parseDianNumberingRanges(payload);
+    if (dianResolutions.length === 0) {
+      return listResolutions;
+    }
+
+    if (listResolutions.length === 0) {
+      return dianResolutions;
+    }
+
+    const merged = listResolutions.map((item) => {
+      const dian = this.findMatchingResolution(dianResolutions, item);
+      if (!dian) {
+        return item;
+      }
+
+      return {
+        ...item,
+        from: dian.from ?? item.from,
+        to: dian.to ?? item.to,
+        resolution_date: dian.resolution_date ?? item.resolution_date,
+        date_from: dian.date_from ?? item.date_from,
+        date_to: dian.date_to ?? item.date_to,
+        technical_key: item.technical_key ?? dian.technical_key,
+        dianVigency: true,
+      };
+    });
+
+    // La lista de NextPyme suele traer solo lo ya configurado (p. ej. SETP
+    // de factura). El sobre DIAN sí trae todos los rangos vigentes, incluido
+    // SEDS de documento soporte con el mismo ResolutionNumber. Si no
+    // agregamos esos rangos, el selector de DS queda vacío y nunca se
+    // persiste resolutions.support_document.
+    const unmatchedDian = dianResolutions.filter((dian) => {
+      const prefix = String(dian.prefix ?? '')
+        .trim()
+        .toUpperCase();
+      const resolution = String(dian.resolution ?? '').trim();
+      if (!prefix || !resolution) {
+        return !this.findMatchingResolution(listResolutions, dian);
+      }
+
+      return !listResolutions.some(
+        (item) =>
+          String(item.prefix ?? '')
+            .trim()
+            .toUpperCase() === prefix &&
+          String(item.resolution ?? '').trim() === resolution,
+      );
+    });
+
+    return [...merged, ...unmatchedDian];
+  }
+
+  private findMatchingResolution(
+    candidates: NextPymeResolution[],
+    target: Pick<NextPymeResolution, 'prefix' | 'resolution'>,
+  ): NextPymeResolution | undefined {
+    const prefix = String(target.prefix ?? '')
+      .trim()
+      .toUpperCase();
+    const resolution = String(target.resolution ?? '').trim();
+
+    if (prefix && resolution) {
+      const exact = candidates.find(
+        (item) =>
+          String(item.prefix ?? '')
+            .trim()
+            .toUpperCase() === prefix &&
+          String(item.resolution ?? '').trim() === resolution,
+      );
+      if (exact) {
+        return exact;
+      }
+    }
+
+    if (resolution) {
+      const byResolution = candidates.filter(
+        (item) => String(item.resolution ?? '').trim() === resolution,
+      );
+      if (byResolution.length === 1) {
+        return byResolution[0];
+      }
+    }
+
+    if (prefix) {
+      const byPrefix = candidates.filter(
+        (item) =>
+          String(item.prefix ?? '')
+            .trim()
+            .toUpperCase() === prefix,
+      );
+      if (byPrefix.length === 1) {
+        return byPrefix[0];
+      }
+    }
+
+    return undefined;
   }
 
   /** Rangos de numeración tal como los devuelve la DIAN, anidados en
@@ -979,11 +1083,12 @@ export class NextPymeApiClient {
 
     return ranges
       .map((range, index) => {
-        const fromNumber = Number(range.FromNumber);
-        const toNumber = Number(range.ToNumber);
-        const prefix = String(range.Prefix ?? '').trim();
-        const technicalKey =
-          range.TechnicalKey != null ? String(range.TechnicalKey) : undefined;
+        const fromNumber = Number(
+          findInRecord(range, ['FromNumber']) ?? Number.NaN,
+        );
+        const toNumber = Number(findInRecord(range, ['ToNumber']) ?? Number.NaN);
+        const prefix = findInRecord(range, ['Prefix']) ?? '';
+        const technicalKey = findInRecord(range, ['TechnicalKey']);
 
         return {
           // La DIAN no numera los rangos; el índice solo sirve como clave
@@ -994,23 +1099,14 @@ export class NextPymeApiClient {
           number: fromNumber,
           from: Number.isFinite(fromNumber) ? fromNumber : undefined,
           to: Number.isFinite(toNumber) ? toNumber : undefined,
-          resolution:
-            range.ResolutionNumber != null
-              ? String(range.ResolutionNumber)
-              : undefined,
-          resolution_date:
-            range.ResolutionDate != null
-              ? String(range.ResolutionDate)
-              : undefined,
+          resolution: findInRecord(range, ['ResolutionNumber']) ?? undefined,
+          resolution_date: findInRecord(range, ['ResolutionDate']) ?? undefined,
           // La resolución de documento soporte no lleva clave técnica: la
           // DIAN la devuelve en null y así se conserva.
           technical_key: technicalKey?.trim() ? technicalKey : undefined,
-          date_from:
-            range.ValidDateFrom != null
-              ? String(range.ValidDateFrom)
-              : undefined,
-          date_to:
-            range.ValidDateTo != null ? String(range.ValidDateTo) : undefined,
+          date_from: findInRecord(range, ['ValidDateFrom']) ?? undefined,
+          date_to: findInRecord(range, ['ValidDateTo']) ?? undefined,
+          dianVigency: true,
         } satisfies NextPymeResolution;
       })
       .filter((item) => item.prefix.length > 0 && Number.isFinite(item.number));
@@ -1031,7 +1127,8 @@ export class NextPymeApiClient {
 
     for (const key of path) {
       if (!node || typeof node !== 'object') {
-        return [];
+        node = undefined;
+        break;
       }
 
       node = (node as UnknownRecord)[key];
@@ -1039,10 +1136,22 @@ export class NextPymeApiClient {
 
     // Con un solo rango, la conversión XML→JSON devuelve el objeto suelto en
     // vez de un arreglo de uno.
-    const ranges = Array.isArray(node) ? node : node ? [node] : [];
-
-    return ranges.filter(
+    const fromPath = (Array.isArray(node) ? node : node ? [node] : []).filter(
       (item): item is UnknownRecord => Boolean(item) && typeof item === 'object',
+    );
+    if (fromPath.length > 0) {
+      return fromPath;
+    }
+
+    // Algunas cuentas anidan el sobre DIAN en otro nodo o lo mandan como
+    // JSON embebido. Sin ValidDate* no hay forma de corregir DSAB07b/08b.
+    return collectRecords(payload, { parseJsonStrings: true }).filter(
+      (record) =>
+        Boolean(
+          findInRecord(record, ['Prefix', 'prefix']) &&
+            findInRecord(record, ['ValidDateFrom']) &&
+            findInRecord(record, ['ValidDateTo']),
+        ),
     );
   }
 

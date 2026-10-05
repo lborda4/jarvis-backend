@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../../electronic-document/enums/electronic-document-type.enum';
@@ -139,11 +140,13 @@ export class SiigoSupportDocumentCreationHandler implements SiigoDocumentCreatio
         },
       );
     } catch (error) {
-      await this.electronicDocumentService.updateStatus(
-        documentId,
-        ElectronicDocumentStatus.PURCHASE_FAILED,
-        companyId,
-      );
+      if (!(error instanceof ServiceUnavailableException)) {
+        await this.electronicDocumentService.updateStatus(
+          documentId,
+          ElectronicDocumentStatus.PURCHASE_FAILED,
+          companyId,
+        );
+      }
 
       this.logger.error(
         `[documentId=${documentId}] Error al crear Documento Soporte en SIIGO`,
@@ -155,6 +158,10 @@ export class SiigoSupportDocumentCreationHandler implements SiigoDocumentCreatio
       }
 
       if (error instanceof BadGatewayException) {
+        throw error;
+      }
+
+      if (error instanceof ServiceUnavailableException) {
         throw error;
       }
 

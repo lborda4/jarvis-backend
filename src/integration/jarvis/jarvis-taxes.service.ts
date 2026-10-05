@@ -258,19 +258,27 @@ export class JarvisTaxesService {
   }
 
   private async requireJarvisIntegration(companyId: string) {
-    const integration =
+    const jarvis =
       await this.integrationsRepository.findByCompanyAndProvider(
         companyId,
         IntegrationProvider.JARVIS,
       );
-
-    if (!integration) {
-      throw new NotFoundException(
-        'La empresa activa no tiene integración Jarvis configurada.',
-      );
+    if (jarvis) {
+      return jarvis;
     }
 
-    return integration;
+    const siigo =
+      await this.integrationsRepository.findByCompanyAndProvider(
+        companyId,
+        IntegrationProvider.SIIGO,
+      );
+    if (siigo) {
+      return siigo;
+    }
+
+    throw new NotFoundException(
+      'La empresa activa no tiene integración Jarvis o SIIGO configurada.',
+    );
   }
 
   private toDto(tax: JarvisTax): JarvisTaxDto {

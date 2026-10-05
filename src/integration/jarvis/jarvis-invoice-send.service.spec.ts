@@ -2,7 +2,14 @@ import { BadGatewayException } from '@nestjs/common';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 
-function setup(token: string | null = ' company-token ') {
+function setup(
+  token: string | null = ' company-token ',
+  tercero: Record<string, unknown> = {
+    name: 'Cliente',
+    municipalityId: 149,
+    typeRegimeId: 1,
+  },
+) {
   const queryRunner = {
     connect: jest.fn(), startTransaction: jest.fn(), query: jest.fn(),
     commitTransaction: jest.fn(), rollbackTransaction: jest.fn(), release: jest.fn(),
@@ -18,23 +25,38 @@ function setup(token: string | null = ' company-token ') {
     getSupportDocumentTypeId: () => 11,
     resolveLiabilityId: jest.fn().mockResolvedValue(117),
     resolveCurrencyId: jest.fn().mockResolvedValue(35),
+    resolveMunicipalityId: jest.fn().mockResolvedValue(149),
+    resolveRegimeId: jest.fn().mockResolvedValue(1),
   };
   const numbering = {
     allocateResolutionNumber: jest.fn().mockResolvedValue({ prefix: 'FVJ', number: 1, formNumber: '18764113677438' }),
     commitResolutionNumber: jest.fn(),
   };
+  const siigoNumbering = {
+    allocateNumber: jest.fn().mockResolvedValue({ prefix: 'NC', number: 1, formNumber: null }),
+    commitNumber: jest.fn(),
+  };
   const history = { record: jest.fn().mockResolvedValue(undefined) };
+  const integrations = {
+    findByCompanyAndProvider: jest.fn().mockImplementation((_companyId: string, provider: string) => {
+      if (provider === 'JARVIS') {
+        return Promise.resolve({ credentials: { token_nextpyme: 'legacy-token' } });
+      }
+      return Promise.resolve(null);
+    }),
+  };
   const service = new JarvisInvoiceSendService(
     dataSource as never,
-    { findByCompanyAndProvider: jest.fn().mockResolvedValue({ credentials: { token_nextpyme: 'legacy-token' } }) } as never,
-    { findByCompanyAndDocument: jest.fn().mockResolvedValue({ name: 'Cliente', municipalityId: 149, typeRegimeId: 1 }) } as never,
+    integrations as never,
+    { findByCompanyAndDocument: jest.fn().mockResolvedValue(tercero) } as never,
     companies as never, client as never, catalog as never, numbering as never, history as never,
+    siigoNumbering as never,
   );
   const request = {
     issueDate: '2026-09-16', customerDocumentType: 'NIT', customerIdentification: '901335977',
     items: [{ description: 'Servicio', quantity: 1, unitValue: 250000, code: '01' }],
   };
-  return { service, request, client, companies, numbering, history };
+  return { service, request, client, companies, numbering, history, integrations, siigoNumbering };
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
@@ -108,11 +130,15 @@ describe('Registro del envio en historial', () => {
     expect(history.record).not.toHaveBeenCalled();
   });
 
-  it('no avanza el consecutivo por otros errores de Nextpyme', async () => {
+  it('reserva el consecutivo antes de enviar aunque Nextpyme rechace el XML', async () => {
     const { service, request, client, numbering } = setup();
     client.createInvoice.mockRejectedValue(new BadGatewayException('Regla: ZB01, Fallo en el Schema XML'));
     await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toThrow('ZB01');
-    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith(
+      'company-1',
+      JarvisResolutionKind.ELECTRONIC_INVOICE,
+      1,
+    );
   });
 
   it('guarda unicamente despues de la emision aceptada', async () => {
@@ -145,19 +171,51 @@ describe('Documento soporte con el mismo flujo de ventas', () => {
     expect(client.createSupportDocument).toHaveBeenCalledWith(expect.objectContaining({
       type_document_id: 11, prefix: 'DSE', resolution_number: '18764113677438',
       seller: expect.objectContaining({ name: 'Cliente' }),
-      invoice_lines: [expect.objectContaining({ type_generation_transmition_id: 1, start_date: request.issueDate })],
+      tax_totals: [{ tax_id: 1, tax_amount: '0.00', taxable_amount: '250000.00', percent: '0.00' }],
+      invoice_lines: [expect.objectContaining({
+        type_generation_transmition_id: 1,
+        start_date: request.issueDate,
+        tax_totals: [{ tax_id: 1, tax_amount: '0.00', taxable_amount: '250000.00', percent: '0.00' }],
+      })],
     }), 'company-token');
     expect(client.createSupportDocument.mock.calls[0][0]).not.toHaveProperty('customer');
     expect(numbering.allocateResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.SUPPORT_DOCUMENT);
     expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.SUPPORT_DOCUMENT, 1);
     expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ documentKind: JarvisResolutionKind.SUPPORT_DOCUMENT, cufe: 'support-code' }));
   });
-  it('un rechazo no guarda historial ni avanza el consecutivo', async () => {
+
+  it('parte el nombre de persona natural para el seller (DSAJ10a)', async () => {
+    const { service, request, client, numbering } = setup(' company-token ', {
+      name: 'BORDA BELTRAN LAURA SOFIA',
+      documentNumber: '1032504904',
+      checkDigit: '4',
+      municipalityId: 149,
+      typeRegimeId: 2,
+      entityType: 'natural_person',
+    });
+    numbering.allocateResolutionNumber.mockResolvedValue({ prefix: 'DSJ', number: 1, formNumber: '13028144278805' });
+    await service.createAndSendInvoice({
+      ...request,
+      customerDocumentType: 'CC',
+      customerIdentification: '1032504904',
+      customerName: 'BORDA BELTRAN LAURA SOFIA',
+    }, 'company-1', JarvisResolutionKind.SUPPORT_DOCUMENT);
+    expect(client.createSupportDocument.mock.calls[0][0].seller.name).toEqual([
+      'LAURA SOFIA',
+      'BORDA',
+      'BELTRAN',
+    ]);
+  });
+  it('un rechazo no guarda historial; el consecutivo ya se reservó antes del POST', async () => {
     const { service, request, client, numbering, history } = setup();
     client.createSupportDocument.mockRejectedValue(new Error('Rechazado'));
     await expect(service.createAndSendInvoice(request, 'company-1', JarvisResolutionKind.SUPPORT_DOCUMENT)).rejects.toThrow('Rechazado');
     expect(history.record).not.toHaveBeenCalled();
-    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith(
+      'company-1',
+      JarvisResolutionKind.SUPPORT_DOCUMENT,
+      1,
+    );
   });
 });
 
@@ -189,6 +247,7 @@ describe('Notas credito Jarvis', () => {
       discrepancyResponseCode: 2, discrepancyResponseDescription: 'Devolucion', seze: '2026', sendmail: true,
       items: [{ description: 'Servicio', quantity: 2, unitValue: 100, discount: 20, taxAmount: 34.2, notes: 'Detalle' }],
       payment: { id: 10 },
+      retentions: [{ id: 7, type: 'ReteICA', percentage: 4.14 }],
     }, 'company-1', JarvisResolutionKind.CREDIT_NOTE);
     expect(client.createInvoice).not.toHaveBeenCalled();
     expect(client.createSupportDocument).not.toHaveBeenCalled();
@@ -196,8 +255,22 @@ describe('Notas credito Jarvis', () => {
     expect(payload).toEqual(expect.objectContaining({ type_document_id: 4,
       billing_reference: { number: reference.number, uuid: reference.uuid, issue_date: reference.issueDate },
       discrepancyresponsecode: 2, discrepancyresponsedescription: 'Devolucion', sendmail: true, seze: '2026',
-      legal_monetary_totals: expect.objectContaining({ payable_amount: '214.20' }),
+      legal_monetary_totals: {
+        line_extension_amount: '180.00',
+        tax_exclusive_amount: '180.00',
+        tax_inclusive_amount: '214.20',
+        payable_amount: '214.20',
+      },
     }));
+    expect(payload).not.toHaveProperty('with_holding_tax_total');
+    expect(payload).not.toHaveProperty('payment_form');
+    expect(payload).not.toHaveProperty('type_currency_id');
+    expect(payload).not.toHaveProperty('allowance_charges');
+    expect(payload.legal_monetary_totals).not.toHaveProperty('allowance_total_amount');
+    expect(payload.legal_monetary_totals).not.toHaveProperty('charge_total_amount');
+    const payloadKeys = Object.keys(payload);
+    expect(payloadKeys.indexOf('tax_totals')).toBeLessThan(payloadKeys.indexOf('legal_monetary_totals'));
+    expect(payloadKeys.indexOf('legal_monetary_totals')).toBeLessThan(payloadKeys.indexOf('credit_note_lines'));
     expect(payload).not.toHaveProperty('invoice_lines');
     expect(payload).not.toHaveProperty('seller');
     expect(payload).not.toHaveProperty('payment_form');
@@ -210,12 +283,88 @@ describe('Notas credito Jarvis', () => {
     await expect(service.createAndSendInvoice({ ...request, billingReference, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('factura afectada');
     expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
   });
-  it('no registra ni avanza una nota rechazada', async () => {
+  it('no registra una nota rechazada; el consecutivo ya se reservó antes del POST', async () => {
     const { service, request, client, numbering, history } = setup();
     client.createCreditNote.mockRejectedValue(new BadGatewayException('Rechazada'));
     await expect(service.createAndSendInvoice({ ...request, billingReference: reference, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('Rechazada');
     expect(history.record).not.toHaveBeenCalled();
-    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith(
+      'company-1',
+      JarvisResolutionKind.CREDIT_NOTE,
+      1,
+    );
+  });
+});
+
+describe('Notas credito SIIGO via NextPyme', () => {
+  const reference = { number: 'FVJ1', uuid: 'a'.repeat(96), issueDate: '2026-09-16' };
+
+  it('usa contador soft NC desde 1 y envía los campos del credit-note', async () => {
+    const { service, request, client, integrations, numbering, siigoNumbering, history } = setup();
+    integrations.findByCompanyAndProvider.mockImplementation((_id: string, provider: string) => {
+      if (provider === 'JARVIS') return Promise.resolve(null);
+      if (provider === 'SIIGO') return Promise.resolve({ credentials: { username: 'u', access_key: 'k' } });
+      return Promise.resolve(null);
+    });
+
+    await service.createAndSendInvoice({
+      ...request,
+      billingReference: reference,
+      discrepancyResponseCode: 2,
+      discrepancyResponseDescription: 'ANULACION DE FACTURA ELECTRONICA',
+      observations: 'ANULACION TOTAL DE LA FACTURA ELECTRONICA FVJ1',
+      headNote: 'NOTA CREDITO ELECTRONICA - ANULACION DE FACTURA FVJ1',
+      footNote: 'NOTA CREDITO ELECTRONICA GENERADA POR JARVIS COLOMBIA S.A.S.',
+      seze: '2021-2017',
+      items: [{
+        description: 'Servicio mensual',
+        quantity: 1,
+        unitValue: 250000,
+        taxAmount: 0,
+        notes: 'ANULACION TOTAL DEL SERVICIO FACTURADO EN FVJ1',
+        code: '01',
+      }],
+    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE);
+
+    const payload = client.createCreditNote.mock.calls[0][0];
+    expect(payload).toEqual(expect.objectContaining({
+      prefix: 'NC',
+      number: 1,
+      type_document_id: 4,
+      billing_reference: {
+        number: 'FVJ1',
+        uuid: reference.uuid,
+        issue_date: '2026-09-16',
+      },
+      discrepancyresponsecode: 2,
+      seze: '2021-2017',
+      head_note: 'NOTA CREDITO ELECTRONICA - ANULACION DE FACTURA FVJ1',
+      foot_note: 'NOTA CREDITO ELECTRONICA GENERADA POR JARVIS COLOMBIA S.A.S.',
+      tax_totals: [{
+        tax_id: 1,
+        tax_amount: '0.00',
+        taxable_amount: '250000.00',
+        percent: '0.00',
+      }],
+    }));
+    expect(payload).not.toHaveProperty('resolution_number');
+    expect(payload.credit_note_lines[0]).toEqual(expect.objectContaining({
+      tax_totals: [{
+        tax_id: 1,
+        tax_amount: '0.00',
+        taxable_amount: '250000.00',
+        percent: '0.00',
+      }],
+      notes: 'ANULACION TOTAL DEL SERVICIO FACTURADO EN FVJ1',
+      code: '01',
+    }));
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+    expect(siigoNumbering.allocateNumber).toHaveBeenCalledWith('company-1');
+    expect(siigoNumbering.commitNumber).toHaveBeenCalledWith('company-1', 1);
+    expect(history.record).toHaveBeenCalledWith(expect.objectContaining({
+      documentKind: JarvisResolutionKind.CREDIT_NOTE,
+      prefix: 'NC',
+    }));
   });
 });
 
@@ -249,6 +398,7 @@ describe('Notas debito Jarvis', () => {
       discrepancyResponseCode: 3, discrepancyResponseDescription: 'Ajuste de valor', observations: 'Observaciones',
       headNote: 'Encabezado', footNote: 'Pie', sendmail: true, seze: 'REF', discountAmount: 10,
       items: [{ description: 'Producto', code: 'ABC', notes: 'Detalle', quantity: 2, unitValue: 100, discount: 20, taxAmount: 34.2, taxId: 1 }],
+      retentions: [{ id: 7, type: 'ReteICA', percentage: 4.14 }],
     }, 'company-1', JarvisResolutionKind.DEBIT_NOTE);
     const body = client.createDebitNote.mock.calls[0][0];
     expect(body.type_document_id).toBe(5);
@@ -257,18 +407,26 @@ describe('Notas debito Jarvis', () => {
     expect(body.requested_monetary_totals).toMatchObject({ line_extension_amount: '180.00', tax_exclusive_amount: '180.00', tax_inclusive_amount: '214.20', allowance_total_amount: '10.00', payable_amount: '204.20' });
     expect(body.allowance_charges[0]).toMatchObject({ amount: '10.00', base_amount: '214.20' });
     expect(body.debit_note_lines[0]).toMatchObject({ code: 'ABC', invoiced_quantity: 2, price_amount: '100.00', notes: 'Detalle', line_extension_amount: '180.00' });
+    expect(body).not.toHaveProperty('with_holding_tax_total');
+    expect(body).not.toHaveProperty('type_currency_id');
+    const bodyKeys = Object.keys(body);
+    expect(bodyKeys.indexOf('tax_totals')).toBeLessThan(bodyKeys.indexOf('requested_monetary_totals'));
     for (const key of ['legal_monetary_totals', 'invoice_lines', 'credit_note_lines', 'payment_form', 'prefix', 'resolution_number']) expect(body).not.toHaveProperty(key);
     expect(client.createCreditNote).not.toHaveBeenCalled();
     expect(client.createInvoice).not.toHaveBeenCalled();
     expect(numbering.allocateResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.DEBIT_NOTE);
     expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ documentKind: JarvisResolutionKind.DEBIT_NOTE, cufe: 'debit-code' }));
   });
-  it('does not record or advance the number for rejected debit notes', async () => {
+  it('does not record a rejected debit note; consecutive was reserved before POST', async () => {
     const { service, request, client, history, numbering } = setup();
     client.createDebitNote.mockRejectedValue(new BadGatewayException('Rechazada'));
     await expect(service.createAndSendInvoice({ ...request, billingReference: reference, discrepancyResponseCode: 3, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.DEBIT_NOTE)).rejects.toThrow('Rechazada');
     expect(history.record).not.toHaveBeenCalled();
-    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith(
+      'company-1',
+      JarvisResolutionKind.DEBIT_NOTE,
+      1,
+    );
   });
   it('requires an original invoice reference', async () => {
     const { service, request, client } = setup();

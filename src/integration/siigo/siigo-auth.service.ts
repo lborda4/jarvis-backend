@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { Integration } from '../entities/integration.entity';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { SiigoCredentials } from '../interfaces/integration-credentials.interface';
@@ -26,6 +27,8 @@ import {
 import { handleSiigoApiError } from './helpers/siigo-error.helper';
 import { AppConfiguration } from '../../config/configuration';
 import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
+import { SiigoCreditNoteNumberingService } from './siigo-credit-note-numbering.service';
+import { JarvisResolutionKind } from '../jarvis/enums/jarvis-resolution-kind.enum';
 
 import { SiigoAuthContext } from './interfaces/siigo-auth-context.interface';
 
@@ -55,6 +58,8 @@ export class SiigoAuthService {
     private readonly siigoAccountsRepository: SiigoAccountsRepository,
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly configService: ConfigService<AppConfiguration, true>,
+    private readonly companiesRepository: CompaniesRepository,
+    private readonly siigoCreditNoteNumberingService: SiigoCreditNoteNumberingService,
   ) {}
 
   async getValidAccessToken(companyId: string): Promise<string> {
@@ -218,6 +223,25 @@ export class SiigoAuthService {
       ? credentials.document_types!.purchase_invoice_id!
       : null;
 
+    const company = await this.companiesRepository.findById(trimmedCompanyId);
+    const creditNoteEnabled = Boolean(company?.nextPymeToken?.trim());
+    const creditNoteNumbering = creditNoteEnabled
+      ? await this.siigoCreditNoteNumberingService.getOrEnsureNumbering(
+          trimmedCompanyId,
+        )
+      : null;
+    const creditNoteResolution = creditNoteNumbering
+      ? {
+          kind: JarvisResolutionKind.CREDIT_NOTE as const,
+          prefix: creditNoteNumbering.prefix,
+          fromNumber: creditNoteNumbering.fromNumber,
+          toNumber: creditNoteNumbering.toNumber,
+          nextConsecutive: creditNoteNumbering.nextConsecutive,
+          formNumber: null,
+          documentTypeLabel: 'NOTA CREDITO',
+        }
+      : null;
+
     if (!configured) {
       return {
         configured: false,
@@ -226,6 +250,8 @@ export class SiigoAuthService {
         subscription,
         supportDocumentTypeId,
         purchaseInvoiceTypeId,
+        creditNoteResolution,
+        creditNoteEnabled,
       };
     }
 
@@ -238,6 +264,8 @@ export class SiigoAuthService {
       partner_id: credentials.partner_id,
       supportDocumentTypeId,
       purchaseInvoiceTypeId,
+      creditNoteResolution,
+      creditNoteEnabled,
     };
   }
 

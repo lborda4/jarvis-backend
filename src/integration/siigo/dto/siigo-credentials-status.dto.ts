@@ -96,4 +96,24 @@ export class SiigoCredentialsStatusResponseDto {
     description: 'Comprobante FC seleccionado para Factura de compra.',
   })
   purchaseInvoiceTypeId?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Numeración soft de nota crédito NextPyme (prefijo NC desde 1 por empresa).',
+  })
+  creditNoteResolution?: {
+    kind: 'CREDIT_NOTE';
+    prefix: string;
+    fromNumber: number;
+    toNumber: number;
+    nextConsecutive: number;
+    formNumber: null;
+    documentTypeLabel: string;
+  } | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Indica si la empresa tiene token NextPyme para emitir notas crédito.',
+  })
+  creditNoteEnabled?: boolean;
 }

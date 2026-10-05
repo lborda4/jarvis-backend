@@ -33,6 +33,8 @@ import {
   UpdateCompanyDescriptionResponseDto,
   UpdateCompanyNextPymeTokenRequestDto,
   UpdateCompanyNextPymeTokenResponseDto,
+  UpdateCompanyTechnicalKeyRequestDto,
+  UpdateCompanyTechnicalKeyResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
   UpdateIntegrationSubscriptionResponseDto,
   UpdateSiigoDocumentQuotasRequestDto,
@@ -177,6 +179,24 @@ export class AdminController {
     @Body() request: UpdateCompanyNextPymeTokenRequestDto,
   ): Promise<UpdateCompanyNextPymeTokenResponseDto> {
     return this.adminService.updateNextPymeToken(
+      companyId,
+      request,
+      user.userId,
+    );
+  }
+
+  @Patch('companies/:companyId/technical-key')
+  @ApiOperation({
+    summary: 'Configurar clave técnica DIAN de la empresa',
+    description:
+      'Persiste technical_key en integrations.credentials (Jarvis y/o SIIGO). Vacío/null la elimina.',
+  })
+  updateTechnicalKey(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('companyId') companyId: string,
+    @Body() request: UpdateCompanyTechnicalKeyRequestDto,
+  ): Promise<UpdateCompanyTechnicalKeyResponseDto> {
+    return this.adminService.updateTechnicalKey(
       companyId,
       request,
       user.userId,

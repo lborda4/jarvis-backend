@@ -51,6 +51,8 @@ import {
   UpdateCompanyDescriptionResponseDto,
   UpdateCompanyNextPymeTokenRequestDto,
   UpdateCompanyNextPymeTokenResponseDto,
+  UpdateCompanyTechnicalKeyRequestDto,
+  UpdateCompanyTechnicalKeyResponseDto,
   UpdateIntegrationSubscriptionRequestDto,
   UpdateIntegrationSubscriptionResponseDto,
   UpdateSiigoDocumentQuotasRequestDto,
@@ -285,20 +287,27 @@ export class AdminService {
             manager,
             createdCompany.id,
           );
+          this.assignTechnicalKey(
+            integration,
+            request?.technicalKey ?? request?.jarvisCredentials?.technicalKey,
+          );
 
           if (siigoPlan) {
             integration.plan = siigoPlan;
             integration.includedDocumentTypes = requestedDocumentTypes;
             integration.subscriptionStatus = SubscriptionStatus.ACTIVE;
             integration.subscriptionStartedAt = new Date();
-            await integrationsRepository.save(integration);
           }
+          await integrationsRepository.save(integration);
         }
 
         if (provider === IntegrationProvider.JARVIS) {
-          const jarvisCredentials = this.normalizeJarvisCredentialsSeed(
-            request?.jarvisCredentials,
-          );
+          const jarvisCredentials = this.normalizeJarvisCredentialsSeed({
+            ...request?.jarvisCredentials,
+            ...(request?.technicalKey?.trim()
+              ? { technicalKey: request.technicalKey.trim() }
+              : {}),
+          });
 
           const integration = await ensureJarvisIntegration(
             manager,
@@ -394,6 +403,49 @@ export class AdminService {
 
     return {
       company: this.mapCompany(saved),
+    };
+  }
+
+  async updateTechnicalKey(
+    companyId: string,
+    request: UpdateCompanyTechnicalKeyRequestDto,
+    _adminUserId: string,
+  ): Promise<UpdateCompanyTechnicalKeyResponseDto> {
+    const company = await this.companiesRepository.findById(companyId);
+
+    if (!company) {
+      throw new NotFoundException('Empresa no encontrada.');
+    }
+
+    const jarvis = await this.integrationsRepository.findByCompanyAndProvider(
+      companyId,
+      IntegrationProvider.JARVIS,
+    );
+    const siigo = await this.integrationsRepository.findByCompanyAndProvider(
+      companyId,
+      IntegrationProvider.SIIGO,
+    );
+    const targets = [jarvis, siigo].filter(
+      (item): item is Integration => Boolean(item),
+    );
+
+    if (targets.length === 0) {
+      throw new BadRequestException(
+        'La empresa no tiene una integración SIIGO o Jarvis donde guardar la clave técnica.',
+      );
+    }
+
+    for (const integration of targets) {
+      this.assignTechnicalKey(integration, request.technicalKey);
+      await this.integrationsRepository.save(integration);
+    }
+
+    const updated = (
+      await this.companiesRepository.findAllWithIntegrations()
+    ).find((item) => item.id === companyId);
+
+    return {
+      company: this.mapCompany(updated ?? company),
     };
   }
 
@@ -652,6 +704,7 @@ export class AdminService {
       createdAt: company.createdAt.toISOString(),
       inviteCode: company.inviteCode,
       nextPymeToken: company.nextPymeToken,
+      technicalKey: this.readTechnicalKey(company),
       cityCode: company.cityCode,
       cityName: company.cityName,
       integrations: (company.integrations ?? [])
@@ -733,6 +786,7 @@ export class AdminService {
       !credentials.tax_regime &&
       !credentials.vat_regime &&
       !credentials.id_software &&
+      !credentials.technical_key &&
       !credentials.token_nextpyme
     ) {
       return null;
@@ -743,5 +797,48 @@ export class AdminService {
 
   private normalizeNit(nit?: string): string {
     return nit?.replace(/[^\d]/g, '') ?? '';
+  }
+
+  private readTechnicalKey(company: Company): string | null {
+    const integrations = company.integrations ?? [];
+    const preferred =
+      integrations.find(
+        (item) => item.provider === IntegrationProvider.JARVIS && item.active,
+      ) ??
+      integrations.find(
+        (item) => item.provider === IntegrationProvider.SIIGO && item.active,
+      );
+
+    return this.technicalKeyFromCredentials(preferred?.credentials);
+  }
+
+  private assignTechnicalKey(
+    integration: Integration,
+    value?: string | null,
+  ): void {
+    const technicalKey = value?.trim() || null;
+    const credentials = {
+      ...((integration.credentials ?? {}) as Record<string, unknown>),
+    };
+
+    if (technicalKey) {
+      credentials.technical_key = technicalKey;
+    } else {
+      delete credentials.technical_key;
+    }
+
+    integration.credentials = credentials as Integration['credentials'];
+  }
+
+  private technicalKeyFromCredentials(
+    credentials?: Integration['credentials'] | null,
+  ): string | null {
+    if (!credentials || typeof credentials !== 'object') {
+      return null;
+    }
+
+    const raw = credentials as Record<string, unknown>;
+    const value = String(raw.technical_key ?? raw.technicalKey ?? '').trim();
+    return value || null;
   }
 }

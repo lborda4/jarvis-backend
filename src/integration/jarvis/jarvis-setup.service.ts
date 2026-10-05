@@ -23,6 +23,8 @@ import {
 } from './dto/save-jarvis-credentials.dto';
 import {
   areJarvisCredentialsConfigured,
+  ensureJarvisCreditNoteResolution,
+  ensureJarvisDebitNoteResolution,
   getJarvisResolutionNextConsecutive,
   isJarvisResolutionConfigured,
   normalizeJarvisCredentials,
@@ -43,6 +45,18 @@ const VALID_RESOLUTION_KINDS = new Set<string>(
   Object.values(JarvisResolutionKind),
 );
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Normaliza fechas DIAN/NextPyme (ISO o YYYY-MM-DD) a AAAA-MM-DD. */
+export function normalizeResolutionDate(
+  value?: string | null,
+): string | null {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? null;
+}
 
 @Injectable()
 export class JarvisSetupService {
@@ -188,13 +202,9 @@ export class JarvisSetupService {
     };
   }
 
-  /** Resoluciones habilitadas hoy en la DIAN según NextPyme. Reemplaza al
-   * cargue del PDF: en vez de que el contador transcriba la autorización, se
-   * consultan y él solo elige cuál usar para cada tipo de documento. Se
-   * devuelven todas las vigentes sin clasificar — la DIAN identifica cada
-   * rango por prefijo y no dice cuál es de factura y cuál de documento
-   * soporte, así que adivinarlo (por el prefijo o por si trae clave técnica)
-   * sería una corazonada, no un dato. */
+  /** Rangos vigentes en NextPyme para los selectores de Factura de venta y
+   * Documento soporte. Al elegir uno, `saveResolution` hace el PUT
+   * /config/resolution con esos datos; si elige ambos, son dos PUTs. */
   async listAvailableResolutions(companyId?: string): Promise<ListJarvisAvailableResolutionsResponseDto> {
     const resolutions =
       await this.nextPymeMasterCatalogService.listResolutions(companyId);
@@ -211,8 +221,8 @@ export class JarvisSetupService {
    * fechas no se descarta: NextPyme no siempre las reporta y esconderla
    * dejaría al usuario sin nada que elegir. */
   private isResolutionActive(item: NextPymeResolution, today: string): boolean {
-    const from = item.date_from?.slice(0, 10);
-    const to = item.date_to?.slice(0, 10);
+    const from = normalizeResolutionDate(item.date_from);
+    const to = normalizeResolutionDate(item.date_to);
 
     if (from && today < from) {
       return false;
@@ -231,16 +241,6 @@ export class JarvisSetupService {
     const fromNumber = Number(item.from ?? item.number);
     const toNumber = Number(item.to ?? fromNumber);
     const nextConsecutive = Number(item.next_consecutive ?? item.number);
-    // NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID (0) es un sentinel del parseo del
-    // sobre DIAN (GetNumberingRangeResponse, ver parseResolutions en
-    // NextPymeApiClient) para resoluciones donde NextPyme NUNCA reportó un
-    // type_document_id real — no un id válido en sí. Dejarlo pasar como si
-    // fuera el id real es lo que causaba que se guardara
-    // `type_document_id: 0` al confirmar la resolución (bug real reportado:
-    // NextPyme seguía rechazando la clave técnica porque 0 tampoco es
-    // "factura electrónica" para su catálogo) — acá se normaliza a null para
-    // que saveResolution caiga al id fijo por kind en ese caso, igual que
-    // cuando NextPyme no informó nada.
     const rawTypeDocumentId = item.type_document?.id ?? item.type_document_id;
     const typeDocumentId =
       rawTypeDocumentId != null &&
@@ -250,6 +250,7 @@ export class JarvisSetupService {
 
     return {
       id: `${item.prefix}-${item.resolution ?? item.id}`,
+      kind: this.kindFromTypeDocumentId(typeDocumentId),
       prefix: item.prefix,
       formNumber: item.resolution ?? null,
       fromNumber: Number.isFinite(fromNumber) ? fromNumber : 0,
@@ -258,12 +259,29 @@ export class JarvisSetupService {
         ? nextConsecutive
         : null,
       technicalKey: item.technical_key ?? null,
-      authorizedAt: item.resolution_date ?? null,
-      dateFrom: item.date_from ?? null,
-      dateTo: item.date_to ?? null,
+      authorizedAt: normalizeResolutionDate(item.resolution_date),
+      dateFrom: normalizeResolutionDate(item.date_from),
+      dateTo: normalizeResolutionDate(item.date_to),
       documentTypeLabel: item.type_document?.name?.trim() || null,
       typeDocumentId,
     };
+  }
+
+  private kindFromTypeDocumentId(
+    typeDocumentId: number | null,
+  ): JarvisResolutionKind | null {
+    if (typeDocumentId === this.nextPymeMasterCatalogService.getSupportDocumentTypeId()) {
+      return JarvisResolutionKind.SUPPORT_DOCUMENT;
+    }
+
+    if (
+      typeDocumentId ===
+      this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId()
+    ) {
+      return JarvisResolutionKind.ELECTRONIC_INVOICE;
+    }
+
+    return null;
   }
 
   async saveResolution(
@@ -285,11 +303,11 @@ export class JarvisSetupService {
     const prefix = request.prefix?.trim().toUpperCase();
     const documentTypeLabel = request.documentTypeLabel?.trim();
     const resolutionNumber = request.formNumber?.trim();
-    const technicalKey = request.technicalKey?.trim();
-    const dateFrom = request.dateFrom?.trim();
-    const dateTo = request.dateTo?.trim();
+    const requestedTechnicalKey = request.technicalKey?.trim();
+    const dateFrom = normalizeResolutionDate(request.dateFrom);
+    const dateTo = normalizeResolutionDate(request.dateTo);
     const resolutionDate =
-      request.authorizedAt?.trim() || dateFrom || undefined;
+      normalizeResolutionDate(request.authorizedAt) || dateFrom || undefined;
     const fromNumber = Number(request.fromNumber);
     const toNumber = Number(request.toNumber);
 
@@ -309,14 +327,8 @@ export class JarvisSetupService {
       );
     }
 
-    // Solo factura electrónica: la DIAN no asigna clave técnica a las
-    // resoluciones de documento soporte (las devuelve en null, ver
-    // GetNumberingRange), así que exigirla ahí bloqueaba un caso legítimo.
-    if (!technicalKey && request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE) {
-      throw new BadRequestException(
-        'La clave técnica es obligatoria para la resolución de factura electrónica.',
-      );
-    }
+    // La clave de factura se resuelve más abajo: primero la de
+    // integrations.credentials.technical_key (admin) y, si no hay, la del rango.
 
     if (!dateFrom || !DATE_PATTERN.test(dateFrom)) {
       throw new BadRequestException(
@@ -370,6 +382,25 @@ export class JarvisSetupService {
       );
     }
 
+    const isSupportDocument =
+      request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT;
+    // NextPyme PUT /config/resolution para factura espera la clave del
+    // software (la que se guarda en admin → credentials.technical_key), no
+    // la TechnicalKey del rango DIAN. El curl oficial manda esa misma llave
+    // con type_document_id 1.
+    const companyTechnicalKey =
+      existing.technical_key?.trim() ||
+      (await this.readSiigoTechnicalKey(trimmedCompanyId));
+    const technicalKey = isSupportDocument
+      ? undefined
+      : companyTechnicalKey || requestedTechnicalKey;
+
+    if (!technicalKey && request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE) {
+      throw new BadRequestException(
+        'Configure la clave técnica de la empresa en Admin o elija un rango de factura que la traiga.',
+      );
+    }
+
     // El id "1"/"11" (SUPPORT_DOCUMENT_TYPE_ID / ELECTRONIC_INVOICE_TYPE_ID)
     // es un supuesto fijo, no un dato consultado — cuando el frontend ya
     // trae el type_document_id REAL que NextPyme reportó para esta
@@ -394,13 +425,17 @@ export class JarvisSetupService {
         ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId()
         : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId());
 
+    // PUT /config/resolution con los datos del rango elegido. Si NextPyme
+    // rechaza, no persistimos: el error que ve el usuario es el de ellos.
     const companyToken = await this.nextPymeMasterCatalogService.requireCompanyToken(trimmedCompanyId);
     await this.nextPymeApiClient.putConfigResolution({
       type_document_id: typeDocumentId,
       prefix,
       resolution: resolutionNumber,
       resolution_date: resolutionDate,
-      technical_key: technicalKey,
+      ...(isSupportDocument || !technicalKey
+        ? {}
+        : { technical_key: technicalKey }),
       from: fromNumber,
       to: toNumber,
       generated_to_date: 0,
@@ -425,7 +460,7 @@ export class JarvisSetupService {
       requestType: request.requestType?.trim() || null,
       year: request.year?.trim() || resolutionDate.slice(0, 4),
       authorizedAt: resolutionDate,
-      technicalKey,
+      technicalKey: isSupportDocument ? null : technicalKey,
       dateFrom,
       dateTo,
       configuredAt: new Date().toISOString(),
@@ -433,6 +468,9 @@ export class JarvisSetupService {
 
     const credentials: JarvisCredentials = {
       ...existing,
+      ...(technicalKey && !isSupportDocument
+        ? { technical_key: technicalKey }
+        : {}),
       resolutions: {
         ...existing.resolutions,
         ...(request.kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: localResolution } : request.kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
@@ -451,8 +489,8 @@ export class JarvisSetupService {
   }
 
   /**
-   * Reserva el siguiente consecutivo local de una resolución Jarvis.
-   * Persiste el avance solo si el callback de emisión termina bien.
+   * Reserva el siguiente consecutivo de la resolución ya configurada.
+   * No vuelve a hacer PUT a NextPyme: eso ocurre solo al guardar en Configuración.
    */
   async allocateResolutionNumber(
     companyId: string,
@@ -489,9 +527,47 @@ export class JarvisSetupService {
         ? credentials.resolutions?.support_document
         : credentials.resolutions?.electronic_invoice;
 
+    if (
+      kind === JarvisResolutionKind.CREDIT_NOTE ||
+      kind === JarvisResolutionKind.DEBIT_NOTE
+    ) {
+      const numbering =
+        kind === JarvisResolutionKind.CREDIT_NOTE
+          ? ensureJarvisCreditNoteResolution(current)
+          : ensureJarvisDebitNoteResolution(current);
+      if (!current?.prefix?.trim()) {
+        integration.credentials = {
+          ...credentials,
+          resolutions: {
+            ...credentials.resolutions,
+            ...(kind === JarvisResolutionKind.CREDIT_NOTE
+              ? { credit_note: numbering }
+              : { debit_note: numbering }),
+          },
+        };
+        await this.integrationsRepository.save(integration);
+      }
+
+      const number = getJarvisResolutionNextConsecutive(numbering);
+      if (number == null) {
+        throw new BadRequestException(
+          kind === JarvisResolutionKind.CREDIT_NOTE
+            ? 'Se agotó el rango de numeración de nota crédito.'
+            : 'Se agotó el rango de numeración de nota débito.',
+        );
+      }
+
+      return {
+        prefix: numbering.prefix.trim(),
+        number,
+        toNumber: numbering.toNumber,
+        formNumber: numbering.formNumber?.trim() || null,
+      };
+    }
+
     if (!isJarvisResolutionConfigured(current)) {
       throw new BadRequestException(
-        kind === JarvisResolutionKind.DEBIT_NOTE ? 'Configure primero la numeración de Nota débito en la integración Jarvis.' : kind === JarvisResolutionKind.CREDIT_NOTE ? 'Configure primero la numeración de Nota crédito en la integración Jarvis.' : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+        kind === JarvisResolutionKind.SUPPORT_DOCUMENT
           ? 'Configure primero la resolución de Documento soporte (número, prefijo y consecutivo).'
           : 'Configure primero la resolución de Factura electrónica (número, prefijo y consecutivo).',
       );
@@ -499,23 +575,23 @@ export class JarvisSetupService {
 
     const number = getJarvisResolutionNextConsecutive(current);
 
-    if (number == null || !current) {
+    if (number == null) {
       throw new BadRequestException(
         'Se agotó el rango de numeración de la resolución configurada.',
       );
     }
 
-    if (!current.formNumber?.trim()) {
+    if (!current!.formNumber?.trim()) {
       throw new BadRequestException(
         'La resolución guardada no tiene número DIAN. Vuelva a configurar la resolución.',
       );
     }
 
     return {
-      prefix: current.prefix.trim(),
+      prefix: current!.prefix.trim(),
       number,
-      toNumber: current.toNumber,
-      formNumber: current.formNumber.trim(),
+      toNumber: current!.toNumber,
+      formNumber: current!.formNumber.trim(),
     };
   }
 
@@ -542,7 +618,13 @@ export class JarvisSetupService {
 
     const credentials = normalizeJarvisCredentials(integration.credentials);
     const current =
-      kind === JarvisResolutionKind.DEBIT_NOTE ? credentials.resolutions?.debit_note : kind === JarvisResolutionKind.CREDIT_NOTE ? credentials.resolutions?.credit_note : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+      kind === JarvisResolutionKind.DEBIT_NOTE
+        ? ensureJarvisDebitNoteResolution(credentials.resolutions?.debit_note)
+        : kind === JarvisResolutionKind.CREDIT_NOTE
+          ? ensureJarvisCreditNoteResolution(
+              credentials.resolutions?.credit_note,
+            )
+        : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? credentials.resolutions?.support_document
         : credentials.resolutions?.electronic_invoice;
 
@@ -608,7 +690,11 @@ export class JarvisSetupService {
     const localSupport = credentials.resolutions?.support_document ?? null;
     const localInvoice = credentials.resolutions?.electronic_invoice ?? null;
 
-    const nextPymeResolutions = await this.loadNextPymeResolutions(trimmedCompanyId);
+    const nextPymeResolutions = await this.loadNextPymeResolutions(
+      trimmedCompanyId,
+      localSupport,
+      localInvoice,
+    );
     const supportDocumentResolution = this.mergeResolutionForStatus(
       localSupport,
       nextPymeResolutions.support,
@@ -641,8 +727,12 @@ export class JarvisSetupService {
       configured_at: credentials.configured_at,
       supportDocumentResolution,
       electronicInvoiceResolution,
-      debitNoteResolution: credentials.resolutions?.debit_note ?? null,
-      creditNoteResolution: credentials.resolutions?.credit_note ?? null,
+      debitNoteResolution: ensureJarvisDebitNoteResolution(
+        credentials.resolutions?.debit_note,
+      ),
+      creditNoteResolution: ensureJarvisCreditNoteResolution(
+        credentials.resolutions?.credit_note,
+      ),
       supportDocumentResolutionConfigured: isJarvisResolutionConfigured(
         localSupport,
       ),
@@ -652,7 +742,11 @@ export class JarvisSetupService {
     };
   }
 
-  private async loadNextPymeResolutions(companyId: string): Promise<{
+  private async loadNextPymeResolutions(
+    companyId: string,
+    localSupport: JarvisDianResolution | null,
+    localInvoice: JarvisDianResolution | null,
+  ): Promise<{
     support: NextPymeResolution | null;
     invoice: NextPymeResolution | null;
   }> {
@@ -665,12 +759,16 @@ export class JarvisSetupService {
         this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId();
 
       return {
-        support:
-          resolutions.find((item) => item.type_document_id === supportTypeId) ??
-          null,
-        invoice:
-          resolutions.find((item) => item.type_document_id === invoiceTypeId) ??
-          null,
+        support: this.pickRemoteResolution(
+          resolutions,
+          supportTypeId,
+          localSupport,
+        ),
+        invoice: this.pickRemoteResolution(
+          resolutions,
+          invoiceTypeId,
+          localInvoice,
+        ),
       };
     } catch (error) {
       this.logger.warn(
@@ -680,6 +778,33 @@ export class JarvisSetupService {
       );
       return { support: null, invoice: null };
     }
+  }
+
+  private pickRemoteResolution(
+    resolutions: NextPymeResolution[],
+    typeDocumentId: number,
+    local: JarvisDianResolution | null,
+  ): NextPymeResolution | null {
+    const ofType = resolutions.filter(
+      (item) => item.type_document_id === typeDocumentId,
+    );
+    const prefix = local?.prefix?.trim().toUpperCase();
+    const formNumber = local?.formNumber?.trim();
+
+    if (prefix && formNumber) {
+      const exact = ofType.find(
+        (item) =>
+          String(item.prefix ?? '')
+            .trim()
+            .toUpperCase() === prefix &&
+          String(item.resolution ?? '').trim() === formNumber,
+      );
+      if (exact) {
+        return exact;
+      }
+    }
+
+    return ofType[0] ?? null;
   }
 
   private mergeResolutionForStatus(
@@ -768,5 +893,19 @@ export class JarvisSetupService {
       year: (item.resolution_date ?? item.date_from)?.slice(0, 4) ?? null,
       configuredAt: new Date().toISOString(),
     };
+  }
+
+  private async readSiigoTechnicalKey(companyId: string): Promise<string | undefined> {
+    const siigo = await this.integrationsRepository.findByCompanyAndProvider(
+      companyId,
+      IntegrationProvider.SIIGO,
+    );
+    if (!siigo?.credentials || typeof siigo.credentials !== 'object') {
+      return undefined;
+    }
+
+    const raw = siigo.credentials as Record<string, unknown>;
+    const value = String(raw.technical_key ?? raw.technicalKey ?? '').trim();
+    return value || undefined;
   }
 }

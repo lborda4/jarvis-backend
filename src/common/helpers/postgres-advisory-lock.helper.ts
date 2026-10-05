@@ -1,4 +1,8 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+
+const LOCK_TIMEOUT = '8s';
+const IDLE_IN_TRANSACTION_TIMEOUT = '15s';
 
 /**
  * Ejecuta `fn` bajo un advisory lock de Postgres identificado por
@@ -22,6 +26,11 @@ import { DataSource } from 'typeorm';
  * fin, así que abrir la transacción, tomar el lock, correr `fn`, y cerrar
  * la transacción queda todo pinneado al mismo backend sin necesidad de un
  * unlock explícito.
+ *
+ * `fn` debe ser corto (leer/escribir el consecutivo). No hacer HTTP ni
+ * esperar a NextPyme/DIAN dentro: esa transacción ocupa un slot del pool
+ * de Neon. Si el front reintenta, cada espera al lock se come otra
+ * conexión y el login (que también pega a Postgres) se queda sin pool.
  */
 export async function withPostgresAdvisoryLock<T>(
   dataSource: DataSource,
@@ -33,6 +42,10 @@ export async function withPostgresAdvisoryLock<T>(
   await queryRunner.startTransaction();
 
   try {
+    await queryRunner.query(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`);
+    await queryRunner.query(
+      `SET LOCAL idle_in_transaction_session_timeout = '${IDLE_IN_TRANSACTION_TIMEOUT}'`,
+    );
     await queryRunner.query(
       'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
       [lockKey],
@@ -44,8 +57,18 @@ export async function withPostgresAdvisoryLock<T>(
     return result;
   } catch (error) {
     await queryRunner.rollbackTransaction();
+    if (isPostgresLockTimeout(error)) {
+      throw new ServiceUnavailableException(
+        'Hay otro envío de este documento en curso. Espera unos segundos e intenta de nuevo.',
+      );
+    }
     throw error;
   } finally {
     await queryRunner.release();
   }
+}
+
+function isPostgresLockTimeout(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /lock timeout/i.test(message);
 }

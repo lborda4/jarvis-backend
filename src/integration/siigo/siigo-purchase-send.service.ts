@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
@@ -65,7 +66,15 @@ export class SiigoPurchaseSendService {
   ) {}
 
   async sendPurchase(request: CreateSiigoPurchaseSendRequestDto, companyId: string): Promise<CreateSiigoPurchaseSendResponseDto> {
-    return this.planSubscriptionService.withSiigoQuotaLock(companyId, () => this.sendPurchaseWithQuota(request, companyId));
+    await this.planSubscriptionService.withSiigoQuotaLock(companyId, () =>
+      this.planSubscriptionService.assertCanCreateDocuments({
+        companyId,
+        provider: IntegrationProvider.SIIGO,
+        documentType: ElectronicDocumentType.PURCHASE_INVOICE,
+        quantity: 1,
+      }),
+    );
+    return this.sendPurchaseWithQuota(request, companyId);
   }
 
   private async sendPurchaseWithQuota(
@@ -237,11 +246,13 @@ export class SiigoPurchaseSendService {
         },
       );
     } catch (error) {
-      await this.electronicDocumentService.updateStatus(
-        documentId,
-        ElectronicDocumentStatus.PURCHASE_FAILED,
-        companyId,
-      );
+      if (!(error instanceof ServiceUnavailableException)) {
+        await this.electronicDocumentService.updateStatus(
+          documentId,
+          ElectronicDocumentStatus.PURCHASE_FAILED,
+          companyId,
+        );
+      }
 
       this.logger.error(
         `[documentId=${documentId}] Error al enviar factura de compra a SIIGO`,
@@ -253,6 +264,10 @@ export class SiigoPurchaseSendService {
       }
 
       if (error instanceof BadGatewayException) {
+        throw error;
+      }
+
+      if (error instanceof ServiceUnavailableException) {
         throw error;
       }
 

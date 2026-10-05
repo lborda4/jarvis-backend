@@ -16,6 +16,7 @@ import { SiigoPurchaseSyncJobsRepository } from './repositories/siigo-purchase-s
 import { SupplierConfigurationsRepository } from './repositories/supplier-configurations.repository';
 import { SupplierItemAccountMappingsRepository } from './repositories/supplier-item-account-mappings.repository';
 import { IntegrationSetupService } from './integration-setup.service';
+import { SiigoCreditNoteNumberingService } from './siigo/siigo-credit-note-numbering.service';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { IntegrationSetupService } from './integration-setup.service';
     SiigoPurchaseSyncJobsRepository,
     IntegrationSetupService,
     IntegrationsService,
+    SiigoCreditNoteNumberingService,
   ],
   exports: [
     IntegrationLogoService,
@@ -50,6 +52,7 @@ import { IntegrationSetupService } from './integration-setup.service';
     SiigoPurchaseSyncJobsRepository,
     IntegrationSetupService,
     IntegrationsService,
+    SiigoCreditNoteNumberingService,
     TypeOrmModule,
   ],
 })
