@@ -77,7 +77,6 @@ export class SiigoPurchaseAiClassificationService {
       console.log(
         `[AI-CLASSIFY] [companyId=${companyId}] Omitido para ${documentIds.join(', ')}: OpenRouter no está configurado (falta OPENROUTER_API_KEY).`,
       );
-
       return;
     }
 
@@ -94,8 +93,6 @@ export class SiigoPurchaseAiClassificationService {
       console.log(
         `[AI-CLASSIFY] [companyId=${companyId}] Omitido para ${documentIds.join(', ')}: la empresa no tiene integración SIIGO.`,
       );
-
-      // Empresas sin integración SIIGO (p.ej. Jarvis) no usan esta clasificación.
       return;
     }
 
@@ -173,10 +170,6 @@ export class SiigoPurchaseAiClassificationService {
       supplierNit,
     );
 
-    // Cuenta o producto ya resueltos, y medio de pago fijo por el sync: la
-    // preferencia ya sincronizada alcanza, no hace falta gastar una llamada
-    // a la IA. Si el tipo dominante es Producto pero no hay código de
-    // producto, igual se llama (ver needsAiClassification).
     console.log(`[AI-CLASSIFY] [documentId=${documentId}] needsAi=${needsAi}`);
 
     if (!needsAi) {
@@ -253,7 +246,6 @@ export class SiigoPurchaseAiClassificationService {
       !(classification.items ?? []).some(
         (item) => item.accountCode || item.productCode,
       );
-
     if (foundNothing) {
       console.log(
         `[AI-CLASSIFY] [documentId=${documentId}] IA no encontró una cuenta contable ni un producto seguros (tipo=${classification.itemType ?? 'desconocido'}); se guarda igual como sugerencia vacía con confidence=0 para que el documento quede en "Requiere revisión" en vez de "Pendiente".`,
@@ -375,8 +367,8 @@ export class SiigoPurchaseAiClassificationService {
     return false;
   }
 
-  /** Pasa al payload la cuenta/producto que ya dio el historial, para que el
-   * recuperador deje de reevaluar el mismo documento cada 30s. */
+  /** Pasa al payload la cuenta/producto que ya dio el historial, para que
+   * no se reevalúe el mismo documento al volver a abrir el historial. */
   private async classificationFromHistory(
     payload: {
       items: Array<{ descripcion: string }>;

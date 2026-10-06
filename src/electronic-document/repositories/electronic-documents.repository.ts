@@ -122,6 +122,7 @@ export class ElectronicDocumentsRepository {
           SELECT 1 FROM jsonb_array_elements(d.payload->'items') WITH ORDINALITY AS entry(item, position)
           WHERE coalesce(item->'accountMapping'->>'code', '') = ''
             AND coalesce(d.draft->'items'->((position - 1)::int)->>'producto', '') = ''
+            AND NOT (item ? 'aiSuggestion')
             AND coalesce((CASE
               WHEN item ? 'aiSuggestion' THEN item->'aiSuggestion'
               WHEN d.payload->'aiSuggestion' ? 'items' THEN d.payload->'aiSuggestion'->'items'->((position - 1)::int)

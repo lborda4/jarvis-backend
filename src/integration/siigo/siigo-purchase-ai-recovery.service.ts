@@ -8,6 +8,7 @@ import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classi
 export class SiigoPurchaseAiRecoveryService {
   private readonly logger = new Logger(SiigoPurchaseAiRecoveryService.name);
   private readonly runningCompanies = new Set<string>();
+  private readonly recoveredCompanies = new Set<string>();
 
   constructor(
     private readonly documents: ElectronicDocumentsRepository,
@@ -29,6 +30,7 @@ export class SiigoPurchaseAiRecoveryService {
     if (
       !id ||
       this.runningCompanies.has(id) ||
+      this.recoveredCompanies.has(id) ||
       !this.openRouter.isConfigured()
     ) {
       return;
@@ -38,12 +40,16 @@ export class SiigoPurchaseAiRecoveryService {
     try {
       const missing = await this.documents.findMissingPurchaseAiSuggestions(id);
       if (missing.length === 0) {
+        this.recoveredCompanies.add(id);
         return;
       }
       await this.classifier.classifyDocuments(
         missing.map((document) => document.id),
         id,
       );
+      if (missing.length < 100) {
+        this.recoveredCompanies.add(id);
+      }
     } finally {
       this.runningCompanies.delete(id);
     }

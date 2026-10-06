@@ -53,6 +53,13 @@ describe('recovery al entrar a una empresa', () => {
     await first;
   });
 
+  it('no vuelve a revisar la misma empresa tras una pasada', async () => {
+    const { service, documents } = setup();
+    await service.recoverForCompany('company');
+    await service.recoverForCompany('company');
+    expect(documents.findMissingPurchaseAiSuggestions).toHaveBeenCalledTimes(1);
+  });
+
   it('no llama IA si OpenRouter no está configurado o no hay empresa', async () => {
     const { service, router, documents } = setup();
     router.isConfigured.mockReturnValue(false);
