@@ -51,4 +51,25 @@ describe('Dirección del tercero SIIGO', () => {
       '0000',
     );
   });
+
+  it('envía un solo correo a SIIGO cuando NextPyme trae varios', () => {
+    const source = payload('11001', '11');
+    source.supplier.email =
+      'ferreteriaelconstructorcml@hotmail.com,cmlferreteriaelconstructor@hotmail.com';
+
+    expect(mapElectronicDocumentPayloadToSiigoSupplier(source).contacts).toEqual([
+      expect.objectContaining({
+        email: 'ferreteriaelconstructorcml@hotmail.com',
+      }),
+    ]);
+  });
+
+  it('limpia el teléfono para SIIGO cuando NextPyme trae | u otros números', () => {
+    const source = payload('11001', '11');
+    source.supplier.phone = '|3138278643';
+
+    expect(mapElectronicDocumentPayloadToSiigoSupplier(source).phones).toEqual([
+      { number: '3138278643' },
+    ]);
+  });
 });

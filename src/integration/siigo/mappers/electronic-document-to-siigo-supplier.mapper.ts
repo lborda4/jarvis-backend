@@ -46,6 +46,42 @@ export function sanitizeSiigoAddress(value: string | null | undefined): string {
   return sanitized || '0000';
 }
 
+/** SIIGO solo acepta un correo en contacts[0].email. NextPyme/RUES a
+ * veces trae varios separados por coma. */
+export function pickFirstSiigoEmail(
+  value: string | null | undefined,
+): string | undefined {
+  const candidates = value
+    ?.split(/[;,\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return candidates?.find((candidate) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate),
+  );
+}
+
+/** SIIGO exige phones[0].number numérico. NextPyme/RUES mezcla `|`, comas
+ * y varios números en el mismo campo. */
+export function pickFirstSiigoPhone(
+  value: string | null | undefined,
+): string | undefined {
+  const candidates = value
+    ?.split(/[|;,/]+/)
+    .map((part) => part.replace(/\D/g, ''))
+    .filter(Boolean);
+  const digits = candidates?.[0];
+  if (!digits) {
+    return undefined;
+  }
+  if (digits.startsWith('57') && digits.length === 12) {
+    return digits.slice(2);
+  }
+  if (digits.length >= 7 && digits.length <= 15) {
+    return digits;
+  }
+  return undefined;
+}
+
 /** Ciudad propia de la empresa (companies.city_code), usada como default
  * cuando el proveedor no trae ciudad — en vez de un Bogotá fijo sin
  * relación con la empresa que está creando el tercero. */
@@ -171,11 +207,12 @@ export function mapElectronicDocumentPayloadToSiigoSupplier(
 
   siigoPayload.address = buildAddress(supplier, companyAddressFallback);
 
-  if (supplier.phone?.trim()) {
-    siigoPayload.phones = [{ number: supplier.phone.trim() }];
+  const phone = pickFirstSiigoPhone(supplier.phone);
+  if (phone) {
+    siigoPayload.phones = [{ number: phone }];
   }
 
-  const email = supplier.email?.trim();
+  const email = pickFirstSiigoEmail(supplier.email);
   if (email) {
     const nameParts = name.split(/\s+/).filter(Boolean);
     siigoPayload.contacts = [
