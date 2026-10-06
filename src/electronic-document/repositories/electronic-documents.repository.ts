@@ -103,20 +103,20 @@ export class ElectronicDocumentsRepository {
     });
   }
 
-  /** The document itself is durable pending work, including after a process restart. */
+  /** Facturas de compra de esta empresa sin cuenta/producto, para completar
+   * al entrar al historial — no hay barrido global. */
   findMissingPurchaseAiSuggestions(
-    excludedIds: string[],
+    companyId: string,
     limit = 100,
   ): Promise<Array<{ id: string; companyId: string }>> {
     return this.repository.query(
       `
       SELECT d.id, d.company_id AS "companyId"
       FROM electronic_documents d
-      WHERE d.electronic_document_type = 'PURCHASE_INVOICE'
+      WHERE d.company_id = $1
+        AND d.electronic_document_type = 'PURCHASE_INVOICE'
         AND d.status NOT IN ('PURCHASE_CREATED', 'COMPLETED')
         AND d.already_in_siigo = false
-        AND d.created_at < now() - interval '10 seconds'
-        AND NOT (d.id = ANY($1::uuid[]))
         AND EXISTS (SELECT 1 FROM integrations g WHERE g.company_id = d.company_id AND g.provider = 'SIIGO' AND g.active = true)
         AND EXISTS (
           SELECT 1 FROM jsonb_array_elements(d.payload->'items') WITH ORDINALITY AS entry(item, position)
@@ -135,7 +135,7 @@ export class ElectronicDocumentsRepository {
         )
       ORDER BY d.created_at, d.id LIMIT $2
     `,
-      [excludedIds, limit],
+      [companyId, limit],
     );
   }
 

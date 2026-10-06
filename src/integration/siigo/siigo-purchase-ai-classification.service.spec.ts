@@ -288,6 +288,51 @@ describe('SiigoPurchaseAiClassificationService — la sugerencia vacía debe for
       siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
     ).toHaveBeenCalled();
   });
+
+  it('cuando el historial ya resolvió cuenta y medio de pago, persiste esa cuenta y no llama a la IA', async () => {
+    const {
+      service,
+      electronicDocumentService,
+      siigoAiAccountSuggestionService,
+    } = buildService({
+      classification: {
+        itemType: 'Account',
+        accountCode: null,
+        accountName: null,
+        productCode: null,
+        productName: null,
+        confidence: null,
+      },
+      configuration: {
+        campoVariabilidad: {
+          tipoItem: { valor: 'Account', variable: false },
+          cuentaPuc: { valor: '513595', variable: false },
+          medioPago: {
+            valor: {
+              id: 5056,
+              name: 'Crédito proveedores',
+              type: 'Proveedor',
+              dueDate: true,
+            },
+            variable: false,
+          },
+        },
+      },
+    });
+
+    await service.classifyDocuments(['doc-1'], 'company-1');
+
+    expect(
+      siigoAiAccountSuggestionService.classifyItemTypeAndAccount,
+    ).not.toHaveBeenCalled();
+    const [, payload] = electronicDocumentService.updatePayload.mock
+      .calls[0] as [string, ElectronicDocumentPayload, string];
+    expect(payload.items[0].aiSuggestion).toEqual({
+      account: { code: '513595', name: '513595' },
+      product: null,
+      confidence: 100,
+    });
+  });
 });
 
 it('persists review status when the AI provider fails before resolving the type', async () => {

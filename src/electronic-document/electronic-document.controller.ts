@@ -30,12 +30,14 @@ import {
   SaveElectronicDocumentDraftResponseDto,
 } from './dto/save-electronic-document-draft.dto';
 import { PurchaseInvoiceDownloadDto } from './dto/purchase-invoice-download.dto';
+import { SiigoPurchaseAiRecoveryService } from '../integration/siigo/siigo-purchase-ai-recovery.service';
 
 @ApiTags('electronic-documents')
 @Controller('electronic-documents')
 export class ElectronicDocumentController {
   constructor(
     private readonly electronicDocumentService: ElectronicDocumentService,
+    private readonly siigoPurchaseAiRecoveryService: SiigoPurchaseAiRecoveryService,
   ) {}
 
   @Get()
@@ -48,10 +50,14 @@ export class ElectronicDocumentController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ElectronicDocumentListQueryDto,
   ): Promise<ElectronicDocumentListResponseDto> {
-    return this.electronicDocumentService.listDocuments(
-      query,
-      getAuthenticatedCompanyId(user),
-    );
+    const companyId = getAuthenticatedCompanyId(user);
+    const page = Number.parseInt(query.page ?? '1', 10) || 1;
+    if (page === 1) {
+      this.siigoPurchaseAiRecoveryService.recoverForCompanyInBackground(
+        companyId,
+      );
+    }
+    return this.electronicDocumentService.listDocuments(query, companyId);
   }
 
   @Get('filter-options')

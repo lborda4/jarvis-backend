@@ -180,10 +180,23 @@ export class SiigoPurchaseAiClassificationService {
     console.log(`[AI-CLASSIFY] [documentId=${documentId}] needsAi=${needsAi}`);
 
     if (!needsAi) {
+      const fromHistory = await this.classificationFromHistory(
+        document.payload,
+        configuration,
+        companyId,
+        integrationId,
+        supplierNit,
+      );
       console.log(
         `[AI-CLASSIFY] [documentId=${documentId}] Omitido, NO se llamó a la IA: cuenta y medio de pago ya resueltos con confianza por el historial.`,
       );
-
+      if (fromHistory) {
+        await this.electronicDocumentService.updatePayload(
+          documentId,
+          applyItemClassificationToPayload(document.payload, fromHistory),
+          companyId,
+        );
+      }
       return;
     }
 
@@ -360,5 +373,109 @@ export class SiigoPurchaseAiClassificationService {
       `[AI-CLASSIFY] [companyId=${companyId}] needsAiClassification=false: proveedor ${supplierNit} — medio de pago y TODOS los ítems ya resueltos con regla exacta.`,
     );
     return false;
+  }
+
+  /** Pasa al payload la cuenta/producto que ya dio el historial, para que el
+   * recuperador deje de reevaluar el mismo documento cada 30s. */
+  private async classificationFromHistory(
+    payload: {
+      items: Array<{ descripcion: string }>;
+      supplier: { documentType?: string };
+    },
+    configuration: Awaited<
+      ReturnType<
+        SupplierConfigurationsRepository['findByCompanyIntegrationAndNormalizedSupplierDocument']
+      >
+    >,
+    companyId: string,
+    integrationId: string,
+    supplierNit: string,
+  ): Promise<ItemTypeAndAccountClassification | null> {
+    const itemConfig =
+      resolveSuggestedItemConfigFromConfiguration(configuration);
+    const historyLine = (
+      item: Partial<ItemTypeAndAccountClassification>,
+    ): ItemTypeAndAccountClassification['items'][number] => ({
+      accountCode: item.accountCode ?? null,
+      accountName: item.accountName ?? null,
+      productCode: item.productCode ?? null,
+      productName: item.productName ?? null,
+      confidence: 100,
+    });
+
+    if (itemConfig?.itemType === 'Product' && itemConfig.productCode) {
+      return {
+        itemType: 'Product',
+        accountCode: null,
+        accountName: null,
+        productCode: itemConfig.productCode,
+        productName: itemConfig.productName,
+        confidence: 100,
+        items: payload.items.map(() =>
+          historyLine({
+            productCode: itemConfig.productCode,
+            productName: itemConfig.productName,
+          }),
+        ),
+      };
+    }
+
+    if (itemConfig?.itemType === 'Account' && itemConfig.accountCode) {
+      return {
+        itemType: 'Account',
+        accountCode: itemConfig.accountCode,
+        accountName: itemConfig.accountName,
+        productCode: null,
+        productName: null,
+        confidence: 100,
+        items: payload.items.map(() =>
+          historyLine({
+            accountCode: itemConfig.accountCode,
+            accountName: itemConfig.accountName,
+          }),
+        ),
+      };
+    }
+
+    const supplierDocumentType = payload.supplier.documentType?.trim() || 'NIT';
+    const items: ItemTypeAndAccountClassification['items'] = [];
+
+    for (const item of payload.items) {
+      const itemMapping =
+        await this.supplierItemAccountMappingsRepository.findOneByKey(
+          companyId,
+          integrationId,
+          supplierDocumentType,
+          supplierNit,
+          item.descripcion,
+        );
+      const resolved = resolveSuggestedAccountForItem(
+        itemMapping,
+        configuration,
+      );
+      if (!resolved || resolved.source !== 'exact') {
+        return null;
+      }
+      items.push(
+        historyLine({
+          accountCode: resolved.code,
+          accountName: resolved.name,
+        }),
+      );
+    }
+
+    if (items.length === 0) {
+      return null;
+    }
+
+    return {
+      itemType: 'Account',
+      accountCode: items[0].accountCode,
+      accountName: items[0].accountName,
+      productCode: null,
+      productName: null,
+      confidence: 100,
+      items,
+    };
   }
 }

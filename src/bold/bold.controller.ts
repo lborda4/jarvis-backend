@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpException,
+  Logger,
   Query,
   Param,
   Post,
@@ -20,18 +22,17 @@ import {
 } from './dto/bold-cash-register.dto';
 import { BoldPaymentMethodsResponseDto } from './dto/bold-payment-methods.dto';
 import { BoldBindedTerminalsResponseDto } from './dto/bold-terminals.dto';
-import { ConfigService } from '@nestjs/config';
-import { AppConfiguration } from '../config/configuration';
 import { BoldCheckoutService } from './bold-checkout.service';
 
 @Controller('bold')
 export class BoldController {
+  private readonly logger = new Logger(BoldController.name);
+
   constructor(
     private readonly boldPaymentsService: BoldPaymentsService,
     private readonly boldTerminalsService: BoldTerminalsService,
     private readonly boldCashRegistersService: BoldCashRegistersService,
     private readonly boldCheckoutService: BoldCheckoutService,
-    private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
   @Get('payments/payment-methods')
@@ -80,9 +81,23 @@ export class BoldController {
   @Public()
   @Post('jarvis/test')
   async testJarvis(@Body() body: unknown) {
-    console.log('[Bold] JSON recibido de la extensión:', JSON.stringify(body, null, 2));
-    const { userEmail } = this.configService.get('bold', { infer: true });
-    const result = await this.boldCheckoutService.createFromExtension(body, userEmail ?? '');
-    return { success: true, message: 'Solicitud de cobro enviada a Bold.', ...result };
+    this.logger.log(`JSON recibido de la extensión: ${JSON.stringify(body)}`);
+    try {
+      const result = await this.boldCheckoutService.createFromExtension(body);
+      return {
+        success: true,
+        message: 'Solicitud de cobro enviada a Bold.',
+        ...result,
+      };
+    } catch (error) {
+      const message =
+        error instanceof HttpException
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      this.logger.warn(`POST /bold/jarvis/test falló: ${message}`);
+      throw error;
+    }
   }
 }

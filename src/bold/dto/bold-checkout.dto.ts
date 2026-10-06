@@ -1,15 +1,21 @@
+export interface BoldCheckoutTax {
+  type: string;
+  base: number;
+  value: number;
+}
+
 export interface BoldCheckoutPayload {
   amount: {
     currency: string;
-    total: number;
-    taxes: Record<string, unknown>[];
-    tip: number;
+    taxes: BoldCheckoutTax[];
+    tip_amount: number;
+    total_amount: number;
   };
-  user_email: string;
   payment_method: 'POS';
   terminal_model: string;
   terminal_serial: string;
   reference: string;
+  user_email: string;
 }
 
 export interface BoldCheckoutResponse {

@@ -111,6 +111,7 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     SiigoProductsCatalogService,
     SiigoCostCentersCatalogService,
     SiigoPurchaseAiClassificationService,
+    SiigoPurchaseAiRecoveryService,
   ],
 })
 export class SiigoModule {}

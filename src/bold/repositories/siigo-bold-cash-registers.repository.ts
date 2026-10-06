@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { matchesExtensionCaja } from '../helpers/bold-extension-caja.helper';
 import { SiigoBoldCashRegister } from '../entities/siigo-bold-cash-register.entity';
 
 @Injectable()
@@ -20,6 +21,13 @@ export class SiigoBoldCashRegistersRepository {
 
   findByName(cashRegisterName: string): Promise<SiigoBoldCashRegister[]> {
     return this.repository.find({ where: { cashRegisterName } });
+  }
+
+  /** La extensión manda el número de caja de SIIGO POS (`1`); el panel guarda
+   * el nombre (`CAJA 1`) o, si ya está, el cash_register_id. */
+  async findByExtensionCaja(caja: string): Promise<SiigoBoldCashRegister[]> {
+    const registers = await this.repository.find();
+    return registers.filter((register) => matchesExtensionCaja(register, caja));
   }
 
   findOneByKey(
