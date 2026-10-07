@@ -184,7 +184,7 @@ describe('Documento soporte con el mismo flujo de ventas', () => {
     expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ documentKind: JarvisResolutionKind.SUPPORT_DOCUMENT, cufe: 'support-code' }));
   });
 
-  it('parte el nombre de persona natural para el seller (DSAJ10a)', async () => {
+  it('envía seller.name como cadena en documento soporte, aunque el tercero sea persona natural', async () => {
     const { service, request, client, numbering } = setup(' company-token ', {
       name: 'BORDA BELTRAN LAURA SOFIA',
       documentNumber: '1032504904',
@@ -200,11 +200,9 @@ describe('Documento soporte con el mismo flujo de ventas', () => {
       customerIdentification: '1032504904',
       customerName: 'BORDA BELTRAN LAURA SOFIA',
     }, 'company-1', JarvisResolutionKind.SUPPORT_DOCUMENT);
-    expect(client.createSupportDocument.mock.calls[0][0].seller.name).toEqual([
-      'LAURA SOFIA',
-      'BORDA',
-      'BELTRAN',
-    ]);
+    expect(client.createSupportDocument.mock.calls[0][0].seller.name).toBe(
+      'BORDA BELTRAN LAURA SOFIA',
+    );
   });
   it('un rechazo no guarda historial; el consecutivo ya se reservó antes del POST', async () => {
     const { service, request, client, numbering, history } = setup();

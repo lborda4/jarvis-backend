@@ -15,6 +15,7 @@ import {
   SIIGO_TEST_BALANCE_PATH,
   SIIGO_TEST_BALANCE_BY_THIRD_PARTY_PATH,
   SIIGO_PRODUCTS_PATH,
+  SIIGO_FIXED_ASSETS_PATH,
 } from '../constants/siigo.constants';
 import { SiigoAuthRequestDto } from '../dto/siigo-auth-request.dto';
 import { SiigoPurchaseRequestDto } from '../dto/siigo-purchase-request.dto';
@@ -29,6 +30,8 @@ import {
   SiigoDocumentType,
   SiigoPaymentType,
   SiigoProductsListResponse,
+  SiigoFixedAsset,
+  SiigoFixedAssetsListResponse,
   SiigoPurchaseResponse,
   SiigoPurchasesListResponse,
   SiigoSupportDocumentDeleteResponse,
@@ -254,6 +257,38 @@ export class SiigoHttpClient {
         page_size: pageSize,
       },
     });
+  }
+
+  async listFixedAssets(
+    accessToken: string,
+    page: number,
+    pageSize: number,
+    partnerId?: string,
+  ): Promise<SiigoFixedAssetsListResponse> {
+    const response = await this.request<
+      SiigoFixedAssetsListResponse | SiigoFixedAsset[]
+    >({
+      method: 'GET',
+      url: `${SIIGO_API_BASE_URL}${SIIGO_FIXED_ASSETS_PATH}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+      params: {
+        page,
+        page_size: pageSize,
+      },
+    });
+
+    if (Array.isArray(response)) {
+      return {
+        pagination: {
+          page,
+          page_size: pageSize,
+          total_results: response.length,
+        },
+        results: response,
+      };
+    }
+
+    return response;
   }
 
   async createTestBalanceReport(

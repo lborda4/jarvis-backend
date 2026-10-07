@@ -86,7 +86,8 @@ const ACCOUNT_ITEM_TYPE = 'Account';
 
 /**
  * Valida que los ítems tipo Account del envío apunten a códigos que
- * existen en el catálogo usable de la empresa (mismo filtro del picker).
+ * existen en el catálogo usable de la empresa (mismo filtro del picker:
+ * cuentas transaccionales/hoja de cualquier clase PUC).
  * Sin esto, un draft/sugerencia stale llega a SIIGO y falla con 400.
  */
 export function assertSendAccountCodesExistInCatalog(
@@ -208,13 +209,13 @@ export function isLeafAccountCode(
   );
 }
 
-export function shouldIncludeAccountInCatalog(
+function isUsableAccountCode(
   account: Pick<SiigoAccount, 'code' | 'isTransactional'>,
   allCodes: readonly string[],
 ): boolean {
   const code = account.code.trim();
 
-  if (!code || !isAllowedAccountCode(code)) {
+  if (!code) {
     return false;
   }
 
@@ -225,8 +226,32 @@ export function shouldIncludeAccountInCatalog(
   return isLeafAccountCode(code, allCodes);
 }
 
-export function collectUniqueAccountsCatalog(
+/** Catálogo de sugerencias (IA / historial): solo gastos, costos de venta y
+ * costos de producción (PUC 5/6/7) que SIIGO acepta como destino. */
+export function shouldIncludeAccountInCatalog(
+  account: Pick<SiigoAccount, 'code' | 'isTransactional'>,
+  allCodes: readonly string[],
+): boolean {
+  return (
+    isAllowedAccountCode(account.code) && isUsableAccountCode(account, allCodes)
+  );
+}
+
+/** Catálogo del picker: cualquier clase PUC usable (hoja o transaccional).
+ * La IA sigue limitada a 5/6/7 vía shouldIncludeAccountInCatalog. */
+export function shouldIncludeAccountInPickerCatalog(
+  account: Pick<SiigoAccount, 'code' | 'isTransactional'>,
+  allCodes: readonly string[],
+): boolean {
+  return isUsableAccountCode(account, allCodes);
+}
+
+function collectAccountsCatalog(
   accounts: Array<Pick<SiigoAccount, 'code' | 'name' | 'isTransactional'>>,
+  includeAccount: (
+    account: Pick<SiigoAccount, 'code' | 'isTransactional'>,
+    allCodes: readonly string[],
+  ) => boolean,
 ): AccountCatalogItem[] {
   const accountsByCode = new Map<string, AccountCatalogItem>();
   const allCodes = accounts
@@ -240,7 +265,7 @@ export function collectUniqueAccountsCatalog(
     if (
       !code ||
       accountsByCode.has(code) ||
-      !shouldIncludeAccountInCatalog(account, allCodes)
+      !includeAccount(account, allCodes)
     ) {
       continue;
     }
@@ -251,6 +276,18 @@ export function collectUniqueAccountsCatalog(
   return [...accountsByCode.values()].sort((left, right) =>
     left.code.localeCompare(right.code),
   );
+}
+
+export function collectUniqueAccountsCatalog(
+  accounts: Array<Pick<SiigoAccount, 'code' | 'name' | 'isTransactional'>>,
+): AccountCatalogItem[] {
+  return collectAccountsCatalog(accounts, shouldIncludeAccountInCatalog);
+}
+
+export function collectPickerAccountsCatalog(
+  accounts: Array<Pick<SiigoAccount, 'code' | 'name' | 'isTransactional'>>,
+): AccountCatalogItem[] {
+  return collectAccountsCatalog(accounts, shouldIncludeAccountInPickerCatalog);
 }
 
 export function buildSupplierConfigurationKey(

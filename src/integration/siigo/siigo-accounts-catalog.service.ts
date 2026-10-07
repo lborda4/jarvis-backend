@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { collectUniqueAccountsCatalog } from '../helpers/supplier-accounts-catalog.helper';
+import { collectPickerAccountsCatalog } from '../helpers/supplier-accounts-catalog.helper';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SiigoAccountsRepository } from '../repositories/siigo-accounts.repository';
 import { SiigoAccountCatalogItemDto } from './dto/list-siigo-accounts.dto';
@@ -24,6 +24,6 @@ export class SiigoAccountsCatalogService {
         integration.id,
       );
 
-    return collectUniqueAccountsCatalog(accounts);
+    return collectPickerAccountsCatalog(accounts);
   }
 }

@@ -194,7 +194,10 @@ function applyDraftCodesToPayloadItems(
         saved.tipo === 'Account' && code
           ? { code, description: existing?.accountMapping?.description }
           : undefined,
-      productMapping: saved.tipo === 'Product' && code ? { code } : undefined,
+      productMapping:
+        (saved.tipo === 'Product' || saved.tipo === 'FixedAsset') && code
+          ? { code }
+          : undefined,
     };
   });
 }
@@ -1696,10 +1699,10 @@ export class ElectronicDocumentService {
         }
 
         // Fuente de verdad del NOMBRE (y de existencia usable) de una
-        // cuenta — mismo filtro del picker (clases 5/6/7 + hoja/transaccional).
-        // Si una sugerencia aprendida apunta a un código fuera de este set
-        // (borrada, padre, etc.), se descarta más abajo en vez de enviarla
-        // a SIIGO y fallar con 400.
+        // cuenta para sugerencias de IA/historial: clases 5/6/7 +
+        // hoja/transaccional. El picker de cuenta usa otro catálogo (todas
+        // las clases). Si una sugerencia apunta a un código fuera de este
+        // set (borrada, padre, etc.), se descarta más abajo.
         const siigoAccounts =
           await this.siigoAccountsRepository.findByCompanyAndIntegration(
             companyId,

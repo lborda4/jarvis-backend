@@ -37,7 +37,6 @@ import {
 import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
-import { toNextPymePartyName } from './helpers/nextpyme-party-name.helper';
 import { JarvisSetupService } from './jarvis-setup.service';
 import {
   daysBetweenLocalDates,
@@ -497,7 +496,7 @@ export class JarvisSupportDocumentSendService {
               ...(tercero.checkDigit
                 ? { dv: Number(tercero.checkDigit) || tercero.checkDigit }
                 : {}),
-              name: toNextPymePartyName(tercero.name, organizationTypeId),
+              name: tercero.name.trim(),
               phone: tercero.phone || credentials.phone || '0000000000',
               address:
                 tercero.address || credentials.address || 'SIN DIRECCION',

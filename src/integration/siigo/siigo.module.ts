@@ -32,6 +32,7 @@ import { SiigoSupportDocumentCreationHandler } from './handlers/siigo-support-do
 import { SiigoPaymentTypesCatalogService } from './siigo-payment-types-catalog.service';
 import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
 import { SiigoProductsCatalogService } from './siigo-products-catalog.service';
+import { SiigoFixedAssetsCatalogService } from './siigo-fixed-assets-catalog.service';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoConfigurationCacheService } from './siigo-configuration-cache.service';
 import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle.service';
@@ -89,6 +90,7 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     SiigoPaymentTypesCatalogService,
     SiigoCostCentersCatalogService,
     SiigoProductsCatalogService,
+    SiigoFixedAssetsCatalogService,
     SiigoTaxesCatalogService,
     SiigoAccountsImportService,
     SiigoAccountsBalanceSyncService,
@@ -109,6 +111,7 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     SiigoTaxesCatalogService,
     SiigoPaymentTypesCatalogService,
     SiigoProductsCatalogService,
+    SiigoFixedAssetsCatalogService,
     SiigoCostCentersCatalogService,
     SiigoPurchaseAiClassificationService,
     SiigoPurchaseAiRecoveryService,

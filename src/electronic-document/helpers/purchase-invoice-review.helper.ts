@@ -75,10 +75,10 @@ function resolveEffectiveItems(input: PurchaseInvoiceReviewInput): EffectiveItem
       ? 'Account'
       : effectiveItemType;
 
-    if (tipo === 'Product') {
+    if (tipo === 'Product' || tipo === 'FixedAsset') {
       // item.codigo (el código que trae la factura DIAN) NO cuenta acá: es
       // SIEMPRE un identificador del VENDEDOR (su SKU o código de barras),
-      // nunca un código de producto real de SIIGO — el frontend solo lo usa
+      // nunca un código de producto/activo real de SIIGO — el frontend solo lo usa
       // como candidato cuando coincide LITERALMENTE con el catálogo
       // (resolveValidatedProductCode); acá, sin catálogo cargado, no hay
       // forma de validarlo, así que confiar en él a ciegas marcaba "Pendiente"
@@ -149,9 +149,14 @@ export function resolvePurchaseInvoiceRequiresReview(
 ): boolean {
   const items = resolveEffectiveItems(input);
 
-  // Un ítem Producto sin código bloquea SIEMPRE, sin fallback a nivel de
-  // documento — SIIGO no tiene un "producto por defecto".
-  if (items.some((item) => item.tipo === 'Product' && !item.hasCode)) {
+  // Un ítem Producto o Activo fijo sin código bloquea SIEMPRE, sin fallback a nivel de
+  // documento — SIIGO no tiene un "producto/activo por defecto".
+  if (
+    items.some(
+      (item) =>
+        (item.tipo === 'Product' || item.tipo === 'FixedAsset') && !item.hasCode,
+    )
+  ) {
     return true;
   }
 

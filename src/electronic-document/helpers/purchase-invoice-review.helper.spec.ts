@@ -88,6 +88,23 @@ describe('resolvePurchaseInvoiceRequiresReview — con borrador guardado', () =>
     expect(result).toBe(true);
   });
 
+  it('un ítem Activo fijo sin código SIEMPRE requiere revisión, aunque haya cuenta de respaldo', () => {
+    const result = resolvePurchaseInvoiceRequiresReview(
+      buildInput({
+        draft: {
+          items: [
+            { tipo: 'FixedAsset', producto: '', description: '', quantity: 1, unitValue: 0, discount: 0 },
+          ],
+          accountCode: '5115',
+          paymentMethodId: PAYMENT_METHOD_ID,
+          savedAt: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+    );
+
+    expect(result).toBe(true);
+  });
+
   it('requiere revisión si el borrador no trae medio de pago', () => {
     const result = resolvePurchaseInvoiceRequiresReview(
       buildInput({

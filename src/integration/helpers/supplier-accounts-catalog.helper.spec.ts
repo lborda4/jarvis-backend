@@ -1,6 +1,8 @@
 import {
   assertSendAccountCodesExistInCatalog,
   buildAccountNameByCode,
+  collectPickerAccountsCatalog,
+  collectUniqueAccountsCatalog,
   resolveAccountNameFromCatalog,
   resolveCatalogBoundAccountSuggestion,
   resolveRequiredAccountFromCatalog,
@@ -164,5 +166,51 @@ describe('resolveRequiredAccountFromCatalog', () => {
 
   it('devuelve null solo si el catálogo está vacío', () => {
     expect(resolveRequiredAccountFromCatalog([], ['51959501'])).toBeNull();
+  });
+});
+
+describe('collectPickerAccountsCatalog', () => {
+  it('incluye cuentas transaccionales de cualquier clase PUC, no solo 5/6/7', () => {
+    expect(
+      collectPickerAccountsCatalog([
+        { code: '11050501', name: 'Caja general', isTransactional: true },
+        { code: '22050501', name: 'Proveedores', isTransactional: true },
+        { code: '41350501', name: 'Ingresos', isTransactional: true },
+        { code: '51050601', name: 'Aseo', isTransactional: true },
+        { code: '61350501', name: 'Costo de ventas', isTransactional: true },
+        { code: '71050511', name: 'Empaques', isTransactional: true },
+      ]).map((account) => account.code),
+    ).toEqual([
+      '11050501',
+      '22050501',
+      '41350501',
+      '51050601',
+      '61350501',
+      '71050511',
+    ]);
+  });
+
+  it('sigue excluyendo padres no transaccionales', () => {
+    expect(
+      collectPickerAccountsCatalog([
+        { code: '11', name: 'Caja', isTransactional: false },
+        { code: '11050501', name: 'Caja general', isTransactional: true },
+      ]),
+    ).toEqual([{ code: '11050501', name: 'Caja general' }]);
+  });
+});
+
+describe('collectUniqueAccountsCatalog', () => {
+  it('sigue limitado a clases 5/6/7 para sugerencias de IA', () => {
+    expect(
+      collectUniqueAccountsCatalog([
+        { code: '11050501', name: 'Caja', isTransactional: true },
+        { code: '51050601', name: 'Aseo', isTransactional: true },
+        { code: '71050511', name: 'Empaques', isTransactional: true },
+      ]),
+    ).toEqual([
+      { code: '51050601', name: 'Aseo' },
+      { code: '71050511', name: 'Empaques' },
+    ]);
   });
 });

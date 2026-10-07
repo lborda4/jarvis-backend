@@ -87,7 +87,7 @@ export interface NextPymeSupportDocumentCreatePayload {
     merchant_registration?: string;
     postal_zone_code?: string;
     dv?: number | string;
-    name: string | string[];
+    name: string;
     phone?: string;
     address?: string;
     email?: string;

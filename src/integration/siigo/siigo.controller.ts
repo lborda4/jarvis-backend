@@ -101,6 +101,8 @@ import { SiigoPaymentTypesCatalogService } from './siigo-payment-types-catalog.s
 import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
 import { SiigoProductsCatalogService } from './siigo-products-catalog.service';
 import { SiigoProductCatalogItemDto } from './dto/list-siigo-products.dto';
+import { SiigoFixedAssetsCatalogService } from './siigo-fixed-assets-catalog.service';
+import { SiigoFixedAssetCatalogItemDto } from './dto/list-siigo-fixed-assets.dto';
 import { SiigoTaxesCatalogService } from './siigo-taxes-catalog.service';
 import { SiigoAccountsCatalogService } from './siigo-accounts-catalog.service';
 import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
@@ -143,6 +145,7 @@ export class SiigoController {
     private readonly siigoPaymentTypesCatalogService: SiigoPaymentTypesCatalogService,
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
     private readonly siigoProductsCatalogService: SiigoProductsCatalogService,
+    private readonly siigoFixedAssetsCatalogService: SiigoFixedAssetsCatalogService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoAccountsImportService: SiigoAccountsImportService,
     private readonly siigoDocumentTypesService: SiigoDocumentTypesService,
@@ -250,7 +253,7 @@ export class SiigoController {
   @ApiOperation({
     summary: 'Sincronizar catálogos SIIGO',
     description:
-      'Actualiza cuentas contables en base de datos y refresca medios de pago, impuestos y centros de costo en caché local.',
+      'Actualiza cuentas contables en base de datos y refresca medios de pago, impuestos, centros de costo, productos y activos fijos en caché local.',
   })
   syncCatalogs(
     @CurrentUser() user: AuthenticatedUser,
@@ -317,6 +320,20 @@ export class SiigoController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<SiigoProductCatalogItemDto[]> {
     return this.siigoProductsCatalogService.listProducts(
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Get('fixed-assets')
+  @ApiOperation({
+    summary: 'Catálogo de activos fijos SIIGO',
+    description:
+      'Consulta GET /v1/fixed-assets de SIIGO (paginado) y lo sirve desde caché local.',
+  })
+  listFixedAssets(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<SiigoFixedAssetCatalogItemDto[]> {
+    return this.siigoFixedAssetsCatalogService.listFixedAssets(
       getAuthenticatedCompanyId(user),
     );
   }

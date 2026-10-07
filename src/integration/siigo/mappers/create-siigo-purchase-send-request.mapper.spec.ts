@@ -198,4 +198,28 @@ describe('mapCreatePurchaseSendRequestToSiigo', () => {
 
     expect(siigoPayload.items[0].taxes).toEqual([{ id: 19 }, { id: 40 }]);
   });
+
+  it('envía items[].type FixedAsset cuando la línea es un activo fijo', () => {
+    const request: CreateSiigoPurchaseSendRequestDto = {
+      documentId: 'doc-activo',
+      date: '2026-10-06',
+      supplier: { identification: '900123456' },
+      provider_invoice: { prefix: 'FE', number: '10' },
+      items: [
+        {
+          type: 'FixedAsset',
+          code: 'AF-001',
+          description: 'Computador portátil',
+          quantity: 1,
+          price: 2500000,
+        },
+      ],
+      payments: [{ id: 1, value: 2500000 }],
+    };
+
+    const siigoPayload = mapCreatePurchaseSendRequestToSiigo(request, 1, []);
+
+    expect(siigoPayload.items[0].type).toBe('FixedAsset');
+    expect(siigoPayload.items[0].code).toBe('AF-001');
+  });
 });

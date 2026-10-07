@@ -179,6 +179,23 @@ export interface SiigoProductsListResponse {
   results: SiigoProduct[];
 }
 
+/** Ítem del catálogo de activos fijos SIIGO (GET /v1/fixed-assets). */
+export interface SiigoFixedAsset {
+  id: string;
+  code: string;
+  name: string;
+  active?: boolean;
+}
+
+export interface SiigoFixedAssetsListResponse {
+  pagination: {
+    page: number;
+    page_size: number;
+    total_results: number;
+  };
+  results: SiigoFixedAsset[];
+}
+
 export interface SiigoSupportDocumentResponse {
   id: string;
   document: { id: number };

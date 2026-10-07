@@ -1,4 +1,5 @@
 import { SiigoProductsCatalogService } from './siigo-products-catalog.service';
+import { SiigoFixedAssetsCatalogService } from './siigo-fixed-assets-catalog.service';
 import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
 import { SiigoAuthService } from './siigo-auth.service';
 import { SiigoHttpClient } from './clients/siigo-http.client';
@@ -23,6 +24,24 @@ describe('manual SIIGO catalog refresh', () => {
     fetcher.mockRejectedValueOnce(new Error('SIIGO unavailable'));
     await expect(service.listProducts('company', true)).rejects.toThrow('SIIGO unavailable');
     expect(await service.listProducts('company')).toBe(newItems);
+  });
+
+  it('bypasses fresh fixed-asset cache and retains the new result for subsequent reads', async () => {
+    const service = new SiigoFixedAssetsCatalogService(auth, http);
+    const fetcher = jest.spyOn(service as unknown as {
+      fetchFixedAssetsFromSiigo: (id: string) => Promise<unknown[]>;
+    }, 'fetchFixedAssetsFromSiigo');
+    const oldItems = [{ id: 'old' }];
+    const newItems = [{ id: 'new' }];
+    fetcher.mockResolvedValueOnce(oldItems).mockResolvedValueOnce(newItems);
+    expect(await service.listFixedAssets('company')).toBe(oldItems);
+    expect(await service.listFixedAssets('company')).toBe(oldItems);
+    expect(await service.listFixedAssets('company', true)).toBe(newItems);
+    expect(await service.listFixedAssets('company')).toBe(newItems);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fetcher.mockRejectedValueOnce(new Error('SIIGO unavailable'));
+    await expect(service.listFixedAssets('company', true)).rejects.toThrow('SIIGO unavailable');
+    expect(await service.listFixedAssets('company')).toBe(newItems);
   });
 
   it('bypasses fresh cost center cache and retains the new result for subsequent reads', async () => {

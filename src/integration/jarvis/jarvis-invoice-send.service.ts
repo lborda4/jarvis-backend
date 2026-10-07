@@ -457,10 +457,12 @@ export class JarvisInvoiceSendService {
               ...(tercero.checkDigit
                 ? { dv: Number(tercero.checkDigit) || tercero.checkDigit }
                 : {}),
-              name: toNextPymePartyName(
-                request.customerName?.trim() || tercero.name,
-                organizationTypeId,
-              ),
+              name: isSupport
+                ? (request.customerName?.trim() || tercero.name).trim()
+                : toNextPymePartyName(
+                    request.customerName?.trim() || tercero.name,
+                    organizationTypeId,
+                  ),
               phone: tercero.phone || credentials.phone || '0000000000',
               address:
                 tercero.address || credentials.address || 'SIN DIRECCION',
@@ -571,7 +573,13 @@ export class JarvisInvoiceSendService {
                 };
               })(), companyToken)
             : isSupport
-            ? this.nextPymeApiClient.createSupportDocument({ ...supportPayload, seller: customer }, companyToken)
+            ? this.nextPymeApiClient.createSupportDocument({
+                ...supportPayload,
+                seller: {
+                  ...customer,
+                  name: (request.customerName?.trim() || tercero.name).trim(),
+                },
+              }, companyToken)
             : this.nextPymeApiClient.createInvoice(payload, companyToken));
 
           this.logger.log(
