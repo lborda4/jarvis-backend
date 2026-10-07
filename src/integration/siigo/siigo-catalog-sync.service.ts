@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { SiigoConfigurationCacheService } from './siigo-configuration-cache.service';
 import { SiigoCostCentersCatalogService } from './siigo-cost-centers-catalog.service';
 import { SiigoProductsCatalogService } from './siigo-products-catalog.service';

@@ -75,7 +75,7 @@ function resolveEffectiveItems(input: PurchaseInvoiceReviewInput): EffectiveItem
       ? 'Account'
       : effectiveItemType;
 
-    if (tipo === 'Product' || tipo === 'FixedAsset') {
+    if (tipo !== 'Account') {
       // item.codigo (el código que trae la factura DIAN) NO cuenta acá: es
       // SIEMPRE un identificador del VENDEDOR (su SKU o código de barras),
       // nunca un código de producto/activo real de SIIGO — el frontend solo lo usa
