@@ -4,7 +4,7 @@ import { NextPymeApiClient } from './nextpyme-api.client';
 describe('NextPyme company authentication', () => {
   it.each([undefined, '', '   '])('rejects a missing company token even with a global token (%s)', async token => {
     const { client, httpService } = buildClient({ 'nextPyme.apiToken': 'global-token' });
-    await expect(client.listResolutions(undefined, token)).rejects.toThrow('token de NextPyme');
+    await expect(client.listResolutions('software-id', token)).rejects.toThrow('token de NextPyme');
     await expect(client.putConfigResolution({} as any, token)).rejects.toThrow('token de NextPyme');
     await expect(client.fetchMasterTable('taxes', token)).rejects.toThrow('token de NextPyme');
     await expect(client.getInvoiceByCufe('cufe', token)).rejects.toThrow('token de NextPyme');
@@ -303,7 +303,7 @@ describe('NextPymeApiClient.getInvoiceByCufe', () => {
   });
 });
 
-/** Respuesta real de GET /reports/resolutions: el sobre crudo de la DIAN,
+/** Respuesta real de POST /numbering-range: el sobre crudo de la DIAN,
  * sin id/type_document_id/number. La de documento soporte (DSJ) viene con
  * TechnicalKey en null. */
 const DIAN_NUMBERING_RANGE_RESPONSE = {
@@ -347,17 +347,36 @@ const DIAN_NUMBERING_RANGE_RESPONSE = {
 };
 
 describe('NextPymeApiClient.listResolutions', () => {
-  function buildClientWithGet(data: unknown) {
-    const { client } = buildClient();
-    const httpGet = jest.fn().mockReturnValue(of({ status: 200, data }));
-    (client as any).httpService = { get: httpGet };
-    return { client, httpGet };
+  const softwareId = 'c1d58955-b1f5-4872-bd19-e93b85eea211';
+
+  function buildClientWithPost(data: unknown) {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data }));
+    return { client, httpService };
   }
 
-  it('lee el sobre DIAN, que no trae id ni type_document_id', async () => {
-    const { client } = buildClientWithGet(DIAN_NUMBERING_RANGE_RESPONSE);
+  it('consulta POST /numbering-range con IDSoftware y el token de la empresa', async () => {
+    const { client, httpService } = buildClientWithPost(DIAN_NUMBERING_RANGE_RESPONSE);
 
-    const resolutions = await client.listResolutions(undefined, "company-token");
+    await client.listResolutions(softwareId, 'company-token');
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://nextpyme.example/numbering-range',
+      { IDSoftware: softwareId },
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer company-token',
+        }),
+      }),
+    );
+  });
+
+  it('lee el sobre DIAN, que no trae id ni type_document_id', async () => {
+    const { client } = buildClientWithPost(DIAN_NUMBERING_RANGE_RESPONSE);
+
+    const resolutions = await client.listResolutions(softwareId, "company-token");
 
     expect(resolutions).toHaveLength(2);
     expect(resolutions[0]).toMatchObject({
@@ -376,7 +395,7 @@ describe('NextPymeApiClient.listResolutions', () => {
   });
 
   it('sigue leyendo el formato de lista propio de NextPyme', async () => {
-    const { client } = buildClientWithGet({
+    const { client } = buildClientWithPost({
       data: [
         {
           id: 7,
@@ -388,7 +407,7 @@ describe('NextPymeApiClient.listResolutions', () => {
       ],
     });
 
-    const resolutions = await client.listResolutions(undefined, "company-token");
+    const resolutions = await client.listResolutions(softwareId, "company-token");
 
     expect(resolutions).toEqual([
       expect.objectContaining({ id: 7, type_document_id: 11, number: 42 }),
@@ -396,7 +415,7 @@ describe('NextPymeApiClient.listResolutions', () => {
   });
 
   it('prioriza ValidDate* DIAN cuando el sobre trae lista NextPyme y rangos DIAN', async () => {
-    const { client } = buildClientWithGet({
+    const { client } = buildClientWithPost({
       data: [
         {
           id: 7,
@@ -432,7 +451,7 @@ describe('NextPymeApiClient.listResolutions', () => {
       },
     });
 
-    const resolutions = await client.listResolutions(undefined, 'company-token');
+    const resolutions = await client.listResolutions(softwareId, 'company-token');
 
     expect(resolutions).toEqual([
       expect.objectContaining({
@@ -448,7 +467,7 @@ describe('NextPymeApiClient.listResolutions', () => {
   });
 
   it('conserva el rango SEDS de DIAN cuando NextPyme solo tiene la factura SETP (mismo ResolutionNumber)', async () => {
-    const { client } = buildClientWithGet({
+    const { client } = buildClientWithPost({
       data: [
         {
           id: 3,
@@ -499,7 +518,7 @@ describe('NextPymeApiClient.listResolutions', () => {
       },
     });
 
-    const resolutions = await client.listResolutions(undefined, 'company-token');
+    const resolutions = await client.listResolutions(softwareId, 'company-token');
 
     expect(resolutions).toEqual(
       expect.arrayContaining([

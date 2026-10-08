@@ -4,6 +4,7 @@ export class RegisterRequestDto {
   password: string;
   nit: string;
   inviteCode: string;
+  acceptPrivacyPolicy: boolean;
 }
 
 export class LoginRequestDto {

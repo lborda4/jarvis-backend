@@ -53,7 +53,9 @@ export interface SiigoPurchaseHistoryAutoSyncConfig {
   checkIntervalMs: number;
   /** Antigüedad del último sync COMPLETADO a partir de la cual una empresa
    * se considera vencida y se vuelve a sincronizar sola, sin que nadie la
-   * dispare a mano. */
+   * dispare a mano. Cada corrida vuelve a bajar ~2 años de facturas de
+   * SIIGO (no es incremental), así que este valor es el palanca principal
+   * de ancho de banda saliente en Render (Service-Initiated). */
   staleAfterHours: number;
   /** Pausa entre el arranque del resync de una empresa y el de la
    * siguiente — espacia el inicio (no la duración) para no lanzar varias
@@ -257,7 +259,7 @@ export default (): AppConfiguration => ({
     ),
     staleAfterHours: parsePositiveInteger(
       process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_STALE_AFTER_HOURS,
-      12,
+      7 * 24,
     ),
     startStaggerMs: parsePositiveInteger(
       process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_START_STAGGER_MS,

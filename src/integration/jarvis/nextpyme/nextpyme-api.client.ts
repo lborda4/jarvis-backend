@@ -153,7 +153,7 @@ export interface NextPymeInvoiceCreatePayload {
   customer: {
     identification_number: number | string;
     dv?: number | string;
-    name: string | string[];
+    name: string;
     phone?: string;
     address?: string;
     email?: string;
@@ -452,34 +452,32 @@ export class NextPymeApiClient {
   }
 
   async listResolutions(
-    filters?: Partial<{ type_document_id: number; prefix: string }>,
+    idSoftware: string,
     companyToken?: string,
   ): Promise<NextPymeResolution[]> {
     const token = this.requireToken(companyToken);
+    const softwareId = idSoftware?.trim();
+    if (!softwareId) {
+      throw new ServiceUnavailableException(
+        'La empresa no tiene un ID de software DIAN configurado.',
+      );
+    }
+
     const baseUrl = this.getBaseUrl();
-    const params: Record<string, string | number> = {};
-
-    if (filters?.type_document_id != null) {
-      params.type_document_id = filters.type_document_id;
-    }
-
-    if (filters?.prefix?.trim()) {
-      params.prefix = filters.prefix.trim();
-    }
+    const body = { IDSoftware: softwareId };
 
     try {
       const response = await firstValueFrom(
-        this.httpService.get<unknown>(`${baseUrl}/reports/resolutions`, {
+        this.httpService.post<unknown>(`${baseUrl}/numbering-range`, body, {
           headers: this.buildAuthHeaders(token),
-          params,
           timeout: 20000,
           validateStatus: () => true,
         }),
       );
 
       this.logger.log(
-        `[resolutions] status=${response.status} params=${JSON.stringify(
-          params,
+        `[numbering-range] status=${response.status} body=${JSON.stringify(
+          body,
         )} respuesta=${this.preview(response.data)}`,
       );
 
@@ -968,7 +966,7 @@ export class NextPymeApiClient {
     return results;
   }
 
-  /** GET /reports/resolutions responde en DOS formatos según la cuenta: la
+  /** POST /numbering-range responde en DOS formatos según la cuenta: la
    * lista propia de NextPyme (`{ data: [...] }`) o el sobre crudo de la DIAN
    * (GetNumberingRangeResponse). Cuando vienen ambos (o solo uno), se
    * combinan priorizando las fechas ValidDate* de la DIAN: la lista de

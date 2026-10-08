@@ -36,6 +36,10 @@ import {
 import { UserRole } from './enums/user-role.enum';
 import { resolveActiveCompanyId } from './helpers/authenticated-company.helper';
 import { normalizeCompanyInviteCode } from '../company/helpers/company-invite-code.helper';
+import {
+  applyPrivacyConsent,
+  assertPrivacyPolicyAccepted,
+} from './helpers/privacy-policy.helper';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -57,6 +61,7 @@ export class AuthService {
     const inviteCode = normalizeCompanyInviteCode(request?.inviteCode);
 
     this.validateRegisterInput(name, email, password, companyNit, inviteCode);
+    assertPrivacyPolicyAccepted(request?.acceptPrivacyPolicy);
 
     const existingUser = await this.usersRepository.findByEmail(email);
 
@@ -101,14 +106,15 @@ export class AuthService {
 
         const user =
           existingUser ??
-          (await usersRepository.save(
-            usersRepository.create({
-              name,
-              email,
-              password: passwordHash,
-              active: true,
-            }),
-          ));
+          usersRepository.create({
+            name,
+            email,
+            password: passwordHash,
+            active: true,
+          });
+
+        applyPrivacyConsent(user);
+        await usersRepository.save(user);
 
         const existingLink = await userCompaniesRepository.findOne({
           where: {

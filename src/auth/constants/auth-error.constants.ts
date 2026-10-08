@@ -7,6 +7,7 @@ export const AUTH_ERROR_CODE = {
   COMPANY_NOT_REGISTERED: 'COMPANY_NOT_REGISTERED',
   INVALID_INVITE_CODE: 'INVALID_INVITE_CODE',
   USER_ALREADY_LINKED_TO_COMPANY: 'USER_ALREADY_LINKED_TO_COMPANY',
+  PRIVACY_POLICY_NOT_ACCEPTED: 'PRIVACY_POLICY_NOT_ACCEPTED',
 } as const;
 
 export type AuthErrorCode =
@@ -24,4 +25,6 @@ export const AUTH_ERROR_MESSAGE = {
     'El código de invitación no es válido para esa empresa. Pídeselo a quien administra tu cuenta en Jarvis.',
   USER_ALREADY_LINKED_TO_COMPANY:
     'Este usuario ya está vinculado a la empresa con ese NIT.',
+  PRIVACY_POLICY_NOT_ACCEPTED:
+    'Debes leer y aceptar la política de tratamiento de datos para crear la cuenta.',
 } as const;

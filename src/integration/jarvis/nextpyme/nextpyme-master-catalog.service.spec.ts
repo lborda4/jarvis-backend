@@ -7,9 +7,16 @@ describe('NextPyme company catalogs', () => {
         nextPymeToken: id === 'missing' ? null : ` token-${id} `,
       })),
     };
+    const integrations = {
+      findByCompanyAndProvider: jest.fn(async (id: string) =>
+        id === 'missing'
+          ? null
+          : { credentials: { id_software: ` software-${id} ` } },
+      ),
+    };
     const client = {
-      listResolutions: jest.fn(async (_filters, token: string) => [
-        { prefix: token },
+      listResolutions: jest.fn(async (idSoftware: string, token: string) => [
+        { prefix: token, resolution: idSoftware },
       ]),
       fetchMasterTable: jest.fn(async (_table, token: string) => [
         { id: 1, name: token },
@@ -18,11 +25,12 @@ describe('NextPyme company catalogs', () => {
     const service = new NextPymeMasterCatalogService(
       client as any,
       companies as any,
+      integrations as any,
     );
-    return { service, client };
+    return { service, client, integrations };
   }
 
-  it('consults each company resolutions with its own token', async () => {
+  it('consults each company resolutions with its own token and IDSoftware', async () => {
     const { service, client } = setup();
     const [a, b] = await Promise.all([
       service.listResolutions('a'),
@@ -31,9 +39,19 @@ describe('NextPyme company catalogs', () => {
     expect(a[0].prefix).toBe('token-a');
     expect(b[0].prefix).toBe('token-b');
     expect(client.listResolutions.mock.calls).toEqual([
-      [undefined, 'token-a'],
-      [undefined, 'token-b'],
+      ['software-a', 'token-a'],
+      ['software-b', 'token-b'],
     ]);
+  });
+
+  it('rejects missing company IDSoftware even with a token', async () => {
+    const { service, integrations } = setup();
+    integrations.findByCompanyAndProvider.mockResolvedValueOnce({
+      credentials: {},
+    });
+    await expect(service.listResolutions('a')).rejects.toThrow(
+      'ID de software DIAN',
+    );
   });
 
   it('isolates cached and concurrent catalogs and rejects missing company tokens even with a warm cache', async () => {

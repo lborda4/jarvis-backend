@@ -29,6 +29,17 @@ export class User {
   @Column({ type: 'varchar', length: 50, default: UserRole.USER })
   role: UserRole;
 
+  @Column({ name: 'accepted_privacy_at', type: 'timestamp', nullable: true })
+  acceptedPrivacyAt: Date | null;
+
+  @Column({
+    name: 'privacy_policy_version',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
+  privacyPolicyVersion: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

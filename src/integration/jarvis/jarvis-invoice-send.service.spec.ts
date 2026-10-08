@@ -96,6 +96,26 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     expect(client.createInvoice).not.toHaveBeenCalled();
     expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
   });
+
+  it('envía customer.name como cadena en factura de venta para persona natural', async () => {
+    const { service, request, client } = setup(' company-token ', {
+      name: 'BORDA BELTRAN LAURA SOFIA',
+      documentNumber: '1032504904',
+      municipalityId: 149,
+      typeRegimeId: 2,
+      entityType: 'natural_person',
+    });
+    await service.createAndSendInvoice({
+      ...request,
+      customerDocumentType: 'CC',
+      customerIdentification: '1032504904',
+      customerName: 'BORDA BELTRAN LAURA SOFIA',
+    }, 'company-1');
+    expect(typeof client.createInvoice.mock.calls[0][0].customer.name).toBe('string');
+    expect(client.createInvoice.mock.calls[0][0].customer.name).toBe(
+      'LAURA SOFIA BORDA BELTRAN',
+    );
+  });
 });
 
 describe('Registro del envio en historial', () => {

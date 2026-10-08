@@ -1,5 +1,8 @@
 import { CompaniesRepository } from '../../../company/repositories/companies.repository';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { IntegrationProvider } from '../../enums/integration-provider.enum';
+import { normalizeJarvisCredentials } from '../helpers/jarvis-credentials.helper';
+import { IntegrationsRepository } from '../../repositories/integrations.repository';
 import {
   NextPymeApiClient,
   NextPymeMasterRow,
@@ -31,6 +34,7 @@ export class NextPymeMasterCatalogService {
   constructor(
     private readonly nextPymeApiClient: NextPymeApiClient,
     private readonly companies: CompaniesRepository,
+    private readonly integrations: IntegrationsRepository,
   ) {}
 
   async requireCompanyToken(companyId?: string): Promise<string> {
@@ -54,10 +58,29 @@ export class NextPymeMasterCatalogService {
   }
 
   async listResolutions(companyId?: string): Promise<NextPymeResolution[]> {
-    return this.nextPymeApiClient.listResolutions(
-      undefined,
-      await this.requireCompanyToken(companyId),
-    );
+    const [token, idSoftware] = await Promise.all([
+      this.requireCompanyToken(companyId),
+      this.requireIdSoftware(companyId),
+    ]);
+    return this.nextPymeApiClient.listResolutions(idSoftware, token);
+  }
+
+  private async requireIdSoftware(companyId?: string): Promise<string> {
+    const integration = companyId?.trim()
+      ? await this.integrations.findByCompanyAndProvider(
+          companyId.trim(),
+          IntegrationProvider.JARVIS,
+        )
+      : null;
+    const idSoftware = normalizeJarvisCredentials(
+      integration?.credentials ?? {},
+    ).id_software?.trim();
+    if (!idSoftware) {
+      throw new ServiceUnavailableException(
+        'La empresa no tiene un ID de software DIAN configurado.',
+      );
+    }
+    return idSoftware;
   }
 
   getDefaultUnitMeasureId(): number {
