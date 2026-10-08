@@ -56,24 +56,28 @@ function parse(xml: string): Node {
 }
 function invoiceFromXml(xml: string): Node {
   let root = parse(xml);
-  // AttachedDocument wraps the signed Invoice in a CDATA Description.
-  if (!root.Invoice && root.AttachedDocument) {
+  // AttachedDocument wraps the signed Invoice/CreditNote/DebitNote in a CDATA Description.
+  if (
+    !root.Invoice &&
+    !root.CreditNote &&
+    !root.DebitNote &&
+    root.AttachedDocument
+  ) {
     const embedded = str(
       root.AttachedDocument,
       'Attachment.ExternalReference.Description',
     );
     if (embedded) root = parse(embedded);
   }
-  if (
-    !root.Invoice ||
-    typeof root.Invoice !== 'object' ||
-    Array.isArray(root.Invoice)
-  ) {
+  const document = [root.Invoice, root.CreditNote, root.DebitNote].find(
+    (node) => node && typeof node === 'object' && !Array.isArray(node),
+  );
+  if (!document) {
     throw new BadGatewayException(
-      'El XML recibido no contiene una factura de compra.',
+      'El XML recibido no contiene un documento electrónico.',
     );
   }
-  return root.Invoice as Node;
+  return document as Node;
 }
 function party(value: unknown): PurchaseInvoiceDownloadPartyDto {
   const p = at(value, 'Party');
@@ -167,12 +171,18 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
   const cufe = str(invoice, 'UUID');
   if (!cufe || cufe.toLowerCase() !== expectedCufe.trim().toLowerCase()) {
     throw new BadGatewayException(
-      'El CUFE del XML no corresponde a la factura solicitada.',
+      'El CUFE/CUDE/CUDS del XML no corresponde al documento solicitado.',
     );
   }
-  const subtotal = num(invoice, 'LegalMonetaryTotal.LineExtensionAmount');
-  const total = num(invoice, 'LegalMonetaryTotal.PayableAmount');
-  const lines = list(invoice.InvoiceLine);
+  const monetary =
+    at(invoice, 'LegalMonetaryTotal') ?? at(invoice, 'RequestedMonetaryTotal');
+  const subtotal = num(monetary, 'LineExtensionAmount');
+  const total = num(monetary, 'PayableAmount');
+  const lines = [
+    ...list(invoice.InvoiceLine),
+    ...list(invoice.CreditNoteLine),
+    ...list(invoice.DebitNoteLine),
+  ];
   if (
     !str(invoice, 'ID') ||
     subtotal === null ||
@@ -180,7 +190,7 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
     !lines.length
   ) {
     throw new BadGatewayException(
-      'El XML de la factura esta incompleto: faltan numero, items o totales.',
+      'El XML del documento esta incompleto: faltan numero, items o totales.',
     );
   }
   const taxes = taxRows(invoice);
@@ -221,9 +231,9 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
     orderNumber: str(invoice, 'OrderReference.ID'),
     orderDate: str(invoice, 'OrderReference.IssueDate'),
     exchangeRate: num(invoice, 'PaymentExchangeRate.CalculationRate'),
-    prepaidAmount: num(invoice, 'LegalMonetaryTotal.PrepaidAmount'),
-    taxExclusiveAmount: num(invoice, 'LegalMonetaryTotal.TaxExclusiveAmount'),
-    taxInclusiveAmount: num(invoice, 'LegalMonetaryTotal.TaxInclusiveAmount'),
+    prepaidAmount: num(monetary, 'PrepaidAmount'),
+    taxExclusiveAmount: num(monetary, 'TaxExclusiveAmount'),
+    taxInclusiveAmount: num(monetary, 'TaxInclusiveAmount'),
     technologyProviderId:
       extensions
         .map((ext) => str(ext, 'SoftwareProvider.ProviderID'))
@@ -267,7 +277,10 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
     items: lines.map((line) => {
       const vat = taxRows(line).filter((t) => t.code === '01');
       const inc = taxRows(line).filter((t) => t.code === '04');
-      const quantity = num(line, 'InvoicedQuantity');
+      const quantity =
+        num(line, 'InvoicedQuantity') ??
+        num(line, 'CreditedQuantity') ??
+        num(line, 'DebitedQuantity');
       const price = num(line, 'Price.PriceAmount');
       const lineTotal = num(line, 'LineExtensionAmount');
       if (quantity === null || price === null || lineTotal === null) {
@@ -307,7 +320,10 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
         quantity,
         // Display the issuer's declared PriceAmount verbatim in the representation.
         unitValue: price,
-        unitCode: str(line, 'InvoicedQuantity.@_unitCode'),
+        unitCode:
+          str(line, 'InvoicedQuantity.@_unitCode') ??
+          str(line, 'CreditedQuantity.@_unitCode') ??
+          str(line, 'DebitedQuantity.@_unitCode'),
         incAmount: inc.length
           ? inc.reduce((sum, t) => sum + t.amount, 0)
           : null,
@@ -336,11 +352,9 @@ export function mapInvoiceXmlToPurchaseInvoiceDownload(
     iva,
     total,
     discount:
-      num(invoice, 'LegalMonetaryTotal.AllowanceTotalAmount') ??
-      adjustment(invoice, false),
+      num(monetary, 'AllowanceTotalAmount') ?? adjustment(invoice, false),
     surcharge:
-      num(invoice, 'LegalMonetaryTotal.ChargeTotalAmount') ??
-      adjustment(invoice, true),
+      num(monetary, 'ChargeTotalAmount') ?? adjustment(invoice, true),
     withholdings,
     dianQrUrl: buildDianCatalogQrUrl(cufe),
     dianQrText:

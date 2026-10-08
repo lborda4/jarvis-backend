@@ -25,6 +25,7 @@ import {
   areJarvisCredentialsConfigured,
   ensureJarvisCreditNoteResolution,
   ensureJarvisDebitNoteResolution,
+  ensureJarvisSupportCreditNoteResolution,
   getJarvisResolutionNextConsecutive,
   isJarvisResolutionConfigured,
   normalizeJarvisCredentials,
@@ -421,7 +422,7 @@ export class JarvisSetupService {
       request.typeDocumentId !== NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID;
     const typeDocumentId =
       (hasRealTypeDocumentId ? request.typeDocumentId : undefined) ??
-      (request.kind === JarvisResolutionKind.DEBIT_NOTE ? 5 : request.kind === JarvisResolutionKind.CREDIT_NOTE ? 4 : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+      (request.kind === JarvisResolutionKind.DEBIT_NOTE ? 5 : request.kind === JarvisResolutionKind.CREDIT_NOTE ? 4 : request.kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? 13 : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId()
         : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId());
 
@@ -473,7 +474,7 @@ export class JarvisSetupService {
         : {}),
       resolutions: {
         ...existing.resolutions,
-        ...(request.kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: localResolution } : request.kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+        ...(request.kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: localResolution } : request.kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? { support_credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
           ? { support_document: localResolution }
           : { electronic_invoice: localResolution }),
       },
@@ -523,18 +524,21 @@ export class JarvisSetupService {
 
     const credentials = normalizeJarvisCredentials(integration.credentials);
     const current =
-      kind === JarvisResolutionKind.DEBIT_NOTE ? credentials.resolutions?.debit_note : kind === JarvisResolutionKind.CREDIT_NOTE ? credentials.resolutions?.credit_note : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+      kind === JarvisResolutionKind.DEBIT_NOTE ? credentials.resolutions?.debit_note : kind === JarvisResolutionKind.CREDIT_NOTE ? credentials.resolutions?.credit_note : kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? credentials.resolutions?.support_credit_note : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? credentials.resolutions?.support_document
         : credentials.resolutions?.electronic_invoice;
 
     if (
       kind === JarvisResolutionKind.CREDIT_NOTE ||
-      kind === JarvisResolutionKind.DEBIT_NOTE
+      kind === JarvisResolutionKind.DEBIT_NOTE ||
+      kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE
     ) {
       const numbering =
         kind === JarvisResolutionKind.CREDIT_NOTE
           ? ensureJarvisCreditNoteResolution(current)
-          : ensureJarvisDebitNoteResolution(current);
+          : kind === JarvisResolutionKind.DEBIT_NOTE
+            ? ensureJarvisDebitNoteResolution(current)
+            : ensureJarvisSupportCreditNoteResolution(current);
       if (!current?.prefix?.trim()) {
         integration.credentials = {
           ...credentials,
@@ -542,7 +546,9 @@ export class JarvisSetupService {
             ...credentials.resolutions,
             ...(kind === JarvisResolutionKind.CREDIT_NOTE
               ? { credit_note: numbering }
-              : { debit_note: numbering }),
+              : kind === JarvisResolutionKind.DEBIT_NOTE
+                ? { debit_note: numbering }
+                : { support_credit_note: numbering }),
           },
         };
         await this.integrationsRepository.save(integration);
@@ -553,7 +559,9 @@ export class JarvisSetupService {
         throw new BadRequestException(
           kind === JarvisResolutionKind.CREDIT_NOTE
             ? 'Se agotó el rango de numeración de nota crédito.'
-            : 'Se agotó el rango de numeración de nota débito.',
+            : kind === JarvisResolutionKind.DEBIT_NOTE
+              ? 'Se agotó el rango de numeración de nota débito.'
+              : 'Se agotó el rango de numeración de nota de ajuste.',
         );
       }
 
@@ -624,6 +632,10 @@ export class JarvisSetupService {
           ? ensureJarvisCreditNoteResolution(
               credentials.resolutions?.credit_note,
             )
+        : kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE
+          ? ensureJarvisSupportCreditNoteResolution(
+              credentials.resolutions?.support_credit_note,
+            )
         : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
         ? credentials.resolutions?.support_document
         : credentials.resolutions?.electronic_invoice;
@@ -643,7 +655,7 @@ export class JarvisSetupService {
       ...credentials,
       resolutions: {
         ...credentials.resolutions,
-        ...(kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: updated } : kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: updated } : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
+        ...(kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: updated } : kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: updated } : kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? { support_credit_note: updated } : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
           ? { support_document: updated }
           : { electronic_invoice: updated }),
       },
@@ -732,6 +744,9 @@ export class JarvisSetupService {
       ),
       creditNoteResolution: ensureJarvisCreditNoteResolution(
         credentials.resolutions?.credit_note,
+      ),
+      supportCreditNoteResolution: ensureJarvisSupportCreditNoteResolution(
+        credentials.resolutions?.support_credit_note,
       ),
       supportDocumentResolutionConfigured: isJarvisResolutionConfigured(
         localSupport,

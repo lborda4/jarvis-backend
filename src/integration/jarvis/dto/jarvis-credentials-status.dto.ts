@@ -58,6 +58,9 @@ export class JarvisCredentialsStatusResponseDto {
 
   @ApiPropertyOptional({ type: JarvisResolutionDto, nullable: true })
   creditNoteResolution?: JarvisResolutionDto | null;
+
+  @ApiPropertyOptional({ type: JarvisResolutionDto, nullable: true })
+  supportCreditNoteResolution?: JarvisResolutionDto | null;
   @ApiProperty({
     description:
       'Indica si la empresa activa ya completó la configuración inicial de Jarvis.',

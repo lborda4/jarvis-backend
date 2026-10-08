@@ -113,6 +113,10 @@ export function normalizeJarvisCredentials(
   );
   const debitNote = normalizeResolution(resolutionsRaw.debit_note, JarvisResolutionKind.DEBIT_NOTE);
   const creditNote = normalizeResolution(resolutionsRaw.credit_note, JarvisResolutionKind.CREDIT_NOTE);
+  const supportCreditNote = normalizeResolution(
+    resolutionsRaw.support_credit_note ?? resolutionsRaw.supportCreditNote,
+    JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
+  );
   const electronicInvoice = normalizeResolution(
     resolutionsRaw.electronic_invoice ?? resolutionsRaw.electronicInvoice,
     JarvisResolutionKind.ELECTRONIC_INVOICE,
@@ -157,10 +161,13 @@ export function normalizeJarvisCredentials(
         ? String(raw.configuredAt)
         : undefined,
     resolutions:
-      supportDocument || electronicInvoice || creditNote || debitNote
+      supportDocument || electronicInvoice || creditNote || debitNote || supportCreditNote
         ? {
             ...(creditNote ? { credit_note: creditNote } : {}),
             ...(debitNote ? { debit_note: debitNote } : {}),
+            ...(supportCreditNote
+              ? { support_credit_note: supportCreditNote }
+              : {}),
             ...(supportDocument
               ? { support_document: supportDocument }
               : {}),
@@ -214,6 +221,28 @@ export function ensureJarvisDebitNoteResolution(
   return resolution?.prefix?.trim()
     ? resolution
     : createDefaultJarvisDebitNoteResolution();
+}
+
+export const JARVIS_SUPPORT_CREDIT_NOTE_DEFAULT_PREFIX = 'NDS';
+
+export function createDefaultJarvisSupportCreditNoteResolution(): JarvisDianResolution {
+  return {
+    kind: JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
+    documentTypeLabel: 'NOTA DE AJUSTE DOCUMENTO SOPORTE',
+    prefix: JARVIS_SUPPORT_CREDIT_NOTE_DEFAULT_PREFIX,
+    fromNumber: 1,
+    toNumber: JARVIS_CREDIT_NOTE_DEFAULT_TO_NUMBER,
+    nextConsecutive: 1,
+    formNumber: null,
+  };
+}
+
+export function ensureJarvisSupportCreditNoteResolution(
+  resolution?: JarvisDianResolution | null,
+): JarvisDianResolution {
+  return resolution?.prefix?.trim()
+    ? resolution
+    : createDefaultJarvisSupportCreditNoteResolution();
 }
 
 export function isJarvisResolutionConfigured(

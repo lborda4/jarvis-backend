@@ -593,6 +593,12 @@ export class NextPymeApiClient {
     return this.postDianUblDocument('credit-note', payload, 'la nota crédito', token, true);
   }
 
+  async createSupportCreditNote(payload: unknown, companyToken: string): Promise<UnknownRecord> {
+    const token = companyToken?.trim();
+    if (!token) throw new ServiceUnavailableException('La empresa no tiene token de NextPyme configurado.');
+    return this.postDianUblDocument('sd-credit-note', payload, 'la nota de ajuste', token, true);
+  }
+
   async createInvoice(
     payload: NextPymeInvoiceCreatePayload,
     companyToken: string,

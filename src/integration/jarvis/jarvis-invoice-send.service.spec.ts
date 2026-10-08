@@ -16,7 +16,7 @@ function setup(
   };
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
   const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: token }) };
-  const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }) };
+  const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportCreditNote: jest.fn().mockResolvedValue({ cuds: 'adjustment-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }) };
   const catalog = {
     getIvaTaxId: () => 1,
     getDefaultUnitMeasureId: () => 70,
@@ -311,6 +311,56 @@ describe('Notas credito Jarvis', () => {
       JarvisResolutionKind.CREDIT_NOTE,
       1,
     );
+  });
+});
+
+describe('Notas de ajuste de documento soporte', () => {
+  const reference = { number: 'DS1', uuid: 'b'.repeat(96), issueDate: '2026-09-01' };
+
+  it('envía seller y credit_note_lines al sd-credit-note con numeración NDS', async () => {
+    const { service, request, client, numbering, history } = setup();
+    numbering.allocateResolutionNumber.mockResolvedValue({ prefix: 'NDS', number: 1, formNumber: null });
+    await service.createAndSendInvoice({
+      ...request,
+      billingReference: reference,
+      discrepancyResponseCode: 2,
+      discrepancyResponseDescription: 'Devolución',
+      items: [{ description: 'COMISION POR SERVICIOS', quantity: 1, unitValue: 200, taxAmount: 0, code: 'COMISION' }],
+    }, 'company-1', JarvisResolutionKind.SUPPORT_CREDIT_NOTE);
+
+    expect(client.createCreditNote).not.toHaveBeenCalled();
+    expect(client.createSupportDocument).not.toHaveBeenCalled();
+    expect(numbering.allocateResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.SUPPORT_CREDIT_NOTE);
+    const payload = client.createSupportCreditNote.mock.calls[0][0];
+    expect(payload).toEqual(expect.objectContaining({
+      type_document_id: 13,
+      prefix: 'NDS',
+      billing_reference: { number: 'DS1', uuid: reference.uuid, issue_date: '2026-09-01' },
+      discrepancyresponsecode: 2,
+    }));
+    expect(payload).not.toHaveProperty('customer');
+    expect(payload).not.toHaveProperty('invoice_lines');
+    expect(payload.seller).toEqual(expect.objectContaining({ name: 'Cliente', merchant_registration: '0000000-00', postal_zone_code: '000000' }));
+    expect(payload.credit_note_lines[0]).toEqual(expect.objectContaining({
+      description: 'COMISION POR SERVICIOS',
+      invoiced_quantity: '1',
+      price_amount: '200.00',
+    }));
+    expect(history.record).toHaveBeenCalledWith(expect.objectContaining({
+      documentKind: JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
+      cufe: 'adjustment-code',
+    }));
+  });
+
+  it('rechaza referencia inválida del documento soporte antes de numerar', async () => {
+    const { service, request, numbering } = setup();
+    await expect(service.createAndSendInvoice({
+      ...request,
+      billingReference: { ...reference, uuid: 'corto' },
+      discrepancyResponseCode: 2,
+      discrepancyResponseDescription: 'Motivo',
+    }, 'company-1', JarvisResolutionKind.SUPPORT_CREDIT_NOTE)).rejects.toThrow('documento soporte afectado');
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
   });
 });
 

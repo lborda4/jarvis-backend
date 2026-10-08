@@ -78,9 +78,13 @@ export class JarvisInvoiceSendService {
     kind = JarvisResolutionKind.ELECTRONIC_INVOICE,
   ): Promise<CreateJarvisInvoiceResponseDto> {
     const isDebitNote = kind === JarvisResolutionKind.DEBIT_NOTE;
-    const isNote = kind === JarvisResolutionKind.CREDIT_NOTE || isDebitNote;
+    const isSupportCreditNote = kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE;
+    const isNote =
+      kind === JarvisResolutionKind.CREDIT_NOTE ||
+      isDebitNote ||
+      isSupportCreditNote;
     const isSupport = kind === JarvisResolutionKind.SUPPORT_DOCUMENT;
-    const documentLabel = isDebitNote ? "nota débito" : isNote ? "nota crédito" : isSupport ? "documento soporte" : "factura de venta";
+    const documentLabel = isDebitNote ? "nota débito" : isSupportCreditNote ? "nota de ajuste" : isNote ? "nota crédito" : isSupport ? "documento soporte" : "factura de venta";
     const issueDate = request.issueDate?.trim();
     const customerIdentification = normalizeJarvisDocumentNumber(
       request.customerIdentification ?? '',
@@ -93,7 +97,7 @@ export class JarvisInvoiceSendService {
     }
 
     if (!customerIdentification) {
-      throw new BadRequestException(isSupport ? "Debe seleccionar un proveedor." : "Debe seleccionar un cliente.");
+      throw new BadRequestException(isSupport || isSupportCreditNote ? "Debe seleccionar un proveedor." : "Debe seleccionar un cliente.");
     }
 
     if (items.length === 0) {
@@ -106,10 +110,18 @@ export class JarvisInvoiceSendService {
       const reference = request.billingReference;
       const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
       if (!reference?.number?.trim() || !/^[a-f0-9]{96}$/i.test(reference?.uuid?.trim() ?? '') || !validDate(reference?.issueDate ?? '') || !validDate(issueDate) || reference.issueDate > issueDate) {
-        throw new BadRequestException('Indique el número, CUFE y fecha válidos de la factura afectada.');
+        throw new BadRequestException(
+          isSupportCreditNote
+            ? 'Indique el número, CUDS y fecha válidos del documento soporte afectado.'
+            : 'Indique el número, CUFE y fecha válidos de la factura afectada.',
+        );
       }
       if (!Number.isSafeInteger(request.discrepancyResponseCode) || request.discrepancyResponseCode! < 1 || !request.discrepancyResponseDescription?.trim()) {
-        throw new BadRequestException('Indique el código y la descripción del motivo de la nota crédito.');
+        throw new BadRequestException(
+          isSupportCreditNote
+            ? 'Indique el código y la descripción del motivo de la nota de ajuste.'
+            : 'Indique el código y la descripción del motivo de la nota crédito.',
+        );
       }
     }
 
@@ -427,7 +439,7 @@ export class JarvisInvoiceSendService {
 
           const payload = {
             type_document_id:
-              isDebitNote ? 5 : isNote ? 4 : isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
+              isSupportCreditNote ? 13 : isDebitNote ? 5 : isNote ? 4 : isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
             number: numbering.number,
             date: issueDate,
             ...((isSupport || isNote) ? { time: new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }), sendmail: false, sendmailtome: false } : {}),
@@ -506,7 +518,7 @@ export class JarvisInvoiceSendService {
             ...(withholdingTotals.length && !isNote
               ? { with_holding_tax_total: withholdingTotals }
               : {}),
-            legal_monetary_totals: isNote && !isDebitNote
+            legal_monetary_totals: isNote && !isDebitNote && !isSupportCreditNote
               ? {
                   line_extension_amount: formatMoney(lineExtensionTotal),
                   tax_exclusive_amount: formatMoney(taxableBase),
@@ -554,6 +566,29 @@ export class JarvisInvoiceSendService {
                     tax_inclusive_amount: formatMoney(lineExtensionTotal + ivaTotal),
                   },
                   debit_note_lines: invoice_lines,
+                };
+              })(), companyToken)
+            : isSupportCreditNote
+            ? this.nextPymeApiClient.createSupportCreditNote((() => {
+                const {
+                  customer,
+                  invoice_lines: _lines,
+                  with_holding_tax_total: _withholding,
+                  payment_form: _payment,
+                  resolution_number: _resolution,
+                  type_currency_id: _currency,
+                  ...creditBody
+                } = payload;
+                return {
+                  ...creditBody,
+                  seller: {
+                    ...customer,
+                    name: (request.customerName?.trim() || tercero.name).trim(),
+                    merchant_registration:
+                      customer.merchant_registration || '0000000-00',
+                    postal_zone_code: '000000',
+                  },
+                  credit_note_lines: invoice_lines,
                 };
               })(), companyToken)
             : isNote
@@ -605,9 +640,7 @@ export class JarvisInvoiceSendService {
 
           let historyId: string | undefined;
           let invoiceXml: string | null = null;
-          if (!isSupport && !isNote) {
-            try { invoiceXml = extractNextPymeInvoiceXml(created); } catch { /* Retrieve by CUFE when opening the PDF if emission did not include XML. */ }
-          }
+          try { invoiceXml = extractNextPymeInvoiceXml(created); } catch { /* Retrieve by CUFE/CUDE/CUDS when opening the PDF if emission did not include XML. */ }
           // Un fallo de historial no convierte una emision aceptada en un error ni invita a reenviarla.
           try {
             historyId = await this.invoiceHistory.record({

@@ -87,6 +87,7 @@ export interface JarvisCredentials {
     support_document?: JarvisDianResolution;
     debit_note?: JarvisDianResolution;
     credit_note?: JarvisDianResolution;
+    support_credit_note?: JarvisDianResolution;
     electronic_invoice?: JarvisDianResolution;
   };
 }

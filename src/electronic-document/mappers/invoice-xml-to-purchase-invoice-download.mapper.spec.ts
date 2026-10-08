@@ -61,6 +61,25 @@ describe('original UBL to PDF data', () => {
     const wrapped = `<AttachedDocument><Attachment><ExternalReference><Description><![CDATA[${DOWNLOAD_XML}]]></Description></ExternalReference></Attachment></AttachedDocument>`;
     expect(map(wrapped, 'doc', 'cufe-123').total).toBe(238);
   });
+  it('reads CreditNoteLine and CreditedQuantity from a nota crédito', () => {
+    const xml = DOWNLOAD_XML
+      .replace('<Invoice xmlns', '<CreditNote xmlns')
+      .replace('</Invoice>', '</CreditNote>')
+      .replace(/InvoiceLine/g, 'CreditNoteLine')
+      .replace(/InvoicedQuantity/g, 'CreditedQuantity');
+    const dto = map(xml, 'doc', 'cufe-123');
+    expect(dto.invoiceNumber).toBe('XML1');
+    expect(dto.items[0]).toMatchObject({ quantity: 2, unitCode: 'EA', total: 200 });
+  });
+  it('reads DebitNote RequestedMonetaryTotal', () => {
+    const xml = DOWNLOAD_XML
+      .replace('<Invoice xmlns', '<DebitNote xmlns')
+      .replace('</Invoice>', '</DebitNote>')
+      .replace(/InvoiceLine/g, 'DebitNoteLine')
+      .replace(/InvoicedQuantity/g, 'DebitedQuantity')
+      .replace(/LegalMonetaryTotal/g, 'RequestedMonetaryTotal');
+    expect(map(xml, 'doc', 'cufe-123').total).toBe(238);
+  });
   it('builds a QR with the actual issue time only when no original QR exists', () => {
     const xml = DOWNLOAD_XML.replace(/<sts:QRCode>[\s\S]*?<\/sts:QRCode>/, '');
     expect(map(xml, 'doc', 'cufe-123').dianQrText).toContain(

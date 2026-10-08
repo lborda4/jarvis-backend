@@ -72,6 +72,7 @@ export class PurchaseInvoiceDownloadDto {
   };
 
   id: string;
+  documentKind?: string | null;
   cufe: string;
   invoiceNumber: string | null;
   prefix: string | null;

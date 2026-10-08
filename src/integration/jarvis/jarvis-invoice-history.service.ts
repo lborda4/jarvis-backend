@@ -12,15 +12,15 @@ export class JarvisInvoiceHistoryService {
     const saved = await this.repository.findOne({ where: { companyId: invoice.companyId, documentKind: invoice.documentKind ?? JarvisResolutionKind.ELECTRONIC_INVOICE, prefix: invoice.prefix, number: invoice.number }, select: { id: true } });
     return saved?.id;
   }
-  async detail(companyId: string, id: string) {
+  async detail(companyId: string, id: string, documentKind = JarvisResolutionKind.ELECTRONIC_INVOICE) {
     if (!companyId?.trim()) throw new BadRequestException('La empresa activa es obligatoria.');
     const invoice = await this.repository.createQueryBuilder('invoice')
       .addSelect('invoice.sourceRequest')
       .where('invoice.companyId = :companyId', { companyId: companyId.trim() })
       .andWhere('invoice.id = :id', { id })
-      .andWhere('invoice.documentKind = :kind', { kind: JarvisResolutionKind.ELECTRONIC_INVOICE })
+      .andWhere('invoice.documentKind = :kind', { kind: documentKind })
       .getOne();
-    if (!invoice) throw new NotFoundException('No se encontró la factura.');
+    if (!invoice) throw new NotFoundException(documentKind === JarvisResolutionKind.SUPPORT_DOCUMENT ? 'No se encontró el documento soporte.' : 'No se encontró la factura.');
     const { companyId: _company, company: _relation, ...detail } = invoice;
     return { ...detail, status: 'SENT' as const };
   }

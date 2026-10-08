@@ -337,10 +337,28 @@ export class JarvisController {
     return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page }, JarvisResolutionKind.SUPPORT_DOCUMENT);
   }
 
+  @Get('support-documents/:id')
+  @ApiOperation({ summary: 'Detalle de un documento soporte enviado, para precargar la nota de ajuste.' })
+  getSupportDocumentDetail(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.jarvisInvoiceHistoryService.detail(getAuthenticatedCompanyId(user), id, JarvisResolutionKind.SUPPORT_DOCUMENT);
+  }
+
   @Post('support-documents/issue')
   @ApiOperation({ summary: 'Crear y enviar documento soporte individual.' })
   issueSupportDocument(@CurrentUser() user: AuthenticatedUser, @Body() request: CreateJarvisInvoiceRequestDto): Promise<CreateJarvisInvoiceResponseDto> {
     return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.SUPPORT_DOCUMENT);
+  }
+
+  @Get('support-credit-notes')
+  @ApiOperation({ summary: 'Historial de notas de ajuste de documento soporte.' })
+  listSupportCreditNotes(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
+    return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page }, JarvisResolutionKind.SUPPORT_CREDIT_NOTE);
+  }
+
+  @Post('support-credit-notes')
+  @ApiOperation({ summary: 'Crear y enviar nota de ajuste de documento soporte a NextPyme.' })
+  createSupportCreditNote(@CurrentUser() user: AuthenticatedUser, @Body() request: CreateJarvisInvoiceRequestDto) {
+    return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.SUPPORT_CREDIT_NOTE);
   }
 
   @Get('debit-notes')
@@ -363,6 +381,7 @@ export class JarvisController {
   }
 
   @Get('invoices/:id/pdf-data')
+  @ApiOperation({ summary: 'Datos para el PDF de un documento Jarvis emitido (factura, DS, NC, ND o nota de ajuste).' })
   getInvoicePdfData(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.invoicePdf.getData(getAuthenticatedCompanyId(user), id);
   }

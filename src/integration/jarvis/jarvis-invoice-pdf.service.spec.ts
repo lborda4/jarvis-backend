@@ -10,15 +10,16 @@ describe('sales invoice PDF data', () => {
     return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never, logos as never), repository, query, client, logos };
   }
   it('adds only the owning company logo to the PDF', async () => {
-    const { service, logos } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
+    const { service, logos } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE' });
     logos.get.mockResolvedValue({ logoDataUrl: 'data:image/png;base64,test' } as never);
     expect((await service.getData('owner', 'id')).logoDataUrl).toBe('data:image/png;base64,test');
     expect(logos.get).toHaveBeenCalledWith('owner', 'JARVIS');
   });
   it('uses the stored signed XML without calling the provider', async () => {
-    const { service, client, query } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
+    const { service, client, query } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'SUPPORT_DOCUMENT' });
     const data = await service.getData('company', 'id');
     expect(data.invoiceNumber).toBe('XML1');
+    expect(data.documentKind).toBe('SUPPORT_DOCUMENT');
     expect(data.total).toBe(238);
     expect(data.dianQrText).toContain('documentkey=cufe-123&test=1');
     expect(client.getInvoiceXmlByCufe).not.toHaveBeenCalled();

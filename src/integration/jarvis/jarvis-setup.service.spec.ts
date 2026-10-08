@@ -423,6 +423,40 @@ describe('Numeracion independiente de notas credito', () => {
   });
 });
 
+describe('Numeracion independiente de notas de ajuste', () => {
+  it('asigna NDS desde 1 sin que el cliente configure la numeración', async () => {
+    const { service, integrationsRepository } = buildService({});
+
+    await expect(
+      service.allocateResolutionNumber(
+        'company-1',
+        JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ prefix: 'NDS', number: 1, formNumber: null }),
+    );
+
+    const saved = integrationsRepository.save.mock.calls[0][0];
+    expect(saved.credentials.resolutions.support_credit_note).toEqual(
+      expect.objectContaining({ prefix: 'NDS', nextConsecutive: 1 }),
+    );
+  });
+
+  it('avanza a 2 después de un envío aceptado aunque no hubiera numeración previa', async () => {
+    const { service, integrationsRepository } = buildService({});
+
+    await service.commitResolutionNumber(
+      'company-1',
+      JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
+      1,
+    );
+
+    const saved = integrationsRepository.save.mock.calls.at(-1)![0];
+    expect(saved.credentials.resolutions.support_credit_note.nextConsecutive).toBe(2);
+    expect(saved.credentials.resolutions.support_credit_note.prefix).toBe('NDS');
+  });
+});
+
 describe('Numeracion independiente de notas debito', () => {
   it('avanza a 2 después de un envío aceptado aunque no hubiera numeración previa', async () => {
     const { service, integrationsRepository } = buildService({});

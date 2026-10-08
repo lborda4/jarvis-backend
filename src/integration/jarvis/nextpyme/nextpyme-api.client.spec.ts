@@ -626,6 +626,16 @@ describe('NextPymeApiClient credit-note', () => {
   });
 });
 
+describe('NextPymeApiClient sd-credit-note', () => {
+  it('usa endpoint sd-credit-note y token de la empresa', async () => {
+    const { client, httpService } = buildClient();
+    const response = { success: true, ResponseDian: { IsValid: true } };
+    httpService.post.mockReturnValue(of({ status: 200, data: response }));
+    await expect(client.createSupportCreditNote({ type_document_id: 13 }, ' company-adjust ')).resolves.toEqual(response);
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/sd-credit-note', { type_document_id: 13 }, expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-adjust' }) }));
+  });
+});
+
 describe('NextPymeApiClient debit-note', () => {
   it('usa endpoint debit-note y token de la empresa', async () => {
     const { client, httpService } = buildClient();
