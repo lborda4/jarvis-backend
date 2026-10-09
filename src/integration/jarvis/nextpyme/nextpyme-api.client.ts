@@ -1018,10 +1018,14 @@ export class NextPymeApiClient {
         ...item,
         from: dian.from ?? item.from,
         to: dian.to ?? item.to,
+        resolution: dian.resolution ?? item.resolution,
         resolution_date: dian.resolution_date ?? item.resolution_date,
         date_from: dian.date_from ?? item.date_from,
         date_to: dian.date_to ?? item.date_to,
-        technical_key: item.technical_key ?? dian.technical_key,
+        // NextPyme a veces guarda la llave de software (UUID) en
+        // technical_key; el PUT /config/resolution de factura debe usar la
+        // TechnicalKey del rango DIAN.
+        technical_key: dian.technical_key ?? item.technical_key,
         dianVigency: true,
       };
     });
@@ -1031,23 +1035,9 @@ export class NextPymeApiClient {
     // SEDS de documento soporte con el mismo ResolutionNumber. Si no
     // agregamos esos rangos, el selector de DS queda vacío y nunca se
     // persiste resolutions.support_document.
-    const unmatchedDian = dianResolutions.filter((dian) => {
-      const prefix = String(dian.prefix ?? '')
-        .trim()
-        .toUpperCase();
-      const resolution = String(dian.resolution ?? '').trim();
-      if (!prefix || !resolution) {
-        return !this.findMatchingResolution(listResolutions, dian);
-      }
-
-      return !listResolutions.some(
-        (item) =>
-          String(item.prefix ?? '')
-            .trim()
-            .toUpperCase() === prefix &&
-          String(item.resolution ?? '').trim() === resolution,
-      );
-    });
+    const unmatchedDian = dianResolutions.filter(
+      (dian) => !this.findMatchingResolution(listResolutions, dian),
+    );
 
     return [...merged, ...unmatchedDian];
   }
@@ -1074,15 +1064,8 @@ export class NextPymeApiClient {
       }
     }
 
-    if (resolution) {
-      const byResolution = candidates.filter(
-        (item) => String(item.resolution ?? '').trim() === resolution,
-      );
-      if (byResolution.length === 1) {
-        return byResolution[0];
-      }
-    }
-
+    // SETP (factura) y SEDS (soporte) pueden compartir ResolutionNumber.
+    // Sin prefijo se fusionarían mal y el rango de DS desaparecería.
     if (prefix) {
       const byPrefix = candidates.filter(
         (item) =>

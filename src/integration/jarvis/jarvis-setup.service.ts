@@ -328,9 +328,6 @@ export class JarvisSetupService {
       );
     }
 
-    // La clave de factura se resuelve más abajo: primero la de
-    // integrations.credentials.technical_key (admin) y, si no hay, la del rango.
-
     if (!dateFrom || !DATE_PATTERN.test(dateFrom)) {
       throw new BadRequestException(
         'La fecha Desde de vigencia es inválida (use AAAA-MM-DD).',
@@ -384,23 +381,12 @@ export class JarvisSetupService {
     }
 
     // NextPyme PUT /config/resolution solo admite technical_key en factura
-    // de venta (type_document_id 1). Es la misma llave con la que se
-    // consultan los rangos (IDSoftware / credentials.technical_key), no la
-    // TechnicalKey del rango DIAN. Documento soporte no la envía.
+    // de venta. Esa clave es la TechnicalKey del rango que devuelve la
+    // DIAN (numbering-range), no el IDSoftware / credentials.technical_key
+    // ni el UUID que NextPyme a veces guarda en su propia lista.
+    // Documento soporte no la envía.
     const includeTechnicalKey =
       request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE;
-    const companyTechnicalKey =
-      existing.technical_key?.trim() ||
-      (await this.readSiigoTechnicalKey(trimmedCompanyId));
-    const technicalKey = includeTechnicalKey
-      ? companyTechnicalKey || requestedTechnicalKey
-      : undefined;
-
-    if (!technicalKey && request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE) {
-      throw new BadRequestException(
-        'Configure la clave técnica de la empresa en Admin o elija un rango de factura que la traiga.',
-      );
-    }
 
     // El id "1"/"11" (SUPPORT_DOCUMENT_TYPE_ID / ELECTRONIC_INVOICE_TYPE_ID)
     // es un supuesto fijo, no un dato consultado — cuando el frontend ya
@@ -426,22 +412,54 @@ export class JarvisSetupService {
         ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId()
         : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId());
 
+    const dianRange = await this.lookupDianRangeForSave(
+      trimmedCompanyId,
+      prefix,
+      resolutionNumber,
+      typeDocumentId,
+    );
+    const resolvedResolution =
+      dianRange?.resolution?.trim() || resolutionNumber;
+    const resolvedDateFrom =
+      normalizeResolutionDate(dianRange?.date_from) || dateFrom;
+    const resolvedDateTo =
+      normalizeResolutionDate(dianRange?.date_to) || dateTo;
+    const resolvedResolutionDate =
+      normalizeResolutionDate(dianRange?.resolution_date) || resolutionDate;
+    const resolvedFrom =
+      dianRange?.from != null && Number.isFinite(dianRange.from)
+        ? dianRange.from
+        : fromNumber;
+    const resolvedTo =
+      dianRange?.to != null && Number.isFinite(dianRange.to)
+        ? dianRange.to
+        : toNumber;
+    const technicalKey = includeTechnicalKey
+      ? dianRange?.technical_key?.trim() || requestedTechnicalKey
+      : undefined;
+
+    if (!technicalKey && request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE) {
+      throw new BadRequestException(
+        'Configure la clave técnica de la empresa en Admin o elija un rango de factura que la traiga.',
+      );
+    }
+
     // PUT /config/resolution con los datos del rango elegido. Si NextPyme
     // rechaza, no persistimos: el error que ve el usuario es el de ellos.
     const companyToken = await this.nextPymeMasterCatalogService.requireCompanyToken(trimmedCompanyId);
     const nextPymePayload = {
       type_document_id: typeDocumentId,
       prefix,
-      resolution: resolutionNumber,
-      resolution_date: resolutionDate,
+      resolution: resolvedResolution,
+      resolution_date: resolvedResolutionDate,
       ...(includeTechnicalKey && technicalKey
         ? { technical_key: technicalKey }
         : {}),
-      from: fromNumber,
-      to: toNumber,
+      from: resolvedFrom,
+      to: resolvedTo,
       generated_to_date: 0,
-      date_from: dateFrom,
-      date_to: dateTo,
+      date_from: resolvedDateFrom,
+      date_to: resolvedDateTo,
     };
     this.logger.log(
       `[saveResolution] company=${trimmedCompanyId} kind=${request.kind} PUT /config/resolution`,
@@ -462,30 +480,27 @@ export class JarvisSetupService {
     // (número de resolución DIAN, clave técnica, vigencia, rango y consecutivo).
     const localResolution: JarvisDianResolution = {
       kind: request.kind,
-      formNumber: resolutionNumber,
+      formNumber: resolvedResolution,
       nit: request.nit?.trim() || null,
       checkDigit: request.checkDigit?.trim() || null,
       businessName: request.businessName?.trim() || null,
       documentTypeLabel,
       modalityCode: request.modalityCode?.trim() || null,
       prefix,
-      fromNumber,
-      toNumber,
-      nextConsecutive: fromNumber,
+      fromNumber: resolvedFrom,
+      toNumber: resolvedTo,
+      nextConsecutive: resolvedFrom,
       requestType: request.requestType?.trim() || null,
-      year: request.year?.trim() || resolutionDate.slice(0, 4),
-      authorizedAt: resolutionDate,
+      year: request.year?.trim() || resolvedResolutionDate.slice(0, 4),
+      authorizedAt: resolvedResolutionDate,
       technicalKey: includeTechnicalKey ? technicalKey : null,
-      dateFrom,
-      dateTo,
+      dateFrom: resolvedDateFrom,
+      dateTo: resolvedDateTo,
       configuredAt: new Date().toISOString(),
     };
 
     const credentials: JarvisCredentials = {
       ...existing,
-      ...(technicalKey && includeTechnicalKey
-        ? { technical_key: technicalKey }
-        : {}),
       resolutions: {
         ...existing.resolutions,
         ...(request.kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: localResolution } : request.kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? { support_credit_note: localResolution } : request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT
@@ -809,6 +824,76 @@ export class JarvisSetupService {
     }
   }
 
+  private async lookupDianRangeForSave(
+    companyId: string,
+    prefix: string,
+    resolutionNumber: string,
+    typeDocumentId: number,
+  ): Promise<NextPymeResolution | undefined> {
+    try {
+      const ranges =
+        await this.nextPymeMasterCatalogService.listResolutions(companyId);
+      return this.pickDianRangeForSave(
+        ranges,
+        prefix,
+        resolutionNumber,
+        typeDocumentId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo consultar numbering-range al guardar la resolución: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    }
+  }
+
+  /** Prefijo único gana aunque el request traiga un ResolutionNumber viejo
+   * de NextPyme: la fuente de verdad es el sobre DIAN. */
+  private pickDianRangeForSave(
+    ranges: NextPymeResolution[],
+    prefix: string,
+    resolutionNumber: string,
+    typeDocumentId: number,
+  ): NextPymeResolution | undefined {
+    const prefixUpper = prefix.trim().toUpperCase();
+    const withPrefix = ranges.filter(
+      (item) =>
+        String(item.prefix ?? '')
+          .trim()
+          .toUpperCase() === prefixUpper,
+    );
+
+    if (withPrefix.length === 1) {
+      return withPrefix[0];
+    }
+
+    const exact = withPrefix.find(
+      (item) => String(item.resolution ?? '').trim() === resolutionNumber,
+    );
+    if (exact) {
+      return exact;
+    }
+
+    if (typeDocumentId !== NEXTPYME_UNKNOWN_TYPE_DOCUMENT_ID) {
+      const byType = withPrefix.filter((item) => {
+        const id = item.type_document?.id ?? item.type_document_id;
+        return id === typeDocumentId;
+      });
+      if (byType.length === 1) {
+        return byType[0];
+      }
+    }
+
+    const fromDian = withPrefix.filter((item) => item.dianVigency);
+    if (fromDian.length === 1) {
+      return fromDian[0];
+    }
+
+    return undefined;
+  }
+
   private pickRemoteResolution(
     resolutions: NextPymeResolution[],
     typeDocumentId: number,
@@ -924,17 +1009,4 @@ export class JarvisSetupService {
     };
   }
 
-  private async readSiigoTechnicalKey(companyId: string): Promise<string | undefined> {
-    const siigo = await this.integrationsRepository.findByCompanyAndProvider(
-      companyId,
-      IntegrationProvider.SIIGO,
-    );
-    if (!siigo?.credentials || typeof siigo.credentials !== 'object') {
-      return undefined;
-    }
-
-    const raw = siigo.credentials as Record<string, unknown>;
-    const value = String(raw.technical_key ?? raw.technicalKey ?? '').trim();
-    return value || undefined;
-  }
 }

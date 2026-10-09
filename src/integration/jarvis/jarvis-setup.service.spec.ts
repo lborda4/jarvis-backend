@@ -128,7 +128,7 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
     );
   });
 
-  it('usa credentials.technical_key de la empresa en el PUT de factura (mismo campo del curl NextPyme)', async () => {
+  it('usa ResolutionNumber y TechnicalKey de la DIAN, no el UUID ni un número viejo de NextPyme', async () => {
     const putConfigResolution = jest.fn().mockResolvedValue({});
     const findByCompanyAndProvider = jest.fn().mockImplementation(
       async (_companyId: string, provider: string) => {
@@ -152,8 +152,7 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
             address: 'Calle 1',
             phone: '3000000000',
             configured_at: new Date().toISOString(),
-            technical_key:
-              'a2e4cf48298098fdd401d2e03b14ae13a048c58b6e6b2d122b39aca2a0250c1a',
+            technical_key: 'c1d58955-b1f5-4872-bd19-e93b85eea211',
           },
         };
       },
@@ -161,13 +160,27 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
     const { service } = buildService({
       putConfigResolution,
       findByCompanyAndProvider,
+      listResolutions: jest.fn().mockResolvedValue([
+        {
+          prefix: 'FVJ',
+          resolution: '18764113677438',
+          resolution_date: '2026-08-05',
+          from: 1,
+          to: 10000,
+          date_from: '2026-08-05',
+          date_to: '2028-08-05',
+          technical_key:
+            'a2e4cf48298098fdd401d2e03b14ae13a048c58b6e6b2d122b39aca2a0250c1a',
+          dianVigency: true,
+        },
+      ]),
     });
 
     await service.saveResolution(
       buildRequest({
         prefix: 'FVJ',
-        formNumber: '18764113677438',
-        technicalKey: 'clave-del-rango-dian',
+        formNumber: '13028144278805',
+        technicalKey: 'c1d58955-b1f5-4872-bd19-e93b85eea211',
         dateFrom: '2026-08-05',
         dateTo: '2028-08-05',
         authorizedAt: '2026-08-05',
@@ -191,6 +204,51 @@ describe('JarvisSetupService.saveResolution — type_document_id', () => {
         date_from: '2026-08-05',
         date_to: '2028-08-05',
       },
+      'company-token',
+    );
+  });
+
+  it('al guardar documento soporte usa el ResolutionNumber de la DIAN y no manda technical_key', async () => {
+    const putConfigResolution = jest.fn().mockResolvedValue({});
+    const { service } = buildService({
+      putConfigResolution,
+      listResolutions: jest.fn().mockResolvedValue([
+        {
+          prefix: 'DSJ',
+          resolution: '18764113677707',
+          resolution_date: '2026-08-05',
+          from: 1,
+          to: 10000,
+          date_from: '2026-08-05',
+          date_to: '2028-08-05',
+          dianVigency: true,
+        },
+      ]),
+    });
+
+    await service.saveResolution(
+      buildRequest({
+        kind: JarvisResolutionKind.SUPPORT_DOCUMENT,
+        prefix: 'DSJ',
+        formNumber: '13028144278805',
+        technicalKey: 'c1d58955-b1f5-4872-bd19-e93b85eea211',
+        documentTypeLabel: 'DOCUMENTO SOPORTE',
+        dateFrom: '2026-08-05',
+        dateTo: '2028-08-05',
+        authorizedAt: '2026-08-05',
+      }),
+      'company-1',
+    );
+
+    expect(putConfigResolution.mock.calls[0][0]).not.toHaveProperty(
+      'technical_key',
+    );
+    expect(putConfigResolution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type_document_id: 11,
+        prefix: 'DSJ',
+        resolution: '18764113677707',
+      }),
       'company-token',
     );
   });

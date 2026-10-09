@@ -564,6 +564,52 @@ describe('NextPymeApiClient.listResolutions', () => {
     );
     expect(resolutions).toHaveLength(2);
   });
+
+  it('prioriza ResolutionNumber y TechnicalKey de la DIAN cuando NextPyme tiene un número o UUID viejos', async () => {
+    const { client } = buildClientWithPost({
+      data: [
+        {
+          id: 3,
+          type_document_id: 1,
+          prefix: 'FVJ',
+          number: 1,
+          from: 1,
+          to: 10000,
+          resolution: '13028144278805',
+          technical_key: 'c1d58955-b1f5-4872-bd19-e93b85eea211',
+        },
+        {
+          id: 4,
+          type_document_id: 11,
+          prefix: 'DSJ',
+          number: 1,
+          from: 1,
+          to: 10000,
+          resolution: '13028144278805',
+        },
+      ],
+      ResponseDian: DIAN_NUMBERING_RANGE_RESPONSE.ResponseDian,
+    });
+
+    const resolutions = await client.listResolutions(softwareId, 'company-token');
+
+    expect(resolutions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          prefix: 'FVJ',
+          resolution: '18764113677438',
+          technical_key: 'a2e4cf48298098fdd401d2e03b14ae13a048c58b',
+          dianVigency: true,
+        }),
+        expect.objectContaining({
+          prefix: 'DSJ',
+          resolution: '18764113677707',
+          dianVigency: true,
+        }),
+      ]),
+    );
+    expect(resolutions).toHaveLength(2);
+  });
 });
 
 describe('NextPymeApiClient.getInvoiceXmlByCufe', () => {
