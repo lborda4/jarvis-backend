@@ -31,6 +31,7 @@ function setup(
   const numbering = {
     allocateResolutionNumber: jest.fn().mockResolvedValue({ prefix: 'FVJ', number: 1, formNumber: '18764113677438' }),
     commitResolutionNumber: jest.fn(),
+    ensureSupportCreditNotePrefixOnNextPyme: jest.fn().mockResolvedValue(undefined),
   };
   const siigoNumbering = {
     allocateNumber: jest.fn().mockResolvedValue({ prefix: 'NC', number: 1, formNumber: null }),
@@ -355,6 +356,11 @@ describe('Notas de ajuste de documento soporte', () => {
     expect(client.createCreditNote).not.toHaveBeenCalled();
     expect(client.createSupportDocument).not.toHaveBeenCalled();
     expect(numbering.allocateResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.SUPPORT_CREDIT_NOTE);
+    expect(numbering.ensureSupportCreditNotePrefixOnNextPyme).toHaveBeenCalledWith(
+      'company-1',
+      'NDS',
+      'company-token',
+    );
     const payload = client.createSupportCreditNote.mock.calls[0][0];
     expect(payload).toEqual(expect.objectContaining({
       type_document_id: 13,

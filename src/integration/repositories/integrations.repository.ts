@@ -51,6 +51,14 @@ export class IntegrationsRepository {
     return this.repository.create(data);
   }
 
+  findAllActiveByProvider(
+    provider: IntegrationProvider,
+  ): Promise<Integration[]> {
+    return this.repository.find({
+      where: { provider, active: true },
+    });
+  }
+
   /** Todas las integraciones activas de un proveedor con suscripción
    * ACTIVA — usado por el resync automático de historial de compras en
    * segundo plano, que no tiene sentido gastar contra SIIGO en empresas

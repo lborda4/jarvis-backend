@@ -7,7 +7,7 @@ import { AppConfiguration } from './config/configuration';
 import { SocketIoAdapter } from './realtime/socket-io.adapter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   const configService = app.get(ConfigService<AppConfiguration, true>);
 
@@ -17,7 +17,12 @@ async function bootstrap() {
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'rquid'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'rquid',
+      'x-bold-signature',
+    ],
   });
 
   app.useGlobalFilters(new HttpExceptionFilter());

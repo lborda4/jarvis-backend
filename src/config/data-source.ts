@@ -1,4 +1,5 @@
 import { JarvisPaymentMethod } from '../integration/jarvis/entities/jarvis-payment-method.entity';
+import { BoldWebhookEvent } from '../bold/entities/bold-webhook-event.entity';
 import { SiigoBoldCashRegister } from '../bold/entities/siigo-bold-cash-register.entity';
 import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
 import { DataSource } from 'typeorm';
@@ -41,6 +42,7 @@ export default new DataSource({
     JarvisPaymentMethod,
     JarvisSalesInvoice,
     SiigoBoldCashRegister,
+    BoldWebhookEvent,
     Integration,
     Company,
     Plan,

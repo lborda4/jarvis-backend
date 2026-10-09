@@ -330,6 +330,14 @@ export class JarvisInvoiceSendService {
             )}`,
           );
 
+          if (isSupportCreditNote) {
+            await this.jarvisSetupService.ensureSupportCreditNotePrefixOnNextPyme(
+              companyId,
+              numbering.prefix,
+              companyToken,
+            );
+          }
+
           const documentDiscount = Math.max(
             0,
             Number(request.discountAmount ?? 0),

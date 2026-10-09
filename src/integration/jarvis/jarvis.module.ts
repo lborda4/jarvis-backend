@@ -32,7 +32,7 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     HttpModule,
     AppConfigModule,
     PlanModule,
-    IntegrationModule,
+    forwardRef(() => IntegrationModule),
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),
     TypeOrmModule.forFeature([JarvisPaymentMethod, JarvisTercero, JarvisTax, JarvisSalesInvoice]),

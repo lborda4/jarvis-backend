@@ -578,6 +578,69 @@ export class NextPymeApiClient {
     }
   }
 
+  /** PUT /config/logo — NextPyme solo admite JPG en base64, sin prefijo data:. */
+  async putConfigLogo(
+    logoBase64: string,
+    companyToken?: string,
+  ): Promise<UnknownRecord> {
+    const token = this.requireToken(companyToken);
+    const baseUrl = this.getBaseUrl();
+    const logo = this.toRawJpegBase64(logoBase64);
+    if (!logo) {
+      throw new BadGatewayException(
+        'El logotipo para NextPyme debe ser JPG en base64.',
+      );
+    }
+
+    this.logger.log(
+      `[config/logo] PUT ${baseUrl}/config/logo logoChars=${logo.length}`,
+    );
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.put<unknown>(
+          `${baseUrl}/config/logo`,
+          { logo },
+          {
+            headers: this.buildAuthHeaders(token),
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        ),
+      );
+
+      const responseJson = JSON.stringify(response.data, null, 2);
+      this.logger.log(
+        `[config/logo] status=${response.status} respuesta=${responseJson}`,
+      );
+      console.log(
+        `[NextPyme config/logo] Respuesta HTTP ${response.status}:`,
+        responseJson,
+      );
+
+      if (response.status < 200 || response.status >= 300) {
+        const detail = this.extractErrorMessage(response.data);
+        throw new BadGatewayException(
+          detail ||
+            `No se pudo configurar el logotipo (código ${response.status}).`,
+        );
+      }
+
+      return (response.data as UnknownRecord) ?? {};
+    } catch (error) {
+      if (
+        error instanceof BadGatewayException ||
+        error instanceof ServiceUnavailableException
+      ) {
+        throw error;
+      }
+
+      throw new BadGatewayException(
+        'No fue posible configurar el logotipo en NextPyme. Intenta nuevamente.',
+      );
+    }
+  }
+
   async createSupportDocument(
     payload: NextPymeSupportDocumentCreatePayload,
     companyToken?: string,
@@ -1253,6 +1316,15 @@ export class NextPymeApiClient {
     }
 
     return null;
+  }
+
+  private toRawJpegBase64(value: string): string {
+    const trimmed = value.trim();
+    const withoutPrefix = trimmed.replace(
+      /^data:image\/(?:jpeg|jpg);base64,/i,
+      '',
+    );
+    return withoutPrefix.replace(/\s/g, '');
   }
 
   private requireToken(companyToken?: string): string {

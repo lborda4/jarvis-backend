@@ -2,18 +2,25 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
+  HttpCode,
   HttpException,
+  HttpStatus,
   Logger,
   Query,
   Param,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import type { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { AdminGuard } from '../admin/guards/admin.guard';
 import { BoldCashRegistersService } from './bold-cash-registers.service';
 import { BoldPaymentsService } from './bold-payments.service';
 import { BoldTerminalsService } from './bold-terminals.service';
+import { BoldWebhookService } from './bold-webhook.service';
 import {
   BoldCashRegisterDto,
   ListBoldCashRegistersResponseDto,
@@ -33,6 +40,7 @@ export class BoldController {
     private readonly boldTerminalsService: BoldTerminalsService,
     private readonly boldCashRegistersService: BoldCashRegistersService,
     private readonly boldCheckoutService: BoldCheckoutService,
+    private readonly boldWebhookService: BoldWebhookService,
   ) {}
 
   @Get('payments/payment-methods')
@@ -74,6 +82,27 @@ export class BoldController {
       await this.boldCashRegistersService.upsert(request);
 
     return { item };
+  }
+
+  /**
+   * Bold POST aquí cuando una transacción cambia de estado (aprobada,
+   * rechazada, anulación). Registrar `https://<host>/bold/webhooks` en
+   * Panel Comercios → Integraciones → Webhooks. Responde 200 enseguida
+   * (Bold espera máximo 2s; si no, reintenta hasta 5 veces).
+   */
+  @Public()
+  @Post('webhooks')
+  @HttpCode(HttpStatus.OK)
+  receiveWebhook(
+    @Req() request: RawBodyRequest<Request>,
+    @Headers('x-bold-signature') signature: string | undefined,
+    @Body() body: unknown,
+  ) {
+    return this.boldWebhookService.receive({
+      rawBody: request.rawBody,
+      signature,
+      body,
+    });
   }
 
   /** Recepción pública de la extensión para la primera empresa integrada.

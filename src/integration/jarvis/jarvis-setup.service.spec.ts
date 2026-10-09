@@ -516,6 +516,79 @@ describe('Numeracion independiente de notas de ajuste', () => {
     expect(saved.credentials.resolutions.support_credit_note.nextConsecutive).toBe(2);
     expect(saved.credentials.resolutions.support_credit_note.prefix).toBe('NDS');
   });
+
+  it('registra NDS en NextPyme con type_document_id 13 y los datos DIAN del documento soporte', async () => {
+    const putConfigResolution = jest.fn().mockResolvedValue({});
+    const findByCompanyAndProvider = jest.fn().mockResolvedValue({
+      id: 'integration-1',
+      credentials: {
+        business_name: 'Empresa SAS',
+        trade_name: 'Empresa',
+        tax_regime: 'common',
+        vat_regime: 'vat_responsible',
+        tax_responsibility: 'R-99-PN',
+        economic_activity: '1234',
+        country: 'CO',
+        department: 'Antioquia',
+        municipality: 'Medellín',
+        city: 'Medellín',
+        email: 'a@a.com',
+        address: 'Calle 1',
+        phone: '3000000000',
+        configured_at: new Date().toISOString(),
+        resolutions: {
+          support_document: {
+            kind: JarvisResolutionKind.SUPPORT_DOCUMENT,
+            documentTypeLabel: 'DOCUMENTO SOPORTE',
+            prefix: 'DSJ',
+            formNumber: '18764113677707',
+            fromNumber: 1,
+            toNumber: 10000,
+            nextConsecutive: 2,
+            authorizedAt: '2026-08-05',
+            dateFrom: '2026-08-05',
+            dateTo: '2028-08-05',
+          },
+        },
+      },
+    });
+    const { service } = buildService({ putConfigResolution, findByCompanyAndProvider });
+
+    await service.ensureSupportCreditNotePrefixOnNextPyme(
+      'company-1',
+      'nds',
+      'company-token',
+    );
+
+    expect(putConfigResolution).toHaveBeenCalledWith(
+      {
+        type_document_id: 13,
+        prefix: 'NDS',
+        resolution: '18764113677707',
+        resolution_date: '2026-08-05',
+        from: 1,
+        to: 9999999,
+        generated_to_date: 0,
+        date_from: '2026-08-05',
+        date_to: '2028-08-05',
+      },
+      'company-token',
+    );
+    expect(putConfigResolution.mock.calls[0][0]).not.toHaveProperty('technical_key');
+  });
+
+  it('no registra NDS si falta la resolución de documento soporte', async () => {
+    const putConfigResolution = jest.fn();
+    const { service } = buildService({ putConfigResolution });
+    await expect(
+      service.ensureSupportCreditNotePrefixOnNextPyme(
+        'company-1',
+        'NDS',
+        'company-token',
+      ),
+    ).rejects.toThrow('Documento soporte');
+    expect(putConfigResolution).not.toHaveBeenCalled();
+  });
 });
 
 describe('Numeracion independiente de notas debito', () => {

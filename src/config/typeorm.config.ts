@@ -1,5 +1,6 @@
 import { JarvisPaymentMethod } from '../integration/jarvis/entities/jarvis-payment-method.entity';
 import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
+import { BoldWebhookEvent } from '../bold/entities/bold-webhook-event.entity';
 import { SiigoBoldCashRegister } from '../bold/entities/siigo-bold-cash-register.entity';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
@@ -35,6 +36,7 @@ export function buildTypeOrmConfig(
       JarvisPaymentMethod,
     JarvisSalesInvoice,
       SiigoBoldCashRegister,
+      BoldWebhookEvent,
       Integration,
       Company,
       Plan,

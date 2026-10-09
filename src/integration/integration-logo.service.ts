@@ -1,8 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, Optional, PayloadTooLargeException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Integration } from './entities/integration.entity';
 import { IntegrationProvider } from './enums/integration-provider.enum';
+import { NextPymeApiClient } from './jarvis/nextpyme/nextpyme-api.client';
+import { NextPymeMasterCatalogService } from './jarvis/nextpyme/nextpyme-master-catalog.service';
 
 export const MAX_LOGO_BYTES = 500 * 1024;
 
@@ -37,7 +39,15 @@ export function logoMime(data: Buffer): 'image/png' | 'image/jpeg' {
 
 @Injectable()
 export class IntegrationLogoService {
-  constructor(@InjectRepository(Integration) private readonly integrations: Repository<Integration>) {}
+  constructor(
+    @InjectRepository(Integration) private readonly integrations: Repository<Integration>,
+    @Optional()
+    @Inject(forwardRef(() => NextPymeApiClient))
+    private readonly nextPymeApiClient?: NextPymeApiClient,
+    @Optional()
+    @Inject(forwardRef(() => NextPymeMasterCatalogService))
+    private readonly nextPymeMasterCatalog?: NextPymeMasterCatalogService,
+  ) {}
   async get(companyId: string, provider: IntegrationProvider): Promise<{ logoDataUrl: string | null }> {
     const integration = await this.integrations.createQueryBuilder('integration').addSelect('integration.logo')
       .where('integration.companyId = :companyId', { companyId })
@@ -49,6 +59,16 @@ export class IntegrationLogoService {
   async save(companyId: string, provider: IntegrationProvider, file?: Express.Multer.File) {
     if (!file?.buffer?.length) throw new BadRequestException('Selecciona una imagen PNG o JPG.');
     const mime = logoMime(file.buffer);
+    if (provider === IntegrationProvider.JARVIS) {
+      if (mime !== 'image/jpeg') {
+        throw new BadRequestException('El logotipo para facturación electrónica debe ser JPG.');
+      }
+      if (!this.nextPymeApiClient || !this.nextPymeMasterCatalog) {
+        throw new BadRequestException('No está disponible la configuración de logo en NextPyme.');
+      }
+      const token = await this.nextPymeMasterCatalog.requireCompanyToken(companyId);
+      await this.nextPymeApiClient.putConfigLogo(file.buffer.toString('base64'), token);
+    }
     await this.update(companyId, provider, file.buffer);
     return { logoDataUrl: `data:${mime};base64,${file.buffer.toString('base64')}` };
   }

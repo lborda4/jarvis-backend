@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { IntegrationLogoService } from './integration-logo.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HistorialFactura } from './entities/historial-factura.entity';
@@ -17,9 +17,11 @@ import { SupplierConfigurationsRepository } from './repositories/supplier-config
 import { SupplierItemAccountMappingsRepository } from './repositories/supplier-item-account-mappings.repository';
 import { IntegrationSetupService } from './integration-setup.service';
 import { SiigoCreditNoteNumberingService } from './siigo/siigo-credit-note-numbering.service';
+import { JarvisModule } from './jarvis/jarvis.module';
 
 @Module({
   imports: [
+    forwardRef(() => JarvisModule),
     TypeOrmModule.forFeature([
       Integration,
       SupplierConfiguration,

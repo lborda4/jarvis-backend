@@ -519,6 +519,68 @@ export class JarvisSetupService {
   }
 
   /**
+   * NextPyme valida el prefijo de sd-credit-note contra resoluciones
+   * registradas (type_document_id 13). NDS es numeración local: hay que
+   * PUT /config/resolution con los datos DIAN del documento soporte.
+   */
+  async ensureSupportCreditNotePrefixOnNextPyme(
+    companyId: string,
+    prefix: string,
+    companyToken: string,
+  ): Promise<void> {
+    const trimmedCompanyId = companyId?.trim();
+    const notePrefix = prefix?.trim().toUpperCase();
+    if (!trimmedCompanyId || !notePrefix) {
+      throw new BadRequestException(
+        'No se pudo determinar el prefijo de la nota de ajuste.',
+      );
+    }
+
+    const integration =
+      await this.integrationsRepository.findByCompanyAndProvider(
+        trimmedCompanyId,
+        IntegrationProvider.JARVIS,
+      );
+    const credentials = normalizeJarvisCredentials(
+      integration?.credentials ?? {},
+    );
+    const supportDocument = credentials.resolutions?.support_document;
+    if (!isJarvisResolutionConfigured(supportDocument)) {
+      throw new BadRequestException(
+        'Configure primero la resolución de Documento soporte para poder emitir notas de ajuste.',
+      );
+    }
+
+    const dateFrom = normalizeResolutionDate(supportDocument!.dateFrom);
+    const dateTo = normalizeResolutionDate(supportDocument!.dateTo);
+    const resolutionDate =
+      normalizeResolutionDate(supportDocument!.authorizedAt) || dateFrom;
+    if (!dateFrom || !dateTo || !resolutionDate) {
+      throw new BadRequestException(
+        'La resolución de Documento soporte no tiene vigencia. Vuelva a configurarla.',
+      );
+    }
+
+    const note = ensureJarvisSupportCreditNoteResolution(
+      credentials.resolutions?.support_credit_note,
+    );
+    await this.nextPymeApiClient.putConfigResolution(
+      {
+        type_document_id: 13,
+        prefix: notePrefix,
+        resolution: supportDocument!.formNumber!.trim(),
+        resolution_date: resolutionDate,
+        from: note.fromNumber,
+        to: note.toNumber,
+        generated_to_date: 0,
+        date_from: dateFrom,
+        date_to: dateTo,
+      },
+      companyToken,
+    );
+  }
+
+  /**
    * Reserva el siguiente consecutivo de la resolución ya configurada.
    * No vuelve a hacer PUT a NextPyme: eso ocurre solo al guardar en Configuración.
    */

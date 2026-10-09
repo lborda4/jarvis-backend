@@ -8,8 +8,11 @@ import { BoldController } from './bold.controller';
 import { BoldPaymentsService } from './bold-payments.service';
 import { BoldCheckoutService } from './bold-checkout.service';
 import { BoldTerminalsService } from './bold-terminals.service';
+import { BoldWebhookService } from './bold-webhook.service';
 import { BoldHttpClient } from './clients/bold-http.client';
+import { BoldWebhookEvent } from './entities/bold-webhook-event.entity';
 import { SiigoBoldCashRegister } from './entities/siigo-bold-cash-register.entity';
+import { BoldWebhookEventsRepository } from './repositories/bold-webhook-events.repository';
 import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash-registers.repository';
 
 @Module({
@@ -20,7 +23,7 @@ import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash
     HttpModule,
     IntegrationModule,
     AuthModule,
-    TypeOrmModule.forFeature([SiigoBoldCashRegister]),
+    TypeOrmModule.forFeature([SiigoBoldCashRegister, BoldWebhookEvent]),
   ],
   controllers: [BoldController],
   providers: [
@@ -28,8 +31,10 @@ import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash
     BoldPaymentsService,
     BoldTerminalsService,
     BoldCashRegistersService,
+    BoldWebhookService,
     BoldHttpClient,
     SiigoBoldCashRegistersRepository,
+    BoldWebhookEventsRepository,
   ],
   exports: [SiigoBoldCashRegistersRepository],
 })

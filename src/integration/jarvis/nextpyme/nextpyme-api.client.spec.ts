@@ -6,6 +6,7 @@ describe('NextPyme company authentication', () => {
     const { client, httpService } = buildClient({ 'nextPyme.apiToken': 'global-token' });
     await expect(client.listResolutions('software-id', token)).rejects.toThrow('token de NextPyme');
     await expect(client.putConfigResolution({} as any, token)).rejects.toThrow('token de NextPyme');
+    await expect(client.putConfigLogo('/9j/xxxx', token)).rejects.toThrow('token de NextPyme');
     await expect(client.fetchMasterTable('taxes', token)).rejects.toThrow('token de NextPyme');
     await expect(client.getInvoiceByCufe('cufe', token)).rejects.toThrow('token de NextPyme');
     await expect(client.createSupportDocument({} as any, token)).rejects.toThrow('token de NextPyme');
@@ -52,6 +53,22 @@ describe('NextPyme company authentication', () => {
         prefix: 'FVJ',
         technical_key:
           'a2e4cf48298098fdd401d2e03b14ae13a048c58b6e6b2d122b39aca2a0250c1a',
+      }),
+    );
+  });
+
+  it('configura el logo JPG en PUT /config/logo sin prefijo data:', async () => {
+    const { client, httpService } = buildClient();
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: true } }));
+    await client.putConfigLogo(
+      'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQE',
+      ' company-token ',
+    );
+    expect(httpService.put).toHaveBeenCalledWith(
+      'https://nextpyme.example/config/logo',
+      { logo: '/9j/4AAQSkZJRgABAQE' },
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer company-token' }),
       }),
     );
   });
