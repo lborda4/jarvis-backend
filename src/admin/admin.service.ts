@@ -833,12 +833,20 @@ export class AdminService {
   private technicalKeyFromCredentials(
     credentials?: Integration['credentials'] | null,
   ): string | null {
+    return this.credentialField(credentials, 'technical_key', 'technicalKey');
+  }
+
+  private credentialField(
+    credentials: Integration['credentials'] | null | undefined,
+    snake: string,
+    camel: string,
+  ): string | null {
     if (!credentials || typeof credentials !== 'object') {
       return null;
     }
 
     const raw = credentials as Record<string, unknown>;
-    const value = String(raw.technical_key ?? raw.technicalKey ?? '').trim();
+    const value = String(raw[snake] ?? raw[camel] ?? '').trim();
     return value || null;
   }
 }

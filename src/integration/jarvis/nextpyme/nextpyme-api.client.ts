@@ -459,7 +459,7 @@ export class NextPymeApiClient {
     const softwareId = idSoftware?.trim();
     if (!softwareId) {
       throw new ServiceUnavailableException(
-        'La empresa no tiene un ID de software DIAN configurado.',
+        'La empresa no tiene una llave técnica configurada.',
       );
     }
 

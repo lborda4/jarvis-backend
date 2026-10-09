@@ -44,13 +44,31 @@ describe('NextPyme company catalogs', () => {
     ]);
   });
 
-  it('rejects missing company IDSoftware even with a token', async () => {
+  it('uses the technical key as IDSoftware when id_software is missing', async () => {
+    const { service, client, integrations } = setup();
+    integrations.findByCompanyAndProvider.mockImplementation(
+      async (_id: string, provider: string) =>
+        provider === 'JARVIS'
+          ? { credentials: { technical_key: ' fc8eac-clave ' } }
+          : null,
+    );
+
+    const resolutions = await service.listResolutions('a');
+
+    expect(resolutions[0].resolution).toBe('fc8eac-clave');
+    expect(client.listResolutions).toHaveBeenCalledWith(
+      'fc8eac-clave',
+      'token-a',
+    );
+  });
+
+  it('rejects missing technical key even with a token', async () => {
     const { service, integrations } = setup();
-    integrations.findByCompanyAndProvider.mockResolvedValueOnce({
+    integrations.findByCompanyAndProvider.mockResolvedValue({
       credentials: {},
     });
     await expect(service.listResolutions('a')).rejects.toThrow(
-      'ID de software DIAN',
+      'llave técnica',
     );
   });
 

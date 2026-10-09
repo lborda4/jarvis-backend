@@ -66,20 +66,37 @@ export class NextPymeMasterCatalogService {
   }
 
   private async requireIdSoftware(companyId?: string): Promise<string> {
-    const integration = companyId?.trim()
-      ? await this.integrations.findByCompanyAndProvider(
-          companyId.trim(),
-          IntegrationProvider.JARVIS,
-        )
-      : null;
-    const idSoftware = normalizeJarvisCredentials(
-      integration?.credentials ?? {},
-    ).id_software?.trim();
+    const trimmedCompanyId = companyId?.trim();
+    const [jarvis, siigo] = trimmedCompanyId
+      ? await Promise.all([
+          this.integrations.findByCompanyAndProvider(
+            trimmedCompanyId,
+            IntegrationProvider.JARVIS,
+          ),
+          this.integrations.findByCompanyAndProvider(
+            trimmedCompanyId,
+            IntegrationProvider.SIIGO,
+          ),
+        ])
+      : [null, null];
+
+    const candidates = [jarvis, siigo].map((integration) =>
+      normalizeJarvisCredentials(integration?.credentials ?? {}),
+    );
+    const idSoftware = candidates
+      .flatMap((credentials) => [
+        credentials.id_software,
+        credentials.technical_key,
+      ])
+      .map((value) => value?.trim())
+      .find(Boolean);
+
     if (!idSoftware) {
       throw new ServiceUnavailableException(
-        'La empresa no tiene un ID de software DIAN configurado.',
+        'La empresa no tiene una llave técnica configurada.',
       );
     }
+
     return idSoftware;
   }
 
