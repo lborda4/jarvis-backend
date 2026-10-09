@@ -5,6 +5,17 @@ export interface BoldWebhookAmount {
   tip?: number;
 }
 
+export interface BoldWebhookCard {
+  capture_mode?: string;
+  brand?: string;
+  franchise?: string;
+  cardholder_name?: string;
+  terminal_id?: string;
+  masked_pan?: string;
+  installments?: number;
+  card_type?: string;
+}
+
 export interface BoldWebhookNotificationData {
   payment_id?: string;
   merchant_id?: string;
@@ -17,7 +28,7 @@ export interface BoldWebhookNotificationData {
   integration?: string;
   user_id?: string;
   payer_email?: string;
-  card?: Record<string, unknown>;
+  card?: BoldWebhookCard;
 }
 
 /** CloudEvent que Bold POST al endpoint registrado en el panel. */
