@@ -8,7 +8,9 @@ interface InvoiceChargeTaxLine {
   discount: number;
 }
 
-/** Conserva el tipo y la tarifa de cada línea al agrupar los impuestos. */
+/** Conserva el tipo y la tarifa de cada línea al agrupar los impuestos.
+ * IVA 0% (includeZeroAmount) cubre FAU04 en factura y DSAU04 en soporte:
+ * TaxExclusiveAmount debe igualar la suma de bases imponibles de las líneas. */
 export function buildJarvisInvoiceChargeTaxTotals(
   lines: InvoiceChargeTaxLine[],
   options?: { includeZeroAmount?: boolean },

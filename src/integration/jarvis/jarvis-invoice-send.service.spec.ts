@@ -72,11 +72,35 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     expect(line).not.toHaveProperty('start_date');
     expect(line.free_of_charge_indicator).toBe(false);
     expect(line.line_extension_amount).toBe('500.00');
-    if (taxAmount > 0) {
-      expect(line.tax_totals).toEqual([{
-        tax_id: 1, tax_amount: '95.00', taxable_amount: '500.00', percent: '19.00',
-      }]);
-    }
+    expect(line.tax_totals).toEqual([{
+      tax_id: 1,
+      tax_amount: taxAmount > 0 ? '95.00' : '0.00',
+      taxable_amount: '500.00',
+      percent: taxAmount > 0 ? '19.00' : '0.00',
+    }]);
+  });
+
+  it('factura de venta sin IVA envía tax_totals 0% en documento y líneas (FAU04)', async () => {
+    const { service, request, client } = setup();
+    await service.createAndSendInvoice({
+      ...request,
+      items: [{
+        description: 'SERVICIO POR EL AÑO 2026',
+        quantity: 1,
+        unitValue: 450000,
+        code: 'SERV-01',
+        taxAmount: 0,
+      }],
+    }, 'company-1');
+
+    const body = client.createInvoice.mock.calls[0][0];
+    expect(body.tax_totals).toEqual([{
+      tax_id: 1, tax_amount: '0.00', taxable_amount: '450000.00', percent: '0.00',
+    }]);
+    expect(body.invoice_lines[0].tax_totals).toEqual([{
+      tax_id: 1, tax_amount: '0.00', taxable_amount: '450000.00', percent: '0.00',
+    }]);
+    expect(body.legal_monetary_totals.tax_exclusive_amount).toBe('450000.00');
   });
 
   it('envía con el token guardado en companies y conserva el body de factura', async () => {

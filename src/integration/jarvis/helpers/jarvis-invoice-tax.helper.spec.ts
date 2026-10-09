@@ -16,7 +16,7 @@ describe('impuestos cargo de factura de venta', () => {
     ]);
   });
 
-  it('incluye IVA 0% cuando se pide (DSAU04 en documento soporte)', () => {
+  it('incluye IVA 0% cuando se pide (FAU04 en factura / DSAU04 en documento soporte)', () => {
     expect(
       buildJarvisInvoiceChargeTaxTotals(
         [{ taxId: 1, taxAmount: 0, quantity: 1, unitValue: 150000, discount: 0 }],

@@ -84,6 +84,7 @@ export class JarvisInvoiceSendService {
       isDebitNote ||
       isSupportCreditNote;
     const isSupport = kind === JarvisResolutionKind.SUPPORT_DOCUMENT;
+    const isSaleInvoice = kind === JarvisResolutionKind.ELECTRONIC_INVOICE;
     const documentLabel = isDebitNote ? "nota débito" : isSupportCreditNote ? "nota de ajuste" : isNote ? "nota crédito" : isSupport ? "documento soporte" : "factura de venta";
     const issueDate = request.issueDate?.trim();
     const customerIdentification = normalizeJarvisDocumentNumber(
@@ -350,7 +351,9 @@ export class JarvisInvoiceSendService {
 
           const taxTotals = isNote || isSupport
             ? buildJarvisInvoiceChargeTaxTotals(parsedItems, { includeZeroAmount: true })
-            : buildJarvisInvoiceChargeTaxTotals(parsedItems);
+            : buildJarvisInvoiceChargeTaxTotals(parsedItems, {
+                includeZeroAmount: isSaleInvoice,
+              });
           const withholdingTotals: typeof taxTotals = [];
           const retentionEntries = [
             ...(request.retentions ?? []).map(retention => ({ retention, base: taxableBase, iva: ivaTotal })),
@@ -386,20 +389,19 @@ export class JarvisInvoiceSendService {
             const lineExtension = toMoney(
               item.quantity * item.unitValue - item.discount,
             );
+            const lineTax = {
+              tax_id: item.taxId,
+              tax_amount: formatMoney(item.taxAmount),
+              taxable_amount: formatMoney(lineExtension),
+              percent: formatMoney(
+                lineExtension > 0
+                  ? (item.taxAmount / lineExtension) * 100
+                  : 0,
+              ),
+            };
             const lineTaxTotals =
-              isNote || isSupport || item.taxAmount > 0
-                ? [
-                    {
-                      tax_id: item.taxId,
-                      tax_amount: formatMoney(item.taxAmount),
-                      taxable_amount: formatMoney(lineExtension),
-                      percent: formatMoney(
-                        lineExtension > 0
-                          ? (item.taxAmount / lineExtension) * 100
-                          : 0,
-                      ),
-                    },
-                  ]
+              isNote || isSupport || item.taxAmount > 0 || isSaleInvoice
+                ? [lineTax]
                 : undefined;
 
             // Orden UBL CreditNoteLine: AllowanceCharge → TaxTotal → Item/Price.
