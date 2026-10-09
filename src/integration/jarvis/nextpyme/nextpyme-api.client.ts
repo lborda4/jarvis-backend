@@ -514,12 +514,13 @@ export class NextPymeApiClient {
       ? { ...payloadWithoutKey, technical_key: technical_key.trim() }
       : payloadWithoutKey;
 
+    const requestJson = JSON.stringify(body, null, 2);
     this.logger.log(
-      `[config/resolution] PUT ${baseUrl}/config/resolution body=${JSON.stringify(
-        body,
-        null,
-        2,
-      )}`,
+      `[config/resolution] PUT ${baseUrl}/config/resolution body=${requestJson}`,
+    );
+    console.log(
+      '[NextPyme config/resolution] Body antes de enviar:',
+      requestJson,
     );
 
     try {
@@ -531,10 +532,13 @@ export class NextPymeApiClient {
         }),
       );
 
+      const responseJson = JSON.stringify(response.data, null, 2);
       this.logger.log(
-        `[config/resolution] status=${response.status} respuesta=${this.preview(
-          response.data,
-        )}`,
+        `[config/resolution] status=${response.status} respuesta=${responseJson}`,
+      );
+      console.log(
+        `[NextPyme config/resolution] Respuesta HTTP ${response.status}:`,
+        responseJson,
       );
 
       if (response.status < 200 || response.status >= 300) {
@@ -553,6 +557,20 @@ export class NextPymeApiClient {
       ) {
         throw error;
       }
+
+      const axiosData = axios.isAxiosError(error)
+        ? error.response?.data
+        : undefined;
+      this.logger.error(
+        `[config/resolution] error=${
+          error instanceof Error ? error.message : String(error)
+        } respuesta=${JSON.stringify(axiosData, null, 2) ?? 'n/a'}`,
+      );
+      console.log(
+        '[NextPyme config/resolution] Error al llamar el servicio:',
+        error instanceof Error ? error.message : String(error),
+        JSON.stringify(axiosData, null, 2),
+      );
 
       throw new BadGatewayException(
         'No fue posible configurar la resolución. Intenta nuevamente.',

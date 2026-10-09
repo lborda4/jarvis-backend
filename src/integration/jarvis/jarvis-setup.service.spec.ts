@@ -411,6 +411,9 @@ describe('Numeracion independiente de notas credito', () => {
     const {service, integrationsRepository, nextPymeApiClient} = buildService({});
     const saved = await service.saveResolution(buildRequest({ kind: JarvisResolutionKind.CREDIT_NOTE, prefix: 'NC', technicalKey: undefined }), 'company-1');
     expect(nextPymeApiClient.putConfigResolution).toHaveBeenCalledWith(expect.objectContaining({ type_document_id: 4 }), "company-token");
+    expect(nextPymeApiClient.putConfigResolution.mock.calls[0][0]).not.toHaveProperty(
+      'technical_key',
+    );
     const integration = integrationsRepository.save.mock.calls[0][0];
     const invoice = { ...saved.resolution, kind: JarvisResolutionKind.ELECTRONIC_INVOICE, prefix: 'FV', nextConsecutive: 50 };
     integration.credentials.resolutions.electronic_invoice = invoice;
@@ -494,6 +497,9 @@ describe('Numeracion independiente de notas debito', () => {
     const {service, integrationsRepository, nextPymeApiClient} = buildService({});
     const saved = await service.saveResolution(buildRequest({ kind: JarvisResolutionKind.DEBIT_NOTE, prefix: 'ND', technicalKey: undefined }), 'company-1');
     expect(nextPymeApiClient.putConfigResolution).toHaveBeenCalledWith(expect.objectContaining({ type_document_id: 5 }), "company-token");
+    expect(nextPymeApiClient.putConfigResolution.mock.calls[0][0]).not.toHaveProperty(
+      'technical_key',
+    );
     const integration = integrationsRepository.save.mock.calls[0][0];
     const invoice = { ...saved.resolution, kind: JarvisResolutionKind.ELECTRONIC_INVOICE, prefix: 'FV', nextConsecutive: 50 };
     integration.credentials.resolutions.electronic_invoice = invoice;

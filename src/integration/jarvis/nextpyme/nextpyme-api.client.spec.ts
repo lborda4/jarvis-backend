@@ -31,6 +31,30 @@ describe('NextPyme company authentication', () => {
     );
     expect(httpService.put.mock.calls[0][1]).not.toHaveProperty('technical_key');
   });
+
+  it('conserva technical_key en el PUT de factura de venta', async () => {
+    const { client, httpService } = buildClient();
+    httpService.put.mockReturnValue(
+      of({ status: 200, data: { success: true, message: 'resolución actualizada' } }),
+    );
+    await client.putConfigResolution(
+      {
+        type_document_id: 1,
+        prefix: 'FVJ',
+        technical_key:
+          'a2e4cf48298098fdd401d2e03b14ae13a048c58b6e6b2d122b39aca2a0250c1a',
+      } as any,
+      'company-token',
+    );
+    expect(httpService.put.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        type_document_id: 1,
+        prefix: 'FVJ',
+        technical_key:
+          'a2e4cf48298098fdd401d2e03b14ae13a048c58b6e6b2d122b39aca2a0250c1a',
+      }),
+    );
+  });
 });
 
 const VALID_NEXTPYME_RESPONSE = {

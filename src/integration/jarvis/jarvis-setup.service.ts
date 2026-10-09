@@ -383,18 +383,18 @@ export class JarvisSetupService {
       );
     }
 
-    const isSupportDocument =
-      request.kind === JarvisResolutionKind.SUPPORT_DOCUMENT;
-    // NextPyme PUT /config/resolution para factura espera la clave del
-    // software (la que se guarda en admin → credentials.technical_key), no
-    // la TechnicalKey del rango DIAN. El curl oficial manda esa misma llave
-    // con type_document_id 1.
+    // NextPyme PUT /config/resolution solo admite technical_key en factura
+    // de venta (type_document_id 1). Es la misma llave con la que se
+    // consultan los rangos (IDSoftware / credentials.technical_key), no la
+    // TechnicalKey del rango DIAN. Documento soporte no la envía.
+    const includeTechnicalKey =
+      request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE;
     const companyTechnicalKey =
       existing.technical_key?.trim() ||
       (await this.readSiigoTechnicalKey(trimmedCompanyId));
-    const technicalKey = isSupportDocument
-      ? undefined
-      : companyTechnicalKey || requestedTechnicalKey;
+    const technicalKey = includeTechnicalKey
+      ? companyTechnicalKey || requestedTechnicalKey
+      : undefined;
 
     if (!technicalKey && request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE) {
       throw new BadRequestException(
@@ -429,20 +429,34 @@ export class JarvisSetupService {
     // PUT /config/resolution con los datos del rango elegido. Si NextPyme
     // rechaza, no persistimos: el error que ve el usuario es el de ellos.
     const companyToken = await this.nextPymeMasterCatalogService.requireCompanyToken(trimmedCompanyId);
-    await this.nextPymeApiClient.putConfigResolution({
+    const nextPymePayload = {
       type_document_id: typeDocumentId,
       prefix,
       resolution: resolutionNumber,
       resolution_date: resolutionDate,
-      ...(isSupportDocument || !technicalKey
-        ? {}
-        : { technical_key: technicalKey }),
+      ...(includeTechnicalKey && technicalKey
+        ? { technical_key: technicalKey }
+        : {}),
       from: fromNumber,
       to: toNumber,
       generated_to_date: 0,
       date_from: dateFrom,
       date_to: dateTo,
-    }, companyToken);
+    };
+    this.logger.log(
+      `[saveResolution] company=${trimmedCompanyId} kind=${request.kind} PUT /config/resolution`,
+    );
+    const nextPymeResponse = await this.nextPymeApiClient.putConfigResolution(
+      nextPymePayload,
+      companyToken,
+    );
+    this.logger.log(
+      `[saveResolution] company=${trimmedCompanyId} kind=${request.kind} NextPyme respondió ${JSON.stringify(
+        nextPymeResponse,
+        null,
+        2,
+      )}`,
+    );
 
     // Persistimos en integrations.credentials todo lo necesario para emitir
     // (número de resolución DIAN, clave técnica, vigencia, rango y consecutivo).
@@ -461,7 +475,7 @@ export class JarvisSetupService {
       requestType: request.requestType?.trim() || null,
       year: request.year?.trim() || resolutionDate.slice(0, 4),
       authorizedAt: resolutionDate,
-      technicalKey: isSupportDocument ? null : technicalKey,
+      technicalKey: includeTechnicalKey ? technicalKey : null,
       dateFrom,
       dateTo,
       configuredAt: new Date().toISOString(),
@@ -469,7 +483,7 @@ export class JarvisSetupService {
 
     const credentials: JarvisCredentials = {
       ...existing,
-      ...(technicalKey && !isSupportDocument
+      ...(technicalKey && includeTechnicalKey
         ? { technical_key: technicalKey }
         : {}),
       resolutions: {
