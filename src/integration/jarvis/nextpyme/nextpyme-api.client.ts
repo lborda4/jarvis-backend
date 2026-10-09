@@ -212,6 +212,17 @@ export interface NextPymeInvoiceCreatePayload {
   }>;
 }
 
+export interface NextPymeSendEmailPayload {
+  prefix: string;
+  number: string;
+  base64graphicrepresentation?: string;
+  showacceptrejectbuttons?: boolean;
+  html_buttons?: string;
+  alternate_email?: string;
+  send_email_cc_list_as_email_cc?: boolean;
+  email_cc_list?: Array<{ email: string }>;
+}
+
 export interface NextPymeInvoiceQueryParty {
   identification_number?: string | number;
   name?: string;
@@ -691,6 +702,64 @@ export class NextPymeApiClient {
       );
     }
     return this.postDianUblDocument('invoice', payload, 'la factura de venta', token);
+  }
+
+  /**
+   * POST /ubl2.1/send-email — envía el ZIP del documento ya aceptado por
+   * la DIAN. Obligatorio `prefix` y `number`.
+   * https://developers.nextpyme.plus/docs/utilities?endpoint=16
+   */
+  async sendDocumentEmail(
+    payload: NextPymeSendEmailPayload,
+    companyToken: string,
+  ): Promise<UnknownRecord> {
+    const token = this.requireToken(companyToken);
+    const prefix = payload.prefix?.trim();
+    const number = String(payload.number ?? '').trim();
+    if (!prefix || !number) {
+      throw new BadGatewayException(
+        'El prefijo y el número del documento son obligatorios para enviar el correo.',
+      );
+    }
+    const body: NextPymeSendEmailPayload = {
+      prefix,
+      number,
+      base64graphicrepresentation: payload.base64graphicrepresentation ?? '',
+      showacceptrejectbuttons: payload.showacceptrejectbuttons === true,
+      html_buttons: payload.html_buttons ?? '',
+      send_email_cc_list_as_email_cc:
+        payload.send_email_cc_list_as_email_cc === true,
+      ...(payload.alternate_email
+        ? { alternate_email: payload.alternate_email }
+        : {}),
+      ...(payload.email_cc_list?.length
+        ? { email_cc_list: payload.email_cc_list }
+        : {}),
+    };
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post<unknown>(`${this.getBaseUrl()}/send-email`, body, {
+          headers: this.buildAuthHeaders(token),
+          timeout: 30000,
+          validateStatus: () => true,
+        }),
+      );
+      this.logger.log(
+        `[send-email] ${prefix}${number} status=${response.status} respuesta=${this.preview(response.data)}`,
+      );
+      if (response.status < 200 || response.status >= 300) {
+        throw new BadGatewayException(
+          this.extractErrorMessage(response.data) ||
+            `No se pudo enviar el correo del documento (código ${response.status}).`,
+        );
+      }
+      return (response.data as UnknownRecord) ?? {};
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException(
+        'No fue posible enviar el correo del documento. El documento ya quedó emitido ante la DIAN.',
+      );
+    }
   }
 
   /**

@@ -24,6 +24,10 @@ export class BoldWebhookEvent {
   @Column({ name: 'company_id', type: 'uuid', nullable: true })
   companyId: string | null;
 
+  /** `production` o `test` — el de pruebas no debe disparar cobros reales. */
+  @Column({ type: 'varchar', length: 16, default: 'production' })
+  environment: 'production' | 'test';
+
   @Column({ type: 'varchar' })
   type: string;
 

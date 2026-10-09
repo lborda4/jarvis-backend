@@ -85,9 +85,8 @@ export class BoldController {
   }
 
   /**
-   * Bold POST aquí cuando una transacción cambia de estado (aprobada,
-   * rechazada, anulación). Registrar `https://<host>/bold/webhooks` en
-   * Panel Comercios → Integraciones → Webhooks. Responde 200 enseguida
+   * Webhook de producción. Registrar en Panel Comercios → Integraciones
+   * → Webhooks. Firma con la llave secreta. Responde 200 enseguida
    * (Bold espera máximo 2s; si no, reintenta hasta 5 veces).
    */
   @Public()
@@ -98,7 +97,26 @@ export class BoldController {
     @Headers('x-bold-signature') signature: string | undefined,
     @Body() body: unknown,
   ) {
-    return this.boldWebhookService.receive({
+    return this.boldWebhookService.receiveProduction({
+      rawBody: request.rawBody,
+      signature,
+      body,
+    });
+  }
+
+  /**
+   * Webhook de pruebas de Bold (firma con llave vacía). Registrar en
+   * Panel Comercios → Integraciones → Webhooks → webhooks de prueba.
+   */
+  @Public()
+  @Post('webhooks/test')
+  @HttpCode(HttpStatus.OK)
+  receiveTestWebhook(
+    @Req() request: RawBodyRequest<Request>,
+    @Headers('x-bold-signature') signature: string | undefined,
+    @Body() body: unknown,
+  ) {
+    return this.boldWebhookService.receiveTest({
       rawBody: request.rawBody,
       signature,
       body,

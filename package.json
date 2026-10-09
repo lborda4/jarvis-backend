@@ -42,6 +42,7 @@
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/typeorm": "^11.0.1",
     "@nestjs/websockets": "^11.2.3",
+    "@react-pdf/renderer": "^4.9.0",
     "adm-zip": "^0.5.17",
     "axios": "^1.17.0",
     "bcrypt": "^6.0.0",
@@ -53,6 +54,8 @@
     "passport-jwt": "^4.0.1",
     "pdf-parse": "^2.4.5",
     "pg": "^8.21.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3",
@@ -73,6 +76,7 @@
     "@types/node": "^24.0.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
     "@types/supertest": "^7.0.0",
     "cross-env": "^10.1.0",
     "eslint": "^9.18.0",
@@ -94,12 +98,13 @@
     "moduleFileExtensions": [
       "js",
       "json",
-      "ts"
+      "ts",
+      "tsx"
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)sx?$": "ts-jest"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

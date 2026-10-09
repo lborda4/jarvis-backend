@@ -12,6 +12,8 @@ import {
 import type { BoldWebhookNotification } from './interfaces/bold-webhook-notification.interface';
 import { BoldWebhookEventsRepository } from './repositories/bold-webhook-events.repository';
 
+export type BoldWebhookEnvironment = 'production' | 'test';
+
 export interface ReceiveBoldWebhookInput {
   rawBody: Buffer | string | undefined;
   signature: string | string[] | undefined;
@@ -28,12 +30,23 @@ export class BoldWebhookService {
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
+  /** Webhook de producción: firma HMAC con la llave secreta de la empresa. */
+  receiveProduction(input: ReceiveBoldWebhookInput) {
+    return this.receive(input, 'production');
+  }
+
   /**
-   * Recibe el POST de Bold, verifica HMAC, persiste (idempotente) y
-   * responde 200. No dispara facturación ni SIIGO: solo deja constancia
-   * del cobro para el siguiente paso.
+   * Webhook de pruebas de Bold: la firma usa llave vacía.
+   * https://developers.bold.co/webhook
    */
-  async receive(input: ReceiveBoldWebhookInput): Promise<{ received: true }> {
+  receiveTest(input: ReceiveBoldWebhookInput) {
+    return this.receive(input, 'test');
+  }
+
+  private async receive(
+    input: ReceiveBoldWebhookInput,
+    environment: BoldWebhookEnvironment,
+  ): Promise<{ received: true }> {
     const rawBody = input.rawBody;
     const signature = readBoldSignatureHeader(input.signature);
     if (!rawBody || rawBody.length === 0 || !signature) {
@@ -42,9 +55,13 @@ export class BoldWebhookService {
       );
     }
 
-    const companyId = await this.companyIdForValidSignature(rawBody, signature);
+    const companyId = await this.companyIdForValidSignature(
+      rawBody,
+      signature,
+      environment,
+    );
     if (companyId === undefined) {
-      this.logger.warn('Webhook Bold con firma inválida');
+      this.logger.warn(`Webhook Bold ${environment} con firma inválida`);
       throw new UnauthorizedException(
         'No se pudo verificar el origen de la notificación.',
       );
@@ -54,12 +71,12 @@ export class BoldWebhookService {
     const paymentId = notification.data?.payment_id?.trim() || null;
     const reference = notification.data?.metadata?.reference?.trim() || null;
     const type = notification.type?.trim() || 'UNKNOWN';
-    const notificationId =
-      notification.id?.trim() || `sha256:${hashBoldWebhookRawBody(rawBody)}`;
+    const notificationId = this.notificationId(notification, rawBody, environment);
     const amountTotal = notification.data?.amount?.total;
     const outcome = await this.events.insertIfNew({
       notificationId,
       companyId,
+      environment,
       type,
       paymentId,
       reference,
@@ -74,6 +91,7 @@ export class BoldWebhookService {
 
     this.logger.log(
       [
+        environment,
         outcome === 'duplicate' ? 'duplicado' : 'recibido',
         type,
         `payment=${paymentId ?? '-'}`,
@@ -89,10 +107,19 @@ export class BoldWebhookService {
   private async companyIdForValidSignature(
     rawBody: Buffer | string,
     signature: string,
+    environment: BoldWebhookEnvironment,
   ): Promise<string | null | undefined> {
     const integrations = await this.integrations.findAllActiveByProvider(
       IntegrationProvider.BOLD,
     );
+
+    if (environment === 'test') {
+      if (!isBoldWebhookSignatureValid(rawBody, '', signature)) {
+        return undefined;
+      }
+      return integrations[0]?.companyId ?? null;
+    }
+
     for (const integration of integrations) {
       const secret = (integration.credentials as BoldCredentials | undefined)
         ?.secret_key?.trim();
@@ -110,15 +137,17 @@ export class BoldWebhookService {
       return integrations[0]?.companyId ?? null;
     }
 
-    const nodeEnv = this.configService.get('app.nodeEnv', { infer: true });
-    if (
-      nodeEnv !== 'production' &&
-      isBoldWebhookSignatureValid(rawBody, '', signature)
-    ) {
-      return integrations[0]?.companyId ?? null;
-    }
-
     return undefined;
+  }
+
+  private notificationId(
+    notification: BoldWebhookNotification,
+    rawBody: Buffer | string,
+    environment: BoldWebhookEnvironment,
+  ): string {
+    const id =
+      notification.id?.trim() || `sha256:${hashBoldWebhookRawBody(rawBody)}`;
+    return environment === 'test' ? `test:${id}` : id;
   }
 
   private parseNotification(

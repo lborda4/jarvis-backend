@@ -23,6 +23,7 @@ export class BoldWebhookEventsRepository {
       BoldWebhookEvent,
       | 'notificationId'
       | 'companyId'
+      | 'environment'
       | 'type'
       | 'paymentId'
       | 'reference'

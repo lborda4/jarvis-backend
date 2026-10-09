@@ -10,6 +10,7 @@ describe('NextPyme company authentication', () => {
     await expect(client.fetchMasterTable('taxes', token)).rejects.toThrow('token de NextPyme');
     await expect(client.getInvoiceByCufe('cufe', token)).rejects.toThrow('token de NextPyme');
     await expect(client.createSupportDocument({} as any, token)).rejects.toThrow('token de NextPyme');
+    await expect(client.sendDocumentEmail({ prefix: 'FE', number: '1' }, token)).rejects.toThrow('token de NextPyme');
     expect(httpService.request).not.toHaveBeenCalled();
     expect(httpService.put).not.toHaveBeenCalled();
     expect(httpService.post).not.toHaveBeenCalled();
@@ -220,6 +221,47 @@ describe('NextPymeApiClient.createInvoice', () => {
     httpService.post.mockReturnValue(of({ status, data }));
     await expect(client.createInvoice(payload, 'company-token')).rejects.toThrow(data.message);
     expect(consoleSpy).toHaveBeenCalledWith(`[NextPyme invoice] Respuesta HTTP ${status}:`, JSON.stringify(data, null, 2));
+  });
+});
+
+describe('NextPymeApiClient.sendDocumentEmail', () => {
+  it('POST /send-email with prefix, number and the company token', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { success: true } }));
+    await client.sendDocumentEmail(
+      {
+        prefix: ' FE ',
+        number: '1',
+        alternate_email: 'cliente@correo.com',
+        send_email_cc_list_as_email_cc: true,
+        email_cc_list: [{ email: 'contabilidad@empresa.com' }],
+      },
+      ' company-token ',
+    );
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://nextpyme.example/send-email',
+      {
+        prefix: 'FE',
+        number: '1',
+        base64graphicrepresentation: '',
+        showacceptrejectbuttons: false,
+        html_buttons: '',
+        send_email_cc_list_as_email_cc: true,
+        alternate_email: 'cliente@correo.com',
+        email_cc_list: [{ email: 'contabilidad@empresa.com' }],
+      },
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer company-token' }),
+      }),
+    );
+  });
+
+  it('rejects HTTP errors from NextPyme', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 422, data: { message: 'Documento no encontrado' } }));
+    await expect(
+      client.sendDocumentEmail({ prefix: 'FE', number: '1' }, 'company-token'),
+    ).rejects.toThrow('Documento no encontrado');
   });
 });
 

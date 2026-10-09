@@ -39,6 +39,7 @@ import {
   CreateJarvisInvoiceResponseDto,
 } from './dto/create-jarvis-invoice.dto';
 import { JarvisInvoiceHistoryService } from './jarvis-invoice-history.service';
+import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
 import { JarvisSetupService } from './jarvis-setup.service';
 import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog.service';
@@ -70,6 +71,7 @@ export class JarvisInvoiceSendService {
     private readonly jarvisSetupService: JarvisSetupService,
     private readonly invoiceHistory: JarvisInvoiceHistoryService,
     private readonly siigoCreditNoteNumberingService: SiigoCreditNoteNumberingService,
+    private readonly invoicePdf: JarvisInvoicePdfService,
   ) {}
 
   async createAndSendInvoice(
@@ -452,13 +454,13 @@ export class JarvisInvoiceSendService {
               isSupportCreditNote ? 13 : isDebitNote ? 5 : isNote ? 4 : isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
             number: numbering.number,
             date: issueDate,
-            ...((isSupport || isNote) ? { time: new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }), sendmail: false, sendmailtome: false } : {}),
+            sendmail: false,
+            sendmailtome: false,
+            ...((isSupport || isNote) ? { time: new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }) } : {}),
             ...(isNote ? {
               billing_reference: { number: request.billingReference!.number.trim(), uuid: request.billingReference!.uuid.trim(), issue_date: request.billingReference!.issueDate },
               discrepancyresponsecode: request.discrepancyResponseCode,
               discrepancyresponsedescription: request.discrepancyResponseDescription!.trim(),
-              sendmail: request.sendmail === true,
-              sendmailtome: request.sendmailtome === true,
               ...(request.seze?.trim() ? { seze: request.seze.trim() } : {}),
             } : {}),
             prefix: numbering.prefix,
@@ -686,6 +688,20 @@ export class JarvisInvoiceSendService {
             `[companyId=${companyId}] ${documentLabel} enviado a NextPyme (id=${createdId}, consecutive=${createdConsecutive}, number=${createdNumber}, cufe=${createdCufe ?? 'n/a'})`,
           );
 
+          await this.sendIssuedDocumentEmail({
+            companyId,
+            documentLabel,
+            token: companyToken,
+            prefix: numbering.prefix,
+            number: createdNumber,
+            customerEmail: tercero.email,
+            companyEmail: credentials.email,
+            historyId,
+            invoiceXml,
+            cufe: createdCufe,
+            documentKind: kind,
+          });
+
           return {
             success: true,
             invoice: {
@@ -720,4 +736,78 @@ export class JarvisInvoiceSendService {
       );
     }
   }
+
+  /**
+   * El documento ya está en la DIAN: un fallo de correo no debe invitar a
+   * reemitirlo. NextPyme envía el ZIP al cliente del documento; el correo
+   * de la empresa va en copia.
+   */
+  private async sendIssuedDocumentEmail(input: {
+    companyId: string;
+    documentLabel: string;
+    token: string;
+    prefix: string;
+    number: number;
+    customerEmail?: string | null;
+    companyEmail?: string | null;
+    historyId?: string;
+    invoiceXml?: string | null;
+    cufe?: string | null;
+    documentKind?: string | null;
+  }): Promise<void> {
+    const prefix = input.prefix?.trim();
+    if (!prefix) {
+      this.logger.warn(
+        `[companyId=${input.companyId}] ${input.documentLabel} ${input.number} sin prefijo; no se envió correo.`,
+      );
+      return;
+    }
+    const customerEmail = usableEmail(input.customerEmail);
+    const companyEmail = usableEmail(input.companyEmail);
+    const ccList =
+      companyEmail && companyEmail !== customerEmail
+        ? [{ email: companyEmail }]
+        : [];
+    const graphic = await this.invoicePdf.renderGraphicBase64({
+      companyId: input.companyId,
+      historyId: input.historyId,
+      invoiceXml: input.invoiceXml,
+      cufe: input.cufe,
+      documentKind: input.documentKind,
+      token: input.token,
+    });
+    try {
+      await this.nextPymeApiClient.sendDocumentEmail(
+        {
+          prefix,
+          number: String(input.number),
+          base64graphicrepresentation: graphic,
+          showacceptrejectbuttons: false,
+          html_buttons: '',
+          send_email_cc_list_as_email_cc: ccList.length > 0,
+          ...(customerEmail ? { alternate_email: customerEmail } : {}),
+          ...(ccList.length > 0 ? { email_cc_list: ccList } : {}),
+        },
+        input.token,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[companyId=${input.companyId}] ${input.documentLabel} ${prefix}${input.number} emitido, pero NextPyme no envió el correo: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+}
+
+function usableEmail(value: string | null | undefined): string | undefined {
+  const email = value?.trim();
+  if (
+    !email ||
+    email === 'sin-email@example.com' ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    return undefined;
+  }
+  return email;
 }

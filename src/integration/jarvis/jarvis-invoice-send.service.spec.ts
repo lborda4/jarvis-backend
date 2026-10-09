@@ -2,6 +2,10 @@ import { BadGatewayException } from '@nestjs/common';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 
+jest.mock('./jarvis-invoice-pdf.service', () => ({
+  JarvisInvoicePdfService: class JarvisInvoicePdfService {},
+}));
+
 function setup(
   token: string | null = ' company-token ',
   tercero: Record<string, unknown> = {
@@ -16,7 +20,7 @@ function setup(
   };
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
   const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: token }) };
-  const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportCreditNote: jest.fn().mockResolvedValue({ cuds: 'adjustment-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }) };
+  const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportCreditNote: jest.fn().mockResolvedValue({ cuds: 'adjustment-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }), sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
   const catalog = {
     getIvaTaxId: () => 1,
     getDefaultUnitMeasureId: () => 70,
@@ -38,6 +42,7 @@ function setup(
     commitNumber: jest.fn(),
   };
   const history = { record: jest.fn().mockResolvedValue(undefined) };
+  const invoicePdf = { renderGraphicBase64: jest.fn().mockResolvedValue('') };
   const integrations = {
     findByCompanyAndProvider: jest.fn().mockImplementation((_companyId: string, provider: string) => {
       if (provider === 'JARVIS') {
@@ -51,13 +56,13 @@ function setup(
     integrations as never,
     { findByCompanyAndDocument: jest.fn().mockResolvedValue(tercero) } as never,
     companies as never, client as never, catalog as never, numbering as never, history as never,
-    siigoNumbering as never,
+    siigoNumbering as never, invoicePdf as never,
   );
   const request = {
     issueDate: '2026-09-16', customerDocumentType: 'NIT', customerIdentification: '901335977',
     items: [{ description: 'Servicio', quantity: 1, unitValue: 250000, code: '01' }],
   };
-  return { service, request, client, companies, numbering, history, integrations, siigoNumbering };
+  return { service, request, client, companies, numbering, history, integrations, siigoNumbering, invoicePdf };
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
@@ -297,7 +302,7 @@ describe('Notas credito Jarvis', () => {
     const payload = client.createCreditNote.mock.calls[0][0];
     expect(payload).toEqual(expect.objectContaining({ type_document_id: 4,
       billing_reference: { number: reference.number, uuid: reference.uuid, issue_date: reference.issueDate },
-      discrepancyresponsecode: 2, discrepancyresponsedescription: 'Devolucion', sendmail: true, seze: '2026',
+      discrepancyresponsecode: 2, discrepancyresponsedescription: 'Devolucion', sendmail: false, seze: '2026',
       legal_monetary_totals: {
         line_extension_amount: '180.00',
         tax_exclusive_amount: '180.00',
@@ -501,7 +506,7 @@ describe('Notas debito Jarvis', () => {
     const body = client.createDebitNote.mock.calls[0][0];
     expect(body.type_document_id).toBe(5);
     expect(body.billing_reference).toEqual({ number: 'FV100', uuid: reference.uuid, issue_date: reference.issueDate });
-    expect(body).toMatchObject({ discrepancyresponsecode: 3, sendmail: true, notes: 'Observaciones', head_note: 'Encabezado', foot_note: 'Pie', seze: 'REF' });
+    expect(body).toMatchObject({ discrepancyresponsecode: 3, sendmail: false, notes: 'Observaciones', head_note: 'Encabezado', foot_note: 'Pie', seze: 'REF' });
     expect(body.requested_monetary_totals).toMatchObject({ line_extension_amount: '180.00', tax_exclusive_amount: '180.00', tax_inclusive_amount: '214.20', allowance_total_amount: '10.00', payable_amount: '204.20' });
     expect(body.allowance_charges[0]).toMatchObject({ amount: '10.00', base_amount: '214.20' });
     expect(body.debit_note_lines[0]).toMatchObject({ code: 'ABC', invoiced_quantity: 2, price_amount: '100.00', notes: 'Detalle', line_extension_amount: '180.00' });
@@ -530,5 +535,67 @@ describe('Notas debito Jarvis', () => {
     const { service, request, client } = setup();
     await expect(service.createAndSendInvoice(request, 'company-1', JarvisResolutionKind.DEBIT_NOTE)).rejects.toThrow('factura afectada');
     expect(client.createDebitNote).not.toHaveBeenCalled();
+  });
+});
+
+describe('correo NextPyme tras aceptación DIAN', () => {
+  it('envía send-email con prefijo, número y correos del cliente y la empresa', async () => {
+    const { service, request, client, integrations, invoicePdf } = setup(' company-token ', {
+      name: 'Cliente',
+      municipalityId: 149,
+      typeRegimeId: 1,
+      email: 'cliente@correo.com',
+    });
+    integrations.findByCompanyAndProvider.mockImplementation(
+      (_id: string, provider: string) => {
+        if (provider === 'JARVIS') {
+          return Promise.resolve({
+            credentials: { email: 'contabilidad@empresa.com' },
+          });
+        }
+        return Promise.resolve(null);
+      },
+    );
+    invoicePdf.renderGraphicBase64.mockResolvedValue('JVBERi0x');
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(invoicePdf.renderGraphicBase64).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: 'company-1',
+        documentKind: 'ELECTRONIC_INVOICE',
+        token: 'company-token',
+      }),
+    );
+    expect(client.sendDocumentEmail).toHaveBeenCalledWith(
+      {
+        prefix: 'FVJ',
+        number: '1',
+        base64graphicrepresentation: 'JVBERi0x',
+        showacceptrejectbuttons: false,
+        html_buttons: '',
+        send_email_cc_list_as_email_cc: true,
+        alternate_email: 'cliente@correo.com',
+        email_cc_list: [{ email: 'contabilidad@empresa.com' }],
+      },
+      'company-token',
+    );
+  });
+
+  it('no falla la emisión si NextPyme no puede enviar el correo', async () => {
+    const { service, request, client } = setup();
+    client.sendDocumentEmail.mockRejectedValue(
+      new BadGatewayException('Correo falló'),
+    );
+    await expect(
+      service.createAndSendInvoice(request, 'company-1'),
+    ).resolves.toMatchObject({ success: true });
+  });
+
+  it('no envía correo si la DIAN rechazó el documento', async () => {
+    const { service, request, client } = setup();
+    client.createInvoice.mockRejectedValue(new BadGatewayException('Rechazado'));
+    await expect(
+      service.createAndSendInvoice(request, 'company-1'),
+    ).rejects.toThrow('Rechazado');
+    expect(client.sendDocumentEmail).not.toHaveBeenCalled();
   });
 });

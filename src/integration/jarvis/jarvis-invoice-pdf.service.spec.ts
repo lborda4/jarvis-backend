@@ -1,5 +1,9 @@
 import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
 import { DOWNLOAD_XML } from '../../electronic-document/mappers/invoice-xml-download.fixture';
+
+jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
+  renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
+}));
 describe('sales invoice PDF data', () => {
   function setup(invoice: unknown) {
     const query = { addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn().mockResolvedValue(invoice) };
@@ -40,5 +44,21 @@ describe('sales invoice PDF data', () => {
     const { service, repository } = setup({ cufe: 'other', invoiceXml: null });
     await expect(service.getData('company', 'id')).rejects.toThrow('CUFE');
     expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('renders the Jarvis PDF from the issued XML for the email graphic', async () => {
+    const { service } = setup({
+      cufe: 'cufe-123',
+      invoiceXml: DOWNLOAD_XML,
+      documentKind: 'ELECTRONIC_INVOICE',
+    });
+    await expect(
+      service.renderGraphicBase64({
+        companyId: 'company',
+        invoiceXml: DOWNLOAD_XML,
+        cufe: 'cufe-123',
+        documentKind: 'ELECTRONIC_INVOICE',
+      }),
+    ).resolves.toBe('JVBERi0x');
   });
 });

@@ -6,7 +6,6 @@ const BODY = '{"id":"n1","type":"SALE_APPROVED","data":{"payment_id":"PAY1","mer
 const SECRET = 'company-secret';
 
 function setup(overrides?: {
-  nodeEnv?: string;
   envKey?: string;
   integrations?: Array<{ companyId: string; credentials: { secret_key?: string } }>;
 }) {
@@ -21,7 +20,6 @@ function setup(overrides?: {
   const configService = {
     get: jest.fn((key: string) => {
       if (key === 'bold') return { key: overrides?.envKey };
-      if (key === 'app.nodeEnv') return overrides?.nodeEnv ?? 'local';
       return undefined;
     }),
   };
@@ -35,17 +33,19 @@ function setup(overrides?: {
 
 describe('BoldWebhookService', () => {
   const signature = computeBoldWebhookSignature(BODY, SECRET);
+  const testSignature = computeBoldWebhookSignature(BODY, '');
   const payload = JSON.parse(BODY);
 
-  it('persists an approved sale when the HMAC matches the company secret', async () => {
+  it('production persists an approved sale signed with the company secret', async () => {
     const { service, events } = setup();
     await expect(
-      service.receive({ rawBody: BODY, signature, body: payload }),
+      service.receiveProduction({ rawBody: BODY, signature, body: payload }),
     ).resolves.toEqual({ received: true });
     expect(events.insertIfNew).toHaveBeenCalledWith(
       expect.objectContaining({
         notificationId: 'n1',
         companyId: 'company-1',
+        environment: 'production',
         type: 'SALE_APPROVED',
         paymentId: 'PAY1',
         reference: 'ref-1',
@@ -57,53 +57,63 @@ describe('BoldWebhookService', () => {
     );
   });
 
-  it('still returns 200 when Bold retries the same notification', async () => {
+  it('production still returns 200 when Bold retries the same notification', async () => {
     const { service, events } = setup();
     events.insertIfNew.mockResolvedValue('duplicate');
     await expect(
-      service.receive({ rawBody: BODY, signature, body: payload }),
+      service.receiveProduction({ rawBody: BODY, signature, body: payload }),
     ).resolves.toEqual({ received: true });
   });
 
-  it('rejects a missing or invalid signature', async () => {
+  it('production rejects a missing, invalid or empty test-mode signature', async () => {
     const { service, events } = setup();
     await expect(
-      service.receive({ rawBody: BODY, signature: undefined, body: payload }),
+      service.receiveProduction({
+        rawBody: BODY,
+        signature: undefined,
+        body: payload,
+      }),
     ).rejects.toThrow(UnauthorizedException);
     await expect(
-      service.receive({
+      service.receiveProduction({
         rawBody: BODY,
         signature: computeBoldWebhookSignature(BODY, 'wrong'),
+        body: payload,
+      }),
+    ).rejects.toThrow(UnauthorizedException);
+    await expect(
+      service.receiveProduction({
+        rawBody: BODY,
+        signature: testSignature,
         body: payload,
       }),
     ).rejects.toThrow(UnauthorizedException);
     expect(events.insertIfNew).not.toHaveBeenCalled();
   });
 
-  it('accepts the empty test-mode secret only outside production', async () => {
-    const testSignature = computeBoldWebhookSignature(BODY, '');
-    const local = setup({
-      nodeEnv: 'local',
-      integrations: [{ companyId: 'company-1', credentials: {} }],
-    });
+  it('test accepts the empty Bold test-mode secret and prefixes the id', async () => {
+    const { service, events } = setup();
     await expect(
-      local.service.receive({
+      service.receiveTest({
         rawBody: BODY,
         signature: testSignature,
         body: payload,
       }),
     ).resolves.toEqual({ received: true });
-
-    const production = setup({
-      nodeEnv: 'production',
-      integrations: [{ companyId: 'company-1', credentials: {} }],
-    });
-    await expect(
-      production.service.receive({
-        rawBody: BODY,
-        signature: testSignature,
-        body: payload,
+    expect(events.insertIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationId: 'test:n1',
+        companyId: 'company-1',
+        environment: 'test',
       }),
+    );
+  });
+
+  it('test rejects a production HMAC', async () => {
+    const { service, events } = setup();
+    await expect(
+      service.receiveTest({ rawBody: BODY, signature, body: payload }),
     ).rejects.toThrow(UnauthorizedException);
+    expect(events.insertIfNew).not.toHaveBeenCalled();
   });
 });
