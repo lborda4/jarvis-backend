@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { CompanyModule } from '../company/company.module';
 import { IntegrationModule } from '../integration/integration.module';
@@ -15,7 +15,7 @@ import { RutParserService } from './rut-parser.service';
     CompanyModule,
     IntegrationModule,
     JarvisModule,
-    PlanModule,
+    forwardRef(() => PlanModule),
   ],
   controllers: [AdminController],
   providers: [AdminService, AdminGuard, RutParserService],

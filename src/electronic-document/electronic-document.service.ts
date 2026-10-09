@@ -4,9 +4,11 @@ import { applySupportDocumentExcelAccounts } from '../invoices/helpers/support-d
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   ServiceUnavailableException,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -218,6 +220,7 @@ export class ElectronicDocumentService {
     private readonly historialFacturasRepository: HistorialFacturasRepository,
     private readonly siigoAccountsRepository: SiigoAccountsRepository,
     private readonly jarvisTercerosRepository: JarvisTercerosRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly siigoTaxesCatalogService: SiigoTaxesCatalogService,
     private readonly siigoPaymentTypesCatalogService: SiigoPaymentTypesCatalogService,

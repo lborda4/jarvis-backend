@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ElectronicDocument } from '../electronic-document/entities/electronic-document.entity';
 import { IntegrationModule } from '../integration/integration.module';
@@ -9,7 +9,7 @@ import { PlansRepository } from './repositories/plans.repository';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Plan, ElectronicDocument]),
-    IntegrationModule,
+    forwardRef(() => IntegrationModule),
   ],
   providers: [PlansRepository, PlanSubscriptionService],
   exports: [PlansRepository, PlanSubscriptionService, TypeOrmModule],

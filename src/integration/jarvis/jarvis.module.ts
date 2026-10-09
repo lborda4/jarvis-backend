@@ -31,7 +31,7 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
   imports: [
     HttpModule,
     AppConfigModule,
-    PlanModule,
+    forwardRef(() => PlanModule),
     forwardRef(() => IntegrationModule),
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),

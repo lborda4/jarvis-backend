@@ -1,9 +1,11 @@
 import {
   BadGatewayException,
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   ServiceUnavailableException,
+  forwardRef,
 } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
@@ -53,6 +55,7 @@ export class SiigoSupportDocumentSendService {
     private readonly siigoAccountsCatalogService: SiigoAccountsCatalogService,
     private readonly siigoAccountMappingService: SiigoAccountMappingService,
     private readonly siigoDocumentSendThrottleService: SiigoDocumentSendThrottleService,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly historialFacturasRepository: HistorialFacturasRepository,

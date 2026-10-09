@@ -50,9 +50,9 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     IntegrationModule,
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),
-    PlanModule,
+    forwardRef(() => PlanModule),
     OpenRouterModule,
-    JarvisModule,
+    forwardRef(() => JarvisModule),
   ],
   controllers: [SiigoDocumentQuotasController,SiigoController, SiigoCompanyAiContextController],
   providers: [

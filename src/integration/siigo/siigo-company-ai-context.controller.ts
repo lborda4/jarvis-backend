@@ -3,8 +3,10 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Inject,
   NotFoundException,
   Put,
+  forwardRef,
 } from '@nestjs/common';
 import { ApiProperty, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -37,6 +39,7 @@ export class CompanyAiContextRequest {
 export class SiigoCompanyAiContextController {
   constructor(
     private readonly companies: CompaniesRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly subscriptions: PlanSubscriptionService,
   ) {}
   private async requireCompany(user: AuthenticatedUser) {

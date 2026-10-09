@@ -14,8 +14,8 @@ import { ElectronicDocumentsRepository } from './repositories/electronic-documen
   imports: [
     TypeOrmModule.forFeature([ElectronicDocument]),
     CompanyModule,
-    IntegrationModule,
-    PlanModule,
+    forwardRef(() => IntegrationModule),
+    forwardRef(() => PlanModule),
     forwardRef(() => JarvisModule),
     forwardRef(() => SiigoModule),
   ],

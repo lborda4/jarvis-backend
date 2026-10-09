@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { Integration } from '../entities/integration.entity';
@@ -56,6 +56,7 @@ export class SiigoAuthService {
     private readonly siigoHttpClient: SiigoHttpClient,
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly siigoAccountsRepository: SiigoAccountsRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly configService: ConfigService<AppConfiguration, true>,
     private readonly companiesRepository: CompaniesRepository,

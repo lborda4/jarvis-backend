@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import {
@@ -65,6 +65,7 @@ export class JarvisSetupService {
 
   constructor(
     private readonly integrationsRepository: IntegrationsRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly nextPymeApiClient: NextPymeApiClient,
     private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,

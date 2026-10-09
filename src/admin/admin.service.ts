@@ -6,8 +6,10 @@ import { readCompanyAiContext, validateCompanyAiContext } from '../company/compa
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
@@ -72,6 +74,7 @@ export class AdminService {
     private readonly companiesRepository: CompaniesRepository,
     private readonly plansRepository: PlansRepository,
     private readonly integrationsRepository: IntegrationsRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,
     private readonly nextPymeRutService: NextPymeRutService,

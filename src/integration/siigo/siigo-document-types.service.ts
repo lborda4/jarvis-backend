@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
+  forwardRef,
 } from '@nestjs/common';
 import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
@@ -37,6 +39,7 @@ export class SiigoDocumentTypesService {
     private readonly siigoAuthService: SiigoAuthService,
     private readonly siigoConfigurationCacheService: SiigoConfigurationCacheService,
     private readonly integrationsRepository: IntegrationsRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
   ) {}
 

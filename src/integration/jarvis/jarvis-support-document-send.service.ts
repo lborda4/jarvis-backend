@@ -1,10 +1,12 @@
 import {
   BadGatewayException,
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  forwardRef,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { withPostgresAdvisoryLock } from '../../common/helpers/postgres-advisory-lock.helper';
@@ -69,6 +71,7 @@ export class JarvisSupportDocumentSendService {
     private readonly integrationsRepository: IntegrationsRepository,
     private readonly jarvisTercerosRepository: JarvisTercerosRepository,
     private readonly companiesRepository: CompaniesRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly nextPymeApiClient: NextPymeApiClient,
     private readonly nextPymeMasterCatalogService: NextPymeMasterCatalogService,

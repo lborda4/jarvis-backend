@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -44,6 +46,7 @@ const ALLOWED_DOCUMENT_TYPES = new Set<ElectronicDocumentType>([
 export class PlanSubscriptionService {
   constructor(
     private readonly plansRepository: PlansRepository,
+    @Inject(forwardRef(() => IntegrationsRepository))
     private readonly integrationsRepository: IntegrationsRepository,
     @InjectRepository(ElectronicDocument)
     private readonly electronicDocumentsRepository: Repository<ElectronicDocument>,
