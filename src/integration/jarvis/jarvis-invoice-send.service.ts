@@ -603,7 +603,6 @@ export class JarvisInvoiceSendService {
                   invoice_lines: _lines,
                   with_holding_tax_total: _withholding,
                   payment_form: _payment,
-                  resolution_number: _resolution,
                   type_currency_id: _currency,
                   ...creditBody
                 } = payload;
@@ -616,7 +615,7 @@ export class JarvisInvoiceSendService {
                       customer.merchant_registration || '0000000-00',
                     postal_zone_code: '000000',
                   },
-                  credit_note_lines: invoice_lines,
+                  sd_credit_note_lines: invoice_lines,
                 };
               })(), companyToken)
             : isNote

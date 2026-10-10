@@ -351,9 +351,9 @@ describe('Notas credito Jarvis', () => {
 describe('Notas de ajuste de documento soporte', () => {
   const reference = { number: 'DS1', uuid: 'b'.repeat(96), issueDate: '2026-09-01' };
 
-  it('envía seller y credit_note_lines al sd-credit-note con numeración NDS', async () => {
+  it('envía seller y sd_credit_note_lines al sd-credit-note con numeración NDS', async () => {
     const { service, request, client, numbering, history } = setup();
-    numbering.allocateResolutionNumber.mockResolvedValue({ prefix: 'NDS', number: 1, formNumber: null });
+    numbering.allocateResolutionNumber.mockResolvedValue({ prefix: 'NDS', number: 1, formNumber: '18764113677438' });
     await service.createAndSendInvoice({
       ...request,
       billingReference: reference,
@@ -374,13 +374,15 @@ describe('Notas de ajuste de documento soporte', () => {
     expect(payload).toEqual(expect.objectContaining({
       type_document_id: 13,
       prefix: 'NDS',
+      resolution_number: '18764113677438',
       billing_reference: { number: 'DS1', uuid: reference.uuid, issue_date: '2026-09-01' },
       discrepancyresponsecode: 2,
     }));
     expect(payload).not.toHaveProperty('customer');
     expect(payload).not.toHaveProperty('invoice_lines');
+    expect(payload).not.toHaveProperty('credit_note_lines');
     expect(payload.seller).toEqual(expect.objectContaining({ name: 'Cliente', merchant_registration: '0000000-00', postal_zone_code: '000000' }));
-    expect(payload.credit_note_lines[0]).toEqual(expect.objectContaining({
+    expect(payload.sd_credit_note_lines[0]).toEqual(expect.objectContaining({
       description: 'COMISION POR SERVICIOS',
       invoiced_quantity: '1',
       price_amount: '200.00',

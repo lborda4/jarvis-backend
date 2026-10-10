@@ -503,6 +503,40 @@ describe('Numeracion independiente de notas de ajuste', () => {
     );
   });
 
+  it('usa el resolution_number del documento soporte en la nota de ajuste', async () => {
+    const { service } = buildService({
+      findByCompanyAndProvider: jest.fn().mockResolvedValue({
+        id: 'integration-1',
+        credentials: {
+          resolutions: {
+            support_document: {
+              kind: JarvisResolutionKind.SUPPORT_DOCUMENT,
+              documentTypeLabel: 'DOCUMENTO SOPORTE',
+              prefix: 'DS',
+              formNumber: '18764113677438',
+              fromNumber: 1,
+              toNumber: 1000,
+              nextConsecutive: 2,
+            },
+          },
+        },
+      }),
+    });
+
+    await expect(
+      service.allocateResolutionNumber(
+        'company-1',
+        JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        prefix: 'NDS',
+        number: 1,
+        formNumber: '18764113677438',
+      }),
+    );
+  });
+
   it('avanza a 2 después de un envío aceptado aunque no hubiera numeración previa', async () => {
     const { service, integrationsRepository } = buildService({});
 

@@ -657,11 +657,18 @@ export class JarvisSetupService {
         );
       }
 
+      const supportFormNumber =
+        credentials.resolutions?.support_document?.formNumber?.trim() || null;
+
       return {
         prefix: numbering.prefix.trim(),
         number,
         toNumber: numbering.toNumber,
-        formNumber: numbering.formNumber?.trim() || null,
+        formNumber:
+          numbering.formNumber?.trim() ||
+          (kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE
+            ? supportFormNumber
+            : null),
       };
     }
 
