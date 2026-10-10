@@ -13,7 +13,7 @@ import { RutParserService } from './rut-parser.service';
   imports: [
     forwardRef(() => AuthModule),
     CompanyModule,
-    IntegrationModule,
+    forwardRef(() => IntegrationModule),
     forwardRef(() => JarvisModule),
     forwardRef(() => PlanModule),
   ],

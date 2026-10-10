@@ -47,7 +47,7 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
 @Module({
   imports: [forwardRef(() => AuthModule),
     HttpModule,
-    IntegrationModule,
+    forwardRef(() => IntegrationModule),
     CompanyModule,
     forwardRef(() => ElectronicDocumentModule),
     forwardRef(() => PlanModule),
