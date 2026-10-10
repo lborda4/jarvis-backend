@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -16,10 +16,12 @@ import { AuthenticatedUserResolverService } from './services/authenticated-user-
 import { WsAuthService } from './services/ws-auth.service';
 import { AppConfiguration } from '../config/configuration';
 import { RutParserService } from '../admin/rut-parser.service';
+import { PlanModule } from '../plan/plan.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, UserCompany]),
+    forwardRef(() => PlanModule),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       inject: [ConfigService],

@@ -298,12 +298,14 @@ export class JarvisSupportDocumentSendService {
     request: CreateJarvisSupportDocumentRequestDto,
     companyId: string,
   ): Promise<CreateJarvisSupportDocumentResponseDto> {
-    await this.planSubscriptionService.assertCanCreateDocuments({
-      companyId,
-      provider: IntegrationProvider.JARVIS,
-      documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
-      quantity: 1,
-    });
+    await this.planSubscriptionService.withJarvisQuotaLock(companyId, () =>
+      this.planSubscriptionService.assertCanCreateDocuments({
+        companyId,
+        provider: IntegrationProvider.JARVIS,
+        documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+        quantity: 1,
+      }),
+    );
 
     const documentId = request.documentId?.trim();
     if (!documentId) {

@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
   UnauthorizedException,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -11,6 +13,9 @@ import * as bcrypt from 'bcrypt';
 import { DataSource } from 'typeorm';
 import { Company } from '../company/entities/company.entity';
 import { AppConfiguration } from '../config/configuration';
+import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
+import { PlanSubscriptionService } from '../plan/plan-subscription.service';
+import type { DocumentQuotaNotice } from '../plan/plan-subscription.service';
 import { UserCompany } from './entities/user-company.entity';
 import { User } from './entities/user.entity';
 import {
@@ -51,6 +56,8 @@ export class AuthService {
     private readonly configService: ConfigService<AppConfiguration, true>,
     private readonly usersRepository: UsersRepository,
     private readonly userCompaniesRepository: UserCompaniesRepository,
+    @Inject(forwardRef(() => PlanSubscriptionService))
+    private readonly planSubscriptionService: PlanSubscriptionService,
   ) {}
 
   async register(request: RegisterRequestDto): Promise<AuthTokensResponseDto> {
@@ -296,7 +303,7 @@ export class AuthService {
     );
 
     if (!companyId) {
-      return buildAuthMeResponse(user, null, companies);
+      return buildAuthMeResponse(user, null, companies, null);
     }
 
     const userCompany =
@@ -311,7 +318,12 @@ export class AuthService {
       );
     }
 
-    return buildAuthMeResponse(user, userCompany.company, companies);
+    return buildAuthMeResponse(
+      user,
+      userCompany.company,
+      companies,
+      await this.resolveJarvisQuotaNotice(userCompany.company.id),
+    );
   }
 
   private async buildAuthResponse(
@@ -327,7 +339,27 @@ export class AuthService {
       user,
       company,
       companies,
+      await this.resolveJarvisQuotaNotice(company?.id),
     );
+  }
+
+  private async resolveJarvisQuotaNotice(
+    companyId?: string | null,
+  ): Promise<DocumentQuotaNotice | null> {
+    const trimmed = companyId?.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      const subscription = await this.planSubscriptionService.getSubscription(
+        trimmed,
+        IntegrationProvider.JARVIS,
+      );
+      return subscription.quotaNotice ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private async listCompaniesForUser(userId: string): Promise<Company[]> {

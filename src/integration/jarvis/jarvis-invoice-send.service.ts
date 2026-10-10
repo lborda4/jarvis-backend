@@ -10,6 +10,8 @@ import { DataSource } from 'typeorm';
 import { extractNextPymeInvoiceXml } from './nextpyme/nextpyme-invoice-xml.helper';
 import { withPostgresAdvisoryLock } from '../../common/helpers/postgres-advisory-lock.helper';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
+import { ElectronicDocumentType } from '../../electronic-document/enums/electronic-document-type.enum';
+import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { SiigoCreditNoteNumberingService } from '../siigo/siigo-credit-note-numbering.service';
@@ -72,6 +74,7 @@ export class JarvisInvoiceSendService {
     private readonly invoiceHistory: JarvisInvoiceHistoryService,
     private readonly siigoCreditNoteNumberingService: SiigoCreditNoteNumberingService,
     private readonly invoicePdf: JarvisInvoicePdfService,
+    private readonly planSubscriptionService: PlanSubscriptionService,
   ) {}
 
   async createAndSendInvoice(
@@ -151,6 +154,19 @@ export class JarvisInvoiceSendService {
         kind === JarvisResolutionKind.CREDIT_NOTE
           ? 'La empresa activa no tiene integración Jarvis ni SIIGO configurada para notas crédito.'
           : 'La empresa activa no tiene integración Jarvis configurada.',
+      );
+    }
+
+    if (!isNote && jarvisIntegration) {
+      await this.planSubscriptionService.withJarvisQuotaLock(companyId, () =>
+        this.planSubscriptionService.assertCanCreateDocuments({
+          companyId,
+          provider: IntegrationProvider.JARVIS,
+          documentType: isSupport
+            ? ElectronicDocumentType.SUPPORT_DOCUMENT
+            : ElectronicDocumentType.PURCHASE_INVOICE,
+          quantity: 1,
+        }),
       );
     }
 

@@ -30,18 +30,28 @@ export class AuthCompanyDto {
   nit: string;
 }
 
+export class DocumentQuotaNoticeDto {
+  code: 'LOW' | 'EXHAUSTED';
+  message: string;
+  remaining: number;
+  documentLimit: number;
+  documentsUsed: number;
+}
+
 export class AuthTokensResponseDto {
   accessToken: string;
   refreshToken: string;
   user: AuthUserDto;
   company: AuthCompanyDto | null;
   companies: AuthCompanyDto[];
+  documentQuotaNotice?: DocumentQuotaNoticeDto | null;
 }
 
 export class AuthMeResponseDto {
   user: AuthUserDto;
   company: AuthCompanyDto | null;
   companies: AuthCompanyDto[];
+  documentQuotaNotice?: DocumentQuotaNoticeDto | null;
 }
 
 export class SwitchCompanyRequestDto {

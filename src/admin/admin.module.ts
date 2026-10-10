@@ -11,10 +11,10 @@ import { RutParserService } from './rut-parser.service';
 
 @Module({
   imports: [
-    AuthModule,
+    forwardRef(() => AuthModule),
     CompanyModule,
     IntegrationModule,
-    JarvisModule,
+    forwardRef(() => JarvisModule),
     forwardRef(() => PlanModule),
   ],
   controllers: [AdminController],

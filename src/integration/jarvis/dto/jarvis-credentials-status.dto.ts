@@ -50,6 +50,19 @@ export class JarvisSubscriptionStatusDto {
 
   @ApiPropertyOptional({ type: JarvisSubscriptionPlanDto, nullable: true })
   plan: JarvisSubscriptionPlanDto | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Aviso cuando el cupo Jarvis está al 10% o se agotó. Las notas no descuentan.',
+  })
+  quotaNotice?: {
+    code: 'LOW' | 'EXHAUSTED';
+    message: string;
+    remaining: number;
+    documentLimit: number;
+    documentsUsed: number;
+  } | null;
 }
 
 export class JarvisCredentialsStatusResponseDto {

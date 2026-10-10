@@ -5,6 +5,7 @@ import {
   AuthMeResponseDto,
   AuthTokensResponseDto,
   AuthUserDto,
+  DocumentQuotaNoticeDto,
 } from '../dto/auth.dto';
 
 export function mapCompanyToAuthCompanyDto(company: Company): AuthCompanyDto {
@@ -34,6 +35,7 @@ export function buildAuthTokensResponse(
   user: User,
   company: Company | null,
   companies: Company[] = company ? [company] : [],
+  documentQuotaNotice?: DocumentQuotaNoticeDto | null,
 ): AuthTokensResponseDto {
   const companyDto = company ? mapCompanyToAuthCompanyDto(company) : null;
   const companiesDto = companies.map(mapCompanyToAuthCompanyDto);
@@ -44,6 +46,7 @@ export function buildAuthTokensResponse(
     user: mapUserToAuthUserDto(user, company),
     company: companyDto,
     companies: companiesDto,
+    ...(documentQuotaNotice ? { documentQuotaNotice } : {}),
   };
 }
 
@@ -51,6 +54,7 @@ export function buildAuthMeResponse(
   user: User,
   company: Company | null,
   companies: Company[] = company ? [company] : [],
+  documentQuotaNotice?: DocumentQuotaNoticeDto | null,
 ): AuthMeResponseDto {
   const companyDto = company ? mapCompanyToAuthCompanyDto(company) : null;
 
@@ -58,5 +62,6 @@ export function buildAuthMeResponse(
     user: mapUserToAuthUserDto(user, company),
     company: companyDto,
     companies: companies.map(mapCompanyToAuthCompanyDto),
+    ...(documentQuotaNotice ? { documentQuotaNotice } : {}),
   };
 }

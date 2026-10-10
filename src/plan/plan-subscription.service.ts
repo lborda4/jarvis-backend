@@ -14,14 +14,27 @@ import { ElectronicDocumentStatus } from '../electronic-document/enums/electroni
 import { ElectronicDocumentType } from '../electronic-document/enums/electronic-document-type.enum';
 import { Integration } from '../integration/entities/integration.entity';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
+import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
+import { JarvisResolutionKind } from '../integration/jarvis/enums/jarvis-resolution-kind.enum';
 import { IntegrationsRepository } from '../integration/repositories/integrations.repository';
 import { Plan } from './entities/plan.entity';
 import { SubscriptionStatus } from './enums/subscription-status.enum';
 import { PlansRepository } from './repositories/plans.repository';
 
+export type DocumentQuotaNoticeCode = 'LOW' | 'EXHAUSTED';
+
+export interface DocumentQuotaNotice {
+  code: DocumentQuotaNoticeCode;
+  message: string;
+  remaining: number;
+  documentLimit: number;
+  documentsUsed: number;
+}
+
 export interface DocumentQuotaSnapshot { documentLimit: number | null; documentsUsed: number; remaining: number | null; }
 export interface PlanSubscriptionSnapshot {
   documentQuotas?: Partial<Record<ElectronicDocumentType, DocumentQuotaSnapshot>>;
+  quotaNotice?: DocumentQuotaNotice | null;
   status: SubscriptionStatus | null;
   startedAt: string | null;
   documentLimit: number | null;
@@ -37,6 +50,13 @@ export interface PlanSubscriptionSnapshot {
   } | null;
 }
 
+const JARVIS_BILLABLE_KINDS = [
+  JarvisResolutionKind.ELECTRONIC_INVOICE,
+  JarvisResolutionKind.SUPPORT_DOCUMENT,
+] as const;
+
+const JARVIS_LOW_QUOTA_RATIO = 0.1;
+
 const ALLOWED_DOCUMENT_TYPES = new Set<ElectronicDocumentType>([
   ElectronicDocumentType.SUPPORT_DOCUMENT,
   ElectronicDocumentType.PURCHASE_INVOICE,
@@ -50,9 +70,15 @@ export class PlanSubscriptionService {
     private readonly integrationsRepository: IntegrationsRepository,
     @InjectRepository(ElectronicDocument)
     private readonly electronicDocumentsRepository: Repository<ElectronicDocument>,
+    @InjectRepository(JarvisSalesInvoice)
+    private readonly jarvisSalesInvoicesRepository: Repository<JarvisSalesInvoice>,
   ) {}
   async withSiigoQuotaLock<T>(companyId: string, work: () => Promise<T>): Promise<T> {
     return withPostgresAdvisoryLock(this.electronicDocumentsRepository.manager.connection, 'siigo-quota:' + companyId, work);
+  }
+
+  async withJarvisQuotaLock<T>(companyId: string, work: () => Promise<T>): Promise<T> {
+    return withPostgresAdvisoryLock(this.electronicDocumentsRepository.manager.connection, 'jarvis-quota:' + companyId, work);
   }
 
   private limitFor(integration: Integration, type: ElectronicDocumentType): number | null {
@@ -135,6 +161,7 @@ export class PlanSubscriptionService {
           documentLimit,
           documentsUsed,
           quantity,
+          params.provider,
         ),
       );
     }
@@ -182,14 +209,17 @@ export class PlanSubscriptionService {
     }
 
     const includedTypes = this.resolveIncludedDocumentTypes(integration);
+    const isJarvis = provider === IntegrationProvider.JARVIS;
 
-    if (!includedTypes.includes(documentType)) {
+    if (!isJarvis && !includedTypes.includes(documentType)) {
       throw new ForbiddenException(
         `La suscripción no incluye el tipo de documento ${documentType}.`,
       );
     }
 
-    const documentLimit = this.limitFor(integration, documentType);
+    const documentLimit = isJarvis
+      ? integration.plan?.documentLimit ?? null
+      : this.limitFor(integration, documentType);
 
     if (requestedQuantity <= 0) {
       return { allowed: 0, documentLimit, documentsUsed: 0 };
@@ -200,12 +230,14 @@ export class PlanSubscriptionService {
     }
 
     const startedAt = integration.subscriptionStartedAt ?? integration.createdAt;
-    const documentsUsed = await this.countDocumentsSince(
-      companyId,
-      documentType,
-      startedAt,
-      provider,
-    );
+    const documentsUsed = isJarvis
+      ? await this.countJarvisBillableDocuments(companyId, startedAt)
+      : await this.countDocumentsSince(
+          companyId,
+          documentType,
+          startedAt,
+          provider,
+        );
     const remaining = Math.max(0, documentLimit - documentsUsed);
 
     return {
@@ -219,9 +251,14 @@ export class PlanSubscriptionService {
     documentLimit: number | null,
     documentsUsed: number,
     requestedQuantity: number,
+    provider?: IntegrationProvider,
   ): string {
     const remaining =
       documentLimit == null ? null : Math.max(0, documentLimit - documentsUsed);
+
+    if (provider === IntegrationProvider.JARVIS && remaining === 0) {
+      return 'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos soporte ni facturas de venta.';
+    }
 
     return (
       `Ha alcanzado el límite del plan (${documentLimit} documentos). ` +
@@ -322,18 +359,23 @@ export class PlanSubscriptionService {
     }
 
     const startedAt = integration.subscriptionStartedAt ?? integration.createdAt;
-    const usagePerType = await Promise.all(
-      includedDocumentTypes.map((documentType) =>
-        this.countDocumentsSince(integration.companyId, documentType, startedAt, integration.provider),
-      ),
-    );
+    const isJarvis = integration.provider === IntegrationProvider.JARVIS;
+    const usagePerType = isJarvis
+      ? []
+      : await Promise.all(
+          includedDocumentTypes.map((documentType) =>
+            this.countDocumentsSince(integration.companyId, documentType, startedAt, integration.provider),
+          ),
+        );
     const documentQuotas = integration.provider === IntegrationProvider.SIIGO
       ? Object.fromEntries(includedDocumentTypes.map((type, index) => {
           const documentLimit = this.limitFor(integration, type);
           const documentsUsed = usagePerType[index];
           return [type, { documentLimit, documentsUsed, remaining: documentLimit === null ? null : Math.max(0, documentLimit - documentsUsed) }];
         })) : undefined;
-    const documentsUsed = usagePerType.reduce((sum, count) => sum + count, 0);
+    const documentsUsed = isJarvis
+      ? await this.countJarvisBillableDocuments(integration.companyId, startedAt)
+      : usagePerType.reduce((sum, count) => sum + count, 0);
     const quotaValues = documentQuotas ? Object.values(documentQuotas) : [];
     const documentLimit = documentQuotas
       ? (quotaValues.some(quota => quota.documentLimit === null) ? null : quotaValues.reduce((sum, quota) => sum + quota.documentLimit!, 0))
@@ -349,6 +391,9 @@ export class PlanSubscriptionService {
       documentsUsed,
       remaining,
       includedDocumentTypes,
+      ...(isJarvis
+        ? { quotaNotice: this.buildJarvisQuotaNotice(documentLimit, documentsUsed, remaining) }
+        : {}),
       ...(documentQuotas ? { documentQuotas } : {}),
       plan: plan ? {
         id: plan.id,
@@ -378,6 +423,62 @@ export class PlanSubscriptionService {
       .andWhere('document.createdAt >= :since', { since });
     if (provider === IntegrationProvider.SIIGO) query.andWhere('document.alreadyInSiigo = :alreadyInSiigo', { alreadyInSiigo: false });
     return query.getCount();
+  }
+
+  /** DS enviados + facturas de venta. Las notas no descuentan. */
+  private async countJarvisBillableDocuments(
+    companyId: string,
+    since: Date,
+  ): Promise<number> {
+    const [supportDocuments, salesDocuments] = await Promise.all([
+      this.countDocumentsSince(
+        companyId,
+        ElectronicDocumentType.SUPPORT_DOCUMENT,
+        since,
+        IntegrationProvider.JARVIS,
+      ),
+      this.jarvisSalesInvoicesRepository
+        .createQueryBuilder('invoice')
+        .where('invoice.companyId = :companyId', { companyId })
+        .andWhere('invoice.documentKind IN (:...kinds)', {
+          kinds: [...JARVIS_BILLABLE_KINDS],
+        })
+        .andWhere('invoice.sentAt >= :since', { since })
+        .getCount(),
+    ]);
+    return supportDocuments + salesDocuments;
+  }
+
+  buildJarvisQuotaNotice(
+    documentLimit: number | null,
+    documentsUsed: number,
+    remaining: number | null,
+  ): DocumentQuotaNotice | null {
+    if (documentLimit == null || remaining == null) {
+      return null;
+    }
+
+    if (remaining <= 0) {
+      return {
+        code: 'EXHAUSTED',
+        message: 'Se le acabaron los documentos disponibles del plan.',
+        remaining: 0,
+        documentLimit,
+        documentsUsed,
+      };
+    }
+
+    if (remaining <= documentLimit * JARVIS_LOW_QUOTA_RATIO) {
+      return {
+        code: 'LOW',
+        message: `Le quedan ${remaining} de ${documentLimit} documentos disponibles. Se le están acabando.`,
+        remaining,
+        documentLimit,
+        documentsUsed,
+      };
+    }
+
+    return null;
   }
 
   private emptySnapshot(): PlanSubscriptionSnapshot {

@@ -43,6 +43,10 @@ function setup(
   };
   const history = { record: jest.fn().mockResolvedValue(undefined) };
   const invoicePdf = { renderGraphicBase64: jest.fn().mockResolvedValue('') };
+  const plans = {
+    assertCanCreateDocuments: jest.fn().mockResolvedValue(undefined),
+    withJarvisQuotaLock: jest.fn((_companyId: string, work: () => Promise<unknown>) => work()),
+  };
   const integrations = {
     findByCompanyAndProvider: jest.fn().mockImplementation((_companyId: string, provider: string) => {
       if (provider === 'JARVIS') {
@@ -56,13 +60,13 @@ function setup(
     integrations as never,
     { findByCompanyAndDocument: jest.fn().mockResolvedValue(tercero) } as never,
     companies as never, client as never, catalog as never, numbering as never, history as never,
-    siigoNumbering as never, invoicePdf as never,
+    siigoNumbering as never, invoicePdf as never, plans as never,
   );
   const request = {
     issueDate: '2026-09-16', customerDocumentType: 'NIT', customerIdentification: '901335977',
     items: [{ description: 'Servicio', quantity: 1, unitValue: 250000, code: '01' }],
   };
-  return { service, request, client, companies, numbering, history, integrations, siigoNumbering, invoicePdf };
+  return { service, request, client, companies, numbering, history, integrations, siigoNumbering, invoicePdf, plans };
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
@@ -597,5 +601,42 @@ describe('correo NextPyme tras aceptación DIAN', () => {
       service.createAndSendInvoice(request, 'company-1'),
     ).rejects.toThrow('Rechazado');
     expect(client.sendDocumentEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe('cupo Jarvis al enviar', () => {
+  const reference = { number: 'SETP990000605', uuid: 'a'.repeat(96), issueDate: '2026-09-15' };
+
+  it('descuenta factura de venta', async () => {
+    const { service, request, plans } = setup();
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(plans.assertCanCreateDocuments).toHaveBeenCalledWith({
+      companyId: 'company-1',
+      provider: 'JARVIS',
+      documentType: 'PURCHASE_INVOICE',
+      quantity: 1,
+    });
+  });
+
+  it('descuenta documento soporte', async () => {
+    const { service, request, plans } = setup();
+    await service.createAndSendInvoice(request, 'company-1', JarvisResolutionKind.SUPPORT_DOCUMENT);
+    expect(plans.assertCanCreateDocuments).toHaveBeenCalledWith({
+      companyId: 'company-1',
+      provider: 'JARVIS',
+      documentType: 'SUPPORT_DOCUMENT',
+      quantity: 1,
+    });
+  });
+
+  it('no descuenta notas', async () => {
+    const { service, request, plans } = setup();
+    await service.createAndSendInvoice({
+      ...request,
+      billingReference: reference,
+      discrepancyResponseCode: 2,
+      discrepancyResponseDescription: 'Devolución',
+    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE);
+    expect(plans.assertCanCreateDocuments).not.toHaveBeenCalled();
   });
 });

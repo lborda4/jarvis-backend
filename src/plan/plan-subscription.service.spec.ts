@@ -25,9 +25,22 @@ function buildIntegration(overrides: Partial<Integration> = {}): Integration {
   } as Integration;
 }
 
+function buildJarvisSalesRepository(documentsUsed = 0) {
+  const queryBuilder = {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getCount: jest.fn().mockResolvedValue(documentsUsed),
+  };
+  return {
+    createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    queryBuilder,
+  };
+}
+
 function buildService(
   integration: Integration | null,
   documentsUsed: number,
+  salesDocumentsUsed = 0,
 ): PlanSubscriptionService {
   const integrationsRepository = {
     findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration),
@@ -47,6 +60,7 @@ function buildService(
     {} as any,
     integrationsRepository as any,
     electronicDocumentsRepository as any,
+    buildJarvisSalesRepository(salesDocumentsUsed) as any,
   );
 }
 
@@ -229,7 +243,7 @@ describe('cupos manuales independientes de Siigo', () => {
       const query = { where: jest.fn().mockReturnThis(), andWhere: jest.fn((sql, params) => { if (params.documentType) type = params.documentType; return query; }), getCount: jest.fn(async () => type === 'PURCHASE_INVOICE' ? 20 : 5) };
       queries.push(query); return query;
     } };
-    const service = new PlanSubscriptionService({} as never, { findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration()) } as never, repo as never);
+    const service = new PlanSubscriptionService({} as never, { findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration()) } as never, repo as never, buildJarvisSalesRepository() as never);
     const snapshot = await service.getSubscription(COMPANY_ID, IntegrationProvider.SIIGO);
     expect(snapshot.documentQuotas).toEqual({ PURCHASE_INVOICE: {documentLimit: 100, documentsUsed: 20, remaining: 80}, SUPPORT_DOCUMENT: {documentLimit: 50, documentsUsed: 5, remaining: 45} });
     expect(snapshot.remaining).toBe(125);
@@ -248,5 +262,66 @@ describe('cupos manuales independientes de Siigo', () => {
   it('no aplica los cupos manuales de Siigo a Jarvis', async () => {
     const service = buildService(buildIntegration({ provider: IntegrationProvider.JARVIS, documentLimits: { PURCHASE_INVOICE: 1 } }), 10);
     expect((await service.resolveAllowedQuantity({ companyId: COMPANY_ID, provider: IntegrationProvider.JARVIS, documentType: ElectronicDocumentType.PURCHASE_INVOICE, requestedQuantity: 100 })).allowed).toBe(90);
+  });
+});
+
+describe('cupo compartido Jarvis', () => {
+  const jarvis = () =>
+    buildIntegration({
+      provider: IntegrationProvider.JARVIS,
+      includedDocumentTypes: [ElectronicDocumentType.SUPPORT_DOCUMENT],
+    });
+
+  it('suma documentos soporte y facturas de venta en el mismo pozo', async () => {
+    const service = buildService(jarvis(), 7, 5);
+
+    const result = await service.resolveAllowedQuantity({
+      companyId: COMPANY_ID,
+      provider: IntegrationProvider.JARVIS,
+      documentType: ElectronicDocumentType.SUPPORT_DOCUMENT,
+      requestedQuantity: 100,
+    });
+
+    expect(result).toEqual({ allowed: 88, documentLimit: 100, documentsUsed: 12 });
+  });
+
+  it('bloquea el envío cuando el cupo se acabó', async () => {
+    const service = buildService(jarvis(), 60, 40);
+
+    await expect(
+      service.assertCanCreateDocuments({
+        companyId: COMPANY_ID,
+        provider: IntegrationProvider.JARVIS,
+        documentType: ElectronicDocumentType.PURCHASE_INVOICE,
+        quantity: 1,
+      }),
+    ).rejects.toThrow(
+      'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos soporte ni facturas de venta.',
+    );
+  });
+
+  it('avisa al 10% restante y cuando se agotó', async () => {
+    const service = buildService(jarvis(), 0);
+
+    expect(service.buildJarvisQuotaNotice(100, 90, 10)).toEqual({
+      code: 'LOW',
+      message: 'Le quedan 10 de 100 documentos disponibles. Se le están acabando.',
+      remaining: 10,
+      documentLimit: 100,
+      documentsUsed: 90,
+    });
+    expect(service.buildJarvisQuotaNotice(100, 100, 0)).toMatchObject({
+      code: 'EXHAUSTED',
+      message: 'Se le acabaron los documentos disponibles del plan.',
+    });
+    expect(service.buildJarvisQuotaNotice(100, 50, 50)).toBeNull();
+  });
+
+  it('expone el aviso en el snapshot de suscripción', async () => {
+    const service = buildService(jarvis(), 91, 0);
+    const snapshot = await service.getSubscription(COMPANY_ID, IntegrationProvider.JARVIS);
+    expect(snapshot.documentsUsed).toBe(91);
+    expect(snapshot.remaining).toBe(9);
+    expect(snapshot.quotaNotice?.code).toBe('LOW');
   });
 });

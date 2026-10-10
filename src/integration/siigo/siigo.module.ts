@@ -45,7 +45,7 @@ import { OpenRouterModule } from '../openrouter/openrouter.module';
 import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balance-history.service';
 
 @Module({
-  imports: [AuthModule,
+  imports: [forwardRef(() => AuthModule),
     HttpModule,
     IntegrationModule,
     CompanyModule,
