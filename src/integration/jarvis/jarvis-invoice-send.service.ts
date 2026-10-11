@@ -615,7 +615,7 @@ export class JarvisInvoiceSendService {
                       customer.merchant_registration || '0000000-00',
                     postal_zone_code: '000000',
                   },
-                  sd_credit_note_lines: invoice_lines,
+                  credit_note_lines: invoice_lines,
                 };
               })(), companyToken)
             : isNote
