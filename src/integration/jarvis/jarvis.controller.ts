@@ -380,6 +380,12 @@ export class JarvisController {
     return this.jarvisInvoiceSendService.createAndSendInvoice(request, getAuthenticatedCompanyId(user), JarvisResolutionKind.CREDIT_NOTE);
   }
 
+  @Post('invoices/:id/send-email')
+  @ApiOperation({ summary: 'Reenviar por correo un documento Jarvis emitido.' })
+  sendInvoiceEmail(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Body() request: { additionalEmails?: string[]; message?: string }) {
+    return this.invoicePdf.sendEmail(getAuthenticatedCompanyId(user), id, request);
+  }
+
   @Get('invoices/:id/pdf-data')
   @ApiOperation({ summary: 'Datos para el PDF de un documento Jarvis emitido (factura, DS, NC, ND o nota de ajuste).' })
   getInvoicePdfData(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
