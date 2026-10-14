@@ -563,6 +563,7 @@ describe('correo NextPyme tras aceptación DIAN', () => {
       },
     );
     invoicePdf.renderGraphicBase64.mockResolvedValue('JVBERi0x');
+    client.createInvoice.mockResolvedValue({ success: true, cufe: 'invoice-code' } as never);
     await service.createAndSendInvoice(request, 'company-1');
     expect(invoicePdf.renderGraphicBase64).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -578,6 +579,9 @@ describe('correo NextPyme tras aceptación DIAN', () => {
         base64graphicrepresentation: 'JVBERi0x',
         showacceptrejectbuttons: false,
         html_buttons: '',
+        html_header: expect.stringContaining('JARVIS'),
+        html_body: expect.stringContaining('FVJ1'),
+        html_footer: expect.stringContaining('https://jarviscol.com'),
         send_email_cc_list_as_email_cc: true,
         alternate_email: 'cliente@correo.com',
         email_cc_list: [{ email: 'contabilidad@empresa.com' }],
@@ -607,6 +611,17 @@ describe('correo NextPyme tras aceptación DIAN', () => {
 });
 
 describe('cupo Jarvis al enviar', () => {
+  it('no envía una nota cuando el cupo está agotado', async () => {
+    const { service, request, plans, client } = setup();
+    plans.assertCanCreateDocuments.mockRejectedValue(new Error('Cupo agotado'));
+    await expect(service.createAndSendInvoice({
+      ...request,
+      billingReference: { number: 'SETP990000605', uuid: 'a'.repeat(96), issueDate: '2026-09-15' },
+      discrepancyResponseCode: 2,
+      discrepancyResponseDescription: 'Devolución',
+    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('Cupo agotado');
+    expect(client.createInvoice).not.toHaveBeenCalled();
+  });
   const reference = { number: 'SETP990000605', uuid: 'a'.repeat(96), issueDate: '2026-09-15' };
 
   it('descuenta factura de venta', async () => {
@@ -631,14 +646,17 @@ describe('cupo Jarvis al enviar', () => {
     });
   });
 
-  it('no descuenta notas', async () => {
+  it.each([JarvisResolutionKind.CREDIT_NOTE, JarvisResolutionKind.DEBIT_NOTE, JarvisResolutionKind.SUPPORT_CREDIT_NOTE])('valida cupo para la nota %s', async (kind) => {
     const { service, request, plans } = setup();
     await service.createAndSendInvoice({
       ...request,
       billingReference: reference,
       discrepancyResponseCode: 2,
       discrepancyResponseDescription: 'Devolución',
-    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE);
-    expect(plans.assertCanCreateDocuments).not.toHaveBeenCalled();
+    }, 'company-1', kind);
+    expect(plans.assertCanCreateDocuments).toHaveBeenCalledWith({
+      companyId: 'company-1', provider: 'JARVIS', quantity: 1,
+      documentType: kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? 'SUPPORT_DOCUMENT' : 'PURCHASE_INVOICE',
+    });
   });
 });

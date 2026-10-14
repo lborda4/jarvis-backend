@@ -1,6 +1,9 @@
+import { AdminAssignPackageDto } from './dto/admin-package.dto';
+import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
 import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
 import { SaveAdminBoldCredentialsDto } from './dto/admin-bold-credentials.dto';
 import {
+  Put,
   Body,
   Controller,
   Get,
@@ -48,6 +51,24 @@ import { RutParserService } from './rut-parser.service';
 @Controller('admin')
 @UseGuards(AdminGuard)
 export class AdminController {
+  @Patch('companies/:companyId/integrations/:provider/select')
+  selectCompanyIntegration(
+    @Param('companyId') companyId: string,
+    @Param('provider', new ParseEnumPipe(IntegrationProvider)) provider: IntegrationProvider,
+  ) {
+    return this.adminService.selectCompanyIntegration(companyId, provider);
+  }
+
+  @Get('companies/:companyId/nextpyme/package')
+  getNextPymePackage(@Param('companyId') companyId: string) {
+    return this.adminService.getNextPymePackage(companyId);
+  }
+
+  @Put('companies/:companyId/nextpyme/package')
+  assignNextPymePackage(@Param('companyId') companyId: string, @Body() request: AdminAssignPackageDto) {
+    return this.adminService.assignNextPymePackage(companyId, request);
+  }
+
   constructor(
     private readonly adminService: AdminService,
     private readonly rutParserService: RutParserService,
@@ -183,6 +204,15 @@ export class AdminController {
       request,
       user.userId,
     );
+  }
+
+  @Patch('companies/:companyId/id-software')
+  updateIdSoftware(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('companyId') companyId: string,
+    @Body() request: UpdateCompanySoftwareRequestDto,
+  ) {
+    return this.adminService.updateIdSoftware(companyId, request, user.userId);
   }
 
   @Patch('companies/:companyId/technical-key')

@@ -1,3 +1,4 @@
+import { JarvisRadianService } from './jarvis-radian.service';
 import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
 import { ParseUUIDPipe } from '@nestjs/common';
 import { JarvisPaymentMethodsService } from './jarvis-payment-methods.service';
@@ -77,6 +78,7 @@ import { JarvisTercerosService } from './jarvis-terceros.service';
 @Controller('integrations/jarvis')
 export class JarvisController {
   constructor(
+    private readonly radian: JarvisRadianService,
     private readonly invoicePdf: JarvisInvoicePdfService,
     private readonly paymentMethodsService: JarvisPaymentMethodsService,
     private readonly jarvisSetupService: JarvisSetupService,
@@ -88,6 +90,28 @@ export class JarvisController {
     private readonly jarvisResolutionParserService: JarvisResolutionParserService,
     private readonly jarvisTaxesService: JarvisTaxesService,
   ) {}
+
+  @Post('radian/invoice')
+  @ApiOperation({ summary: 'Consultar una factura recibida por CUFE para RADIAN.' })
+  lookupRadianInvoice(@CurrentUser() user: AuthenticatedUser, @Body() request: { cufe: string }) {
+    return this.radian.lookup(getAuthenticatedCompanyId(user), request?.cufe);
+  }
+
+  @Post('radian/events')
+  @ApiOperation({ summary: 'Enviar un evento RADIAN de una factura recibida por CUFE.' })
+  sendRadianEvent(@CurrentUser() user: AuthenticatedUser, @Body() request: { cufe?: string; eventId?: number; typeRejectionId?: number }) {
+    return this.radian.send(getAuthenticatedCompanyId(user), request);
+  }
+
+  @Get('radian/invoices/:cufe/events')
+  getRadianEvents(@CurrentUser() user: AuthenticatedUser, @Param('cufe') cufe: string) {
+    return this.radian.history(getAuthenticatedCompanyId(user), cufe);
+  }
+
+  @Post('radian/invoices/:cufe/events/reconcile')
+  reconcileRadianEvents(@CurrentUser() user: AuthenticatedUser, @Param('cufe') cufe: string) {
+    return this.radian.history(getAuthenticatedCompanyId(user), cufe, true);
+  }
 
   @Post('credentials')
   @ApiOperation({

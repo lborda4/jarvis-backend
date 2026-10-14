@@ -232,6 +232,9 @@ describe('NextPymeApiClient.sendDocumentEmail', () => {
       {
         prefix: ' FE ',
         number: '1',
+        html_header: '<header>JARVIS</header>',
+        html_body: '<p>Empresa</p>',
+        html_footer: '<footer>JARVIS</footer>',
         alternate_email: 'cliente@correo.com',
         send_email_cc_list_as_email_cc: true,
         email_cc_list: [{ email: 'contabilidad@empresa.com' }],
@@ -243,6 +246,9 @@ describe('NextPymeApiClient.sendDocumentEmail', () => {
       {
         prefix: 'FE',
         number: '1',
+        html_header: '<header>JARVIS</header>',
+        html_body: '<p>Empresa</p>',
+        html_footer: '<footer>JARVIS</footer>',
         base64graphicrepresentation: '',
         showacceptrejectbuttons: false,
         html_buttons: '',

@@ -138,6 +138,9 @@ export class AdminCompanyListItemDto {
   })
   technicalKey: string | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  idSoftware?: string | null;
+
   @ApiPropertyOptional({
     nullable: true,
     description:
@@ -331,6 +334,11 @@ export class UpdateCompanyNextPymeTokenRequestDto {
 export class UpdateCompanyNextPymeTokenResponseDto {
   @ApiProperty({ type: AdminCompanyListItemDto })
   company: AdminCompanyListItemDto;
+}
+
+export class UpdateCompanySoftwareRequestDto {
+  @ApiProperty({ nullable: true, description: 'IDSoftware DIAN de la empresa.' })
+  idSoftware: string | null;
 }
 
 export class UpdateCompanyTechnicalKeyRequestDto {

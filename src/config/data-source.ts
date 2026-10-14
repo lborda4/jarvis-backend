@@ -1,3 +1,4 @@
+import { JarvisRadianEvent } from '../integration/jarvis/entities/jarvis-radian-event.entity';
 import { JarvisPaymentMethod } from '../integration/jarvis/entities/jarvis-payment-method.entity';
 import { BoldWebhookEvent } from '../bold/entities/bold-webhook-event.entity';
 import { SiigoBoldCashRegister } from '../bold/entities/siigo-bold-cash-register.entity';
@@ -39,6 +40,7 @@ export default new DataSource({
   url: databaseUrl,
   ssl: { rejectUnauthorized: false },
   entities: [
+    JarvisRadianEvent,
     JarvisPaymentMethod,
     JarvisSalesInvoice,
     SiigoBoldCashRegister,

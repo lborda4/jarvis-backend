@@ -44,7 +44,7 @@ describe('NextPyme company catalogs', () => {
     ]);
   });
 
-  it('uses the technical key as IDSoftware when id_software is missing', async () => {
+  it('does not use a resolution technical key as IDSoftware', async () => {
     const { service, client, integrations } = setup();
     integrations.findByCompanyAndProvider.mockImplementation(
       async (_id: string, provider: string) =>
@@ -53,13 +53,8 @@ describe('NextPyme company catalogs', () => {
           : null,
     );
 
-    const resolutions = await service.listResolutions('a');
-
-    expect(resolutions[0].resolution).toBe('fc8eac-clave');
-    expect(client.listResolutions).toHaveBeenCalledWith(
-      'fc8eac-clave',
-      'token-a',
-    );
+    await expect(service.listResolutions('a')).rejects.toThrow('IDSoftware');
+    expect(client.listResolutions).not.toHaveBeenCalled();
   });
 
   it('rejects missing technical key even with a token', async () => {
@@ -68,7 +63,7 @@ describe('NextPyme company catalogs', () => {
       credentials: {},
     });
     await expect(service.listResolutions('a')).rejects.toThrow(
-      'llave técnica',
+      'IDSoftware',
     );
   });
 

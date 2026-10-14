@@ -84,16 +84,13 @@ export class NextPymeMasterCatalogService {
       normalizeJarvisCredentials(integration?.credentials ?? {}),
     );
     const idSoftware = candidates
-      .flatMap((credentials) => [
-        credentials.id_software,
-        credentials.technical_key,
-      ])
+      .map((credentials) => credentials.id_software)
       .map((value) => value?.trim())
       .find(Boolean);
 
     if (!idSoftware) {
       throw new ServiceUnavailableException(
-        'La empresa no tiene una llave técnica configurada.',
+        'Falta configurar el IDSoftware de esta empresa. Solicita al administrador que lo registre para consultar las resoluciones.',
       );
     }
 

@@ -16,6 +16,7 @@ import {
   mapJarvisIssuedDocumentToPdfData,
 } from './pdf/map-jarvis-issued-document-to-pdf-data';
 import { renderJarvisInvoicePdfBase64 } from './pdf/sales-invoice-pdf.renderer';
+import { buildJarvisDocumentEmail } from './helpers/jarvis-document-email.helper';
 
 function uniqueCodeLabel(kind?: string | null) {
   if (
@@ -64,6 +65,20 @@ export class JarvisInvoicePdfService {
     const graphic = await renderJarvisInvoicePdfBase64(data);
     const message = request.message?.trim() ?? '';
     const html = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\r?\n/g, '<br>');
+    const template = buildJarvisDocumentEmail({
+      issuerName: data.issuer.name || company.name || '',
+      issuerNit: data.issuer.documentNumber || company.nit || '',
+      receiverName: data.buyer.name || '',
+      documentNumber: data.invoiceNumber || (invoice.number.startsWith(invoice.prefix) ? invoice.number : `${invoice.prefix}${invoice.number}`),
+      issueDate: data.issueDate || '',
+      total: data.total,
+      currency: data.currency,
+      documentKind: data.documentKind,
+      cufe: data.cufe,
+    });
+    if (html) {
+      template.html_body += `<table role="presentation" align="center" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:760px;margin:0 auto;border-collapse:collapse;font-family:Arial,sans-serif;"><tr><td style="padding:4px 12px;font-size:12px;"><p style="margin:0;">${html}</p></td></tr></table>`;
+    }
     const response = await this.nextPyme.sendDocumentEmail({
       prefix: invoice.prefix,
       number: invoice.number.startsWith(invoice.prefix) ? invoice.number.slice(invoice.prefix.length) : invoice.number,
@@ -71,8 +86,8 @@ export class JarvisInvoicePdfService {
       email_cc_list: emails.slice(1).map(email => ({ email })),
       send_email_cc_list_as_email_cc: emails.length > 1,
       base64graphicrepresentation: graphic,
-      showacceptrejectbuttons: Boolean(message),
-      html_buttons: html ? '<p>' + html + '</p>' : '',
+      showacceptrejectbuttons: false,
+      ...template,
     }, company.nextPymeToken);
     if (response.success === false) throw new BadGatewayException('El proveedor no confirmó el envío del correo.');
     return { success: true };

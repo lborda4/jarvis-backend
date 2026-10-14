@@ -53,6 +53,9 @@ export interface PlanSubscriptionSnapshot {
 const JARVIS_BILLABLE_KINDS = [
   JarvisResolutionKind.ELECTRONIC_INVOICE,
   JarvisResolutionKind.SUPPORT_DOCUMENT,
+  JarvisResolutionKind.CREDIT_NOTE,
+  JarvisResolutionKind.DEBIT_NOTE,
+  JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
 ] as const;
 
 const JARVIS_LOW_QUOTA_RATIO = 0.1;
@@ -121,6 +124,10 @@ export class PlanSubscriptionService {
   resolveIncludedDocumentTypes(
     integration: Integration,
   ): ElectronicDocumentType[] {
+    if (integration.provider === IntegrationProvider.JARVIS) {
+      return [...ALLOWED_DOCUMENT_TYPES];
+    }
+
     const fromIntegration = this.normalizeDocumentTypes(
       integration.includedDocumentTypes,
     );
@@ -257,7 +264,7 @@ export class PlanSubscriptionService {
       documentLimit == null ? null : Math.max(0, documentLimit - documentsUsed);
 
     if (provider === IntegrationProvider.JARVIS && remaining === 0) {
-      return 'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos soporte ni facturas de venta.';
+      return 'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos electrónicos.';
     }
 
     return (
@@ -425,7 +432,7 @@ export class PlanSubscriptionService {
     return query.getCount();
   }
 
-  /** DS enviados + facturas de venta. Las notas no descuentan. */
+  /** Documentos soporte enviados + facturas de venta y todas sus notas enviadas. */
   private async countJarvisBillableDocuments(
     companyId: string,
     since: Date,

@@ -28,7 +28,7 @@ function setup() {
   };
   const nextPyme = { configureProductionEnvironment: jest.fn().mockResolvedValue(undefined) };
   const service = new AdminService(
-    dataSource as never, companies as never, {} as never, {} as never,
+    dataSource as never, companies as never, { findById: jest.fn().mockResolvedValue({ id: 'jarvis-plan', provider: IntegrationProvider.JARVIS }) } as never, {} as never,
     { normalizeDocumentTypes: () => [] } as never,
     {} as never, {} as never, nextPyme as never,
   );
@@ -95,4 +95,23 @@ describe('Configuración NextPyme de empresa desde admin', () => {
     await expect(service.createCompany(request, 'admin-1')).rejects.toThrow('Ya existe');
     expect(nextPyme.configureProductionEnvironment).not.toHaveBeenCalled();
   });
+});
+
+describe('Tipos de documento al crear empresas', () => {
+  it('crea una empresa Jarvis sin seleccionar tipos de documento', async () => {
+    const { service, request, companies } = setup();
+    const result = await service.createCompany({
+      ...request, integrations: [IntegrationProvider.JARVIS], jarvisPlanId: 'jarvis-plan',
+    }, 'admin-1');
+    expect(result.company.id).toBe('company-1');
+    expect(companies.save).toHaveBeenCalled();
+  });
+  it.each([[IntegrationProvider.SIIGO], [IntegrationProvider.JARVIS, IntegrationProvider.SIIGO]])(
+    'exige tipos de documento cuando SIIGO está seleccionado (%s)', async (...integrations) => {
+      const { service, request, dataSource } = setup();
+      await expect(service.createCompany({ ...request, integrations }, 'admin-1'))
+        .rejects.toThrow('Debe seleccionar al menos un tipo de documento');
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    },
+  );
 });

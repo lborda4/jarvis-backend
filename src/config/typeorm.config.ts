@@ -1,3 +1,4 @@
+import { JarvisRadianEvent } from '../integration/jarvis/entities/jarvis-radian-event.entity';
 import { JarvisPaymentMethod } from '../integration/jarvis/entities/jarvis-payment-method.entity';
 import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
 import { BoldWebhookEvent } from '../bold/entities/bold-webhook-event.entity';
@@ -33,6 +34,7 @@ export function buildTypeOrmConfig(
     url: configService.get('database.url', { infer: true }),
     ssl: { rejectUnauthorized: false },
     entities: [
+      JarvisRadianEvent,
       JarvisPaymentMethod,
     JarvisSalesInvoice,
       SiigoBoldCashRegister,

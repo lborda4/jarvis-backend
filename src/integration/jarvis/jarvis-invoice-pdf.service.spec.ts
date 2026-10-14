@@ -116,7 +116,7 @@ describe('reenvío de correo de documentos emitidos', () => {
     const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'owner-token' }) };
     const client = { sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
     const service = new JarvisInvoicePdfService(repository as never, companies as never, client as never, {} as never, {} as never);
-    jest.spyOn(service, 'getData').mockResolvedValue({ buyer: { email: 'cliente@correo.com' } } as never);
+    jest.spyOn(service, 'getData').mockResolvedValue({ issuer: { name: 'Empresa SAS', documentNumber: '900123456' }, buyer: { email: 'cliente@correo.com', name: 'Cliente' }, invoiceNumber: 'NDS5', issueDate: '2026-10-12', total: 238000, currency: 'COP', documentKind: 'SUPPORT_CREDIT_NOTE' } as never);
     return { service, repository, client };
   }
   it('envía PDF, correo registrado, copias únicas y mensaje escapado usando el token de la empresa', async () => {
@@ -126,9 +126,16 @@ describe('reenvío de correo de documentos emitidos', () => {
     expect(client.sendDocumentEmail).toHaveBeenCalledWith({
       prefix: 'NDS', number: '5', alternate_email: 'cliente@correo.com',
       email_cc_list: [{ email: 'copia@correo.com' }], send_email_cc_list_as_email_cc: true,
-      base64graphicrepresentation: 'JVBERi0x', showacceptrejectbuttons: true,
-      html_buttons: '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>',
+      base64graphicrepresentation: 'JVBERi0x', showacceptrejectbuttons: false,
+      html_buttons: '',
+      html_header: expect.stringContaining('JARVIS'),
+      html_body: expect.stringContaining('&lt;script&gt;alert(1)&lt;/script&gt;'),
+      html_footer: expect.stringContaining('https://jarviscol.com'),
     }, 'owner-token');
+    const body = client.sendDocumentEmail.mock.calls[0][0] as unknown as { html_body: string };
+    expect(body.html_body).toContain('Empresa SAS');
+    expect(body.html_body).toContain('NDS5');
+    expect(body.html_body).toContain('Nota de ajuste de documento soporte');
   });
   it('rechaza documentos ajenos antes de contactar al proveedor', async () => {
     const { service, repository, client } = setup();
@@ -144,7 +151,8 @@ describe('reenvío de correo de documentos emitidos', () => {
   });
   it('permite enviar a un correo adicional si no hay correo registrado', async () => {
     const { service, client } = setup();
-    jest.mocked(service.getData).mockResolvedValue({ buyer: { email: null } } as never);
+    const data = await service.getData('owner', 'id');
+    jest.mocked(service.getData).mockResolvedValue({ ...data, buyer: { ...data.buyer, email: null } });
     await service.sendEmail('owner', 'id', { additionalEmails: ['nuevo@correo.com'] });
     expect(client.sendDocumentEmail).toHaveBeenCalledWith(expect.objectContaining({ alternate_email: 'nuevo@correo.com', showacceptrejectbuttons: false }), 'owner-token');
   });

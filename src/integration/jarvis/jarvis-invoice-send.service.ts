@@ -1,3 +1,4 @@
+import { buildJarvisDocumentEmail, type JarvisDocumentEmailData } from './helpers/jarvis-document-email.helper';
 import {
   BadGatewayException,
   BadRequestException,
@@ -157,12 +158,12 @@ export class JarvisInvoiceSendService {
       );
     }
 
-    if (!isNote && jarvisIntegration) {
+    if (jarvisIntegration) {
       await this.planSubscriptionService.withJarvisQuotaLock(companyId, () =>
         this.planSubscriptionService.assertCanCreateDocuments({
           companyId,
           provider: IntegrationProvider.JARVIS,
-          documentType: isSupport
+          documentType: (isSupport || isSupportCreditNote)
             ? ElectronicDocumentType.SUPPORT_DOCUMENT
             : ElectronicDocumentType.PURCHASE_INVOICE,
           quantity: 1,
@@ -704,6 +705,13 @@ export class JarvisInvoiceSendService {
           );
 
           await this.sendIssuedDocumentEmail({
+            emailData: {
+              issuerName: credentials.business_name || company.name,
+              issuerNit: company.nit,
+              receiverName: request.customerName?.trim() || tercero.name,
+              documentNumber: `${numbering.prefix}${createdNumber}`,
+              issueDate, total: payable, currency, documentKind: kind, cufe: createdCufe,
+            },
             companyId,
             documentLabel,
             token: companyToken,
@@ -758,6 +766,7 @@ export class JarvisInvoiceSendService {
    * de la empresa va en copia.
    */
   private async sendIssuedDocumentEmail(input: {
+    emailData: JarvisDocumentEmailData;
     companyId: string;
     documentLabel: string;
     token: string;
@@ -798,7 +807,7 @@ export class JarvisInvoiceSendService {
           number: String(input.number),
           base64graphicrepresentation: graphic,
           showacceptrejectbuttons: false,
-          html_buttons: '',
+          ...buildJarvisDocumentEmail(input.emailData),
           send_email_cc_list_as_email_cc: ccList.length > 0,
           ...(customerEmail ? { alternate_email: customerEmail } : {}),
           ...(ccList.length > 0 ? { email_cc_list: ccList } : {}),

@@ -1,3 +1,4 @@
+import { parseRadianEventResult, type RadianEventResult } from './nextpyme-radian-result';
 import { extractNextPymeInvoiceXml } from './nextpyme-invoice-xml.helper';
 import {
   BadGatewayException,
@@ -218,6 +219,9 @@ export interface NextPymeSendEmailPayload {
   base64graphicrepresentation?: string;
   showacceptrejectbuttons?: boolean;
   html_buttons?: string;
+  html_header?: string;
+  html_body?: string;
+  html_footer?: string;
   alternate_email?: string;
   send_email_cc_list_as_email_cc?: boolean;
   email_cc_list?: Array<{ email: string }>;
@@ -459,6 +463,37 @@ export class NextPymeApiClient {
       throw new BadGatewayException(
         'No fue posible cargar el catálogo solicitado. Intenta nuevamente.',
       );
+    }
+  }
+
+  async getAssignedPackage(companyToken?: string): Promise<unknown> {
+    return this.requestAssignedPackage(undefined, companyToken);
+  }
+
+  async assignDocumentPackage(payload: { user_identification_number: number; absolut_start_plan_date: string; absolut_documents: number }, companyToken?: string): Promise<unknown> {
+    return this.requestAssignedPackage(payload, companyToken);
+  }
+
+  private async requestAssignedPackage(payload: { user_identification_number: number; absolut_start_plan_date: string; absolut_documents: number } | undefined, companyToken?: string): Promise<unknown> {
+    const token = this.requireToken(companyToken);
+    const options = { headers: this.buildAuthHeaders(token), timeout: 20000, validateStatus: () => true };
+    try {
+      const url = this.getBaseUrl() + (payload ? '/plan/assign-package-user' : '/plan/infoplanuser');
+      const response = await firstValueFrom(payload ? this.httpService.put<unknown>(url, payload, options) : this.httpService.get<unknown>(url, options));
+      const operation = payload ? 'assign-package-user' : 'infoplanuser';
+      this.logger.log(`[plan/${operation}] status=${response.status} respuesta=${this.preview(response.data).split(token).join('[REDACTED]')}`);
+      if (response.status < 200 || response.status >= 300 || (response.data && typeof response.data === 'object' && (response.data as Record<string, unknown>).success === false)) {
+        const detail = this.extractErrorMessage(response.data);
+        throw new BadGatewayException(detail
+          ? `NextPyme rechazó la operación de documentos (HTTP ${response.status}): ${detail.split(token).join('[REDACTED]')}`
+          : `No se pudo completar la operación de documentos en NextPyme (HTTP ${response.status}).`);
+      }
+      return response.data;
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException(payload
+        ? 'No se pudo confirmar la asignación con NextPyme. Consulta el saldo antes de volver a asignar documentos.'
+        : 'No se pudo consultar el saldo de documentos en NextPyme. Intenta más tarde.');
     }
   }
 
@@ -709,6 +744,26 @@ export class NextPymeApiClient {
    * la DIAN. Obligatorio `prefix` y `number`.
    * https://developers.nextpyme.plus/docs/utilities?endpoint=16
    */
+  async sendRadianEvent(payload: { event_id: 1 | 2 | 3 | 4; type_rejection_id: number | null; sendmail?: boolean; document_reference: { cufe: string } }, companyToken: string): Promise<RadianEventResult> {
+    const token = this.requireToken(companyToken);
+    try {
+      const response = await firstValueFrom(this.httpService.post<unknown>(this.getBaseUrl() + '/send-event-data', { ...payload, sendmail: payload.sendmail ?? false }, { headers: this.buildAuthHeaders(token), timeout: 20000, validateStatus: () => true }));
+      const safeBody = JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
+      return parseRadianEventResult(safeBody, response.status);
+    } catch { return { status: 'unknown', message: 'No se pudo confirmar el evento. Consulta su estado antes de reenviarlo.' }; }
+  }
+
+  async getRadianEventStatus(cude: string, companyToken: string): Promise<RadianEventResult> {
+    const token = this.requireToken(companyToken);
+    try {
+      const response = await firstValueFrom(this.httpService.post<unknown>(this.getBaseUrl() + '/status/document/' + encodeURIComponent(cude), {}, { headers: this.buildAuthHeaders(token), timeout: 20000, validateStatus: () => true }));
+      const safeBody = JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
+      const result = parseRadianEventResult(safeBody, response.status);
+      // An HTTP error from a status lookup does not prove that DIAN rejected the event.
+      return { ...result, cude, status: response.status >= 200 && response.status < 300 && parseDianValidationResult(safeBody)?.isValid === false ? 'failed' : result.status === 'sent' ? 'sent' : 'unknown' };
+    } catch { return { status: 'unknown', cude, message: 'No se pudo confirmar el estado del evento.' }; }
+  }
+
   async sendDocumentEmail(
     payload: NextPymeSendEmailPayload,
     companyToken: string,
@@ -727,6 +782,9 @@ export class NextPymeApiClient {
       base64graphicrepresentation: payload.base64graphicrepresentation ?? '',
       showacceptrejectbuttons: payload.showacceptrejectbuttons === true,
       html_buttons: payload.html_buttons ?? '',
+      ...(payload.html_header !== undefined ? { html_header: payload.html_header } : {}),
+      ...(payload.html_body !== undefined ? { html_body: payload.html_body } : {}),
+      ...(payload.html_footer !== undefined ? { html_footer: payload.html_footer } : {}),
       send_email_cc_list_as_email_cc:
         payload.send_email_cc_list_as_email_cc === true,
       ...(payload.alternate_email

@@ -3,6 +3,7 @@ import { ElectronicDocumentType } from '../electronic-document/enums/electronic-
 import { Integration } from '../integration/entities/integration.entity';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
 import { SubscriptionStatus } from './enums/subscription-status.enum';
+import { JarvisResolutionKind } from '../integration/jarvis/enums/jarvis-resolution-kind.enum';
 import { PlanSubscriptionService } from './plan-subscription.service';
 
 const COMPANY_ID = 'company-1';
@@ -285,6 +286,21 @@ describe('cupo compartido Jarvis', () => {
     expect(result).toEqual({ allowed: 88, documentLimit: 100, documentsUsed: 12 });
   });
 
+  it('incluye todas las notas en el conteo de documentos enviados', async () => {
+    const repository = buildJarvisSalesRepository(3);
+    const service = buildService(jarvis(), 0);
+    (service as any).jarvisSalesInvoicesRepository = repository;
+    const snapshot = await service.getSubscription(COMPANY_ID, IntegrationProvider.JARVIS);
+    expect(snapshot.documentsUsed).toBe(3);
+    expect(snapshot.remaining).toBe(97);
+    expect(repository.queryBuilder.andWhere).toHaveBeenCalledWith('invoice.documentKind IN (:...kinds)', {
+      kinds: expect.arrayContaining(Object.values(JarvisResolutionKind)),
+    });
+    expect(repository.queryBuilder.andWhere).toHaveBeenCalledWith('invoice.sentAt >= :since', {
+      since: jarvis().subscriptionStartedAt,
+    });
+  });
+
   it('bloquea el envío cuando el cupo se acabó', async () => {
     const service = buildService(jarvis(), 60, 40);
 
@@ -296,7 +312,7 @@ describe('cupo compartido Jarvis', () => {
         quantity: 1,
       }),
     ).rejects.toThrow(
-      'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos soporte ni facturas de venta.',
+      'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos electrónicos.',
     );
   });
 
@@ -324,4 +340,10 @@ describe('cupo compartido Jarvis', () => {
     expect(snapshot.remaining).toBe(9);
     expect(snapshot.quotaNotice?.code).toBe('LOW');
   });
+});
+
+it('Jarvis incluye ambos documentos sin depender de la selección del administrador', () => {
+  const integration = buildIntegration({ provider: IntegrationProvider.JARVIS, includedDocumentTypes: [] });
+  const service = buildService(integration, 0);
+  expect(service.resolveIncludedDocumentTypes(integration)).toEqual(expect.arrayContaining([ElectronicDocumentType.SUPPORT_DOCUMENT, ElectronicDocumentType.PURCHASE_INVOICE]));
 });

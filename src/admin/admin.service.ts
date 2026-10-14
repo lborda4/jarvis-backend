@@ -1,4 +1,5 @@
 import { companyDueDate, normalizeCompanyTracking } from './company-tracking';
+import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
 import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
 import type { BoldCredentials } from '../integration/interfaces/integration-credentials.interface';
 import { SaveAdminBoldCredentialsDto, AdminBoldCredentialsStatusDto } from './dto/admin-bold-credentials.dto';
@@ -161,6 +162,57 @@ export class AdminService {
     };
   }
 
+  async selectCompanyIntegration(companyId: string, provider: IntegrationProvider) {
+    if (![IntegrationProvider.SIIGO, IntegrationProvider.JARVIS].includes(provider)) {
+      throw new BadRequestException('Seleccione SIIGO o Jarvis.');
+    }
+    await this.dataSource.transaction(async manager => {
+      const company = await manager.getRepository(Company).findOne({
+        where: { id: companyId }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!company) throw new NotFoundException('Empresa no encontrada.');
+      const repository = manager.getRepository(Integration);
+      let selected = await repository.findOne({ where: { companyId, provider } });
+      if (!selected) {
+        selected = provider === IntegrationProvider.JARVIS
+          ? await ensureJarvisIntegration(manager, companyId)
+          : await ensureSiigoIntegration(manager, companyId);
+      }
+      await repository.update({ companyId, provider: provider === IntegrationProvider.JARVIS ? IntegrationProvider.SIIGO : IntegrationProvider.JARVIS }, { active: false });
+      selected.active = true;
+      await repository.save(selected);
+    });
+    const company = (await this.companiesRepository.findAllWithIntegrations()).find(item => item.id === companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    return { company: this.mapCompany(company) };
+  }
+
+  async getNextPymePackage(companyId: string) {
+    const company = await this.companiesRepository.findById(companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    const token = company.nextPymeToken?.trim();
+    if (!token) throw new BadRequestException('La empresa no tiene un token de NextPyme configurado.');
+    return { data: await this.nextPymeApiClient.getAssignedPackage(token) };
+  }
+
+  async assignNextPymePackage(companyId: string, request: { documents: number }) {
+    if (!Number.isSafeInteger(request.documents) || request.documents < 1) throw new BadRequestException('Indica una cantidad entera de documentos mayor que cero.');
+    const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date(Date.now())).replace(',', '');
+    const jarvisCompany = await this.companiesRepository.findByNit('902086460');
+    const jarvisToken = jarvisCompany?.nextPymeToken?.trim();
+    if (!jarvisToken) throw new BadRequestException('Configura el token NextPyme de JARVIS COLOMBIA S.A.S. para recargar documentos.');
+    const company = await this.companiesRepository.findById(companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    const nit = String(company.nit ?? '').split('-')[0].replace(/\D/g, '');
+    const identification = Number(nit);
+    if (!nit || !Number.isSafeInteger(identification) || identification <= 0) throw new BadRequestException('El NIT de la empresa no es válido.');
+    return { data: await this.nextPymeApiClient.assignDocumentPackage({
+      user_identification_number: identification,
+      absolut_start_plan_date: date,
+      absolut_documents: request.documents,
+    }, jarvisToken) };
+  }
+
   async listPlans(): Promise<ListAdminPlansResponseDto> {
     const plans = await this.plansRepository.findAllActive();
 
@@ -230,7 +282,7 @@ export class AdminService {
       );
 
     if (
-      (includesSiigo || includesJarvis) &&
+      includesSiigo &&
       requestedDocumentTypes.length === 0
     ) {
       throw new BadRequestException(
@@ -406,6 +458,56 @@ export class AdminService {
 
     return {
       company: this.mapCompany(saved),
+    };
+  }
+
+  async updateIdSoftware(
+    companyId: string,
+    request: UpdateCompanySoftwareRequestDto,
+    _adminUserId: string,
+  ): Promise<UpdateCompanyTechnicalKeyResponseDto> {
+    const company = await this.companiesRepository.findById(companyId);
+
+    if (!company) {
+      throw new NotFoundException('Empresa no encontrada.');
+    }
+
+    const jarvis = await this.integrationsRepository.findByCompanyAndProvider(
+      companyId,
+      IntegrationProvider.JARVIS,
+    );
+    const siigo = await this.integrationsRepository.findByCompanyAndProvider(
+      companyId,
+      IntegrationProvider.SIIGO,
+    );
+    const targets = [jarvis, siigo].filter(
+      (item): item is Integration => Boolean(item),
+    );
+
+    if (targets.length === 0) {
+      throw new BadRequestException(
+        'La empresa no tiene una integración SIIGO o Jarvis donde guardar el IDSoftware.',
+      );
+    }
+
+    for (const integration of targets) {
+      if (request.idSoftware != null && typeof request.idSoftware !== 'string') throw new BadRequestException('IDSoftware debe ser texto.');
+      const credentials = { ...(integration.credentials ?? {}) } as Record<string, unknown>;
+      const softwareId = request.idSoftware?.trim();
+      if (softwareId) credentials.id_software = softwareId;
+      else delete credentials.id_software;
+      delete credentials.idSoftware;
+      delete credentials.IDSoftware;
+      integration.credentials = credentials;
+      await this.integrationsRepository.save(integration);
+    }
+
+    const updated = (
+      await this.companiesRepository.findAllWithIntegrations()
+    ).find((item) => item.id === companyId);
+
+    return {
+      company: this.mapCompany(updated ?? company),
     };
   }
 
@@ -708,6 +810,7 @@ export class AdminService {
       inviteCode: company.inviteCode,
       nextPymeToken: company.nextPymeToken,
       technicalKey: this.readTechnicalKey(company),
+      idSoftware: this.credentialField(company.integrations?.find(item => item.active && item.provider === IntegrationProvider.JARVIS)?.credentials ?? company.integrations?.find(item => item.active && item.provider === IntegrationProvider.SIIGO)?.credentials, 'id_software', 'idSoftware'),
       cityCode: company.cityCode,
       cityName: company.cityName,
       integrations: (company.integrations ?? [])
