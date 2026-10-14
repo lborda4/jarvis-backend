@@ -1,4 +1,5 @@
 import {
+  Param,
   Body,
   Controller,
   Get,
@@ -32,6 +33,16 @@ import type { AuthenticatedUser } from './interfaces/jwt-payload.interface';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  @Get('integration-policy/:policyId')
+  getPolicyAcceptance(@CurrentUser() user: AuthenticatedUser, @Param('policyId') policyId: string) {
+    return this.authService.integrationPolicyAcceptance(user.userId, user.companyId, policyId);
+  }
+
+  @Post('integration-policy/:policyId/accept')
+  acceptPolicy(@CurrentUser() user: AuthenticatedUser, @Param('policyId') policyId: string) {
+    return this.authService.integrationPolicyAcceptance(user.userId, user.companyId, policyId, true);
+  }
+
   constructor(
     private readonly authService: AuthService,
     private readonly rutParserService: RutParserService,

@@ -1,3 +1,5 @@
+import { INTEGRATION_POLICIES } from './constants/integration-policies';
+import { createHash } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -50,6 +52,19 @@ const BCRYPT_SALT_ROUNDS = 10;
 
 @Injectable()
 export class AuthService {
+  async integrationPolicyAcceptance(userId: string, companyId: string | null | undefined, policyId: string, accept = false) {
+    const policy = INTEGRATION_POLICIES[policyId];
+    if (!companyId || !policy || !Object.prototype.hasOwnProperty.call(INTEGRATION_POLICIES, policyId)) throw new BadRequestException('No se pudo identificar la política o la empresa.');
+    if (accept) {
+      await this.dataSource.query(
+        'INSERT INTO integration_policy_acceptances (user_id, company_id, policy_id, version, policy_text, policy_hash) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id, company_id, policy_id) DO NOTHING',
+        [userId, companyId, policyId, policy.version, policy.text, createHash('sha256').update(policy.text).digest('hex')],
+      );
+    }
+    const rows = await this.dataSource.query('SELECT accepted_at FROM integration_policy_acceptances WHERE user_id=$1 AND company_id=$2 AND policy_id=$3', [userId, companyId, policyId]);
+    return { accepted: rows.length > 0 };
+  }
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly jwtService: JwtService,
