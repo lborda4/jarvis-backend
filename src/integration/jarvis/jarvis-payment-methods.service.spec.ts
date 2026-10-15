@@ -14,9 +14,14 @@ describe('JarvisPaymentMethodsService', () => {
     repository.save.mockImplementation(async value => ({ ...value, id: 'saved' }));
     repository.findOneBy.mockResolvedValue(null);
   });
+  it('guarda la negociación explícita y rechaza valores no permitidos', async () => {
+    const response = await service.save('company-a', { name: 'Pago diferido', nextpymeMethodId: 10, negotiation: 'CREDIT' });
+    expect(response.paymentMethod.negotiation).toBe('CREDIT');
+    await expect(service.save('company-a', { name: 'Pago', nextpymeMethodId: 10, negotiation: 'OTHER' as never })).rejects.toThrow();
+  });
   it('valida el catálogo y guarda nombre e identificador maestro por empresa', async () => {
     const response = await service.save('company-a', { name: ' Caja principal ', nextpymeMethodId: 10 });
-    expect(response.paymentMethod).toEqual({ id: 'saved', name: 'Caja principal', nextpymeMethodId: 10, nextpymeMethodName: 'Efectivo' });
+    expect(response.paymentMethod).toEqual({ id: 'saved', name: 'Caja principal', negotiation: 'CASH', nextpymeMethodId: 10, nextpymeMethodName: 'Efectivo' });
     expect(repository.save).toHaveBeenCalledWith(expect.objectContaining({ companyId: 'company-a' }));
   });
   it.each([0, 999, 1.5])('rechaza identificador maestro inválido %s', async nextpymeMethodId => {
@@ -44,11 +49,11 @@ describe('JarvisPaymentMethodsService', () => {
     repository.find.mockResolvedValue([]);
     await service.list('company-a');
     expect(insert.values).toHaveBeenCalledWith([
-      { companyId: 'company-a', name: 'Efectivo', nextpymeMethodId: 10, nextpymeMethodName: 'Efectivo' },
-       { companyId: 'company-a', name: 'Crédito clientes', nextpymeMethodId: 75, nextpymeMethodName: 'Otro*' },
-      { companyId: 'company-a', name: 'Transferencia bancaria', nextpymeMethodId: 42, nextpymeMethodName: 'Transferecia Crédito' },
-      { companyId: 'company-a', name: 'Tarjeta crédito', nextpymeMethodId: 43, nextpymeMethodName: 'Tarjeta Crédito' },
-      { companyId: 'company-a', name: 'Tarjeta débito', nextpymeMethodId: 44, nextpymeMethodName: 'Tarjeta Débito' },
+      { companyId: 'company-a', name: 'Efectivo', negotiation: 'CASH', nextpymeMethodId: 10, nextpymeMethodName: 'Efectivo' },
+       { companyId: 'company-a', name: 'Crédito clientes', negotiation: 'CREDIT', nextpymeMethodId: 75, nextpymeMethodName: 'Otro*' },
+      { companyId: 'company-a', name: 'Transferencia bancaria', negotiation: 'CASH', nextpymeMethodId: 42, nextpymeMethodName: 'Transferecia Crédito' },
+      { companyId: 'company-a', name: 'Tarjeta crédito', negotiation: 'CASH', nextpymeMethodId: 43, nextpymeMethodName: 'Tarjeta Crédito' },
+      { companyId: 'company-a', name: 'Tarjeta débito', negotiation: 'CASH', nextpymeMethodId: 44, nextpymeMethodName: 'Tarjeta Débito' },
     ]);
     expect(insert.orIgnore).toHaveBeenCalled();
   });

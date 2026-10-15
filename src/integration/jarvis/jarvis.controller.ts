@@ -1,3 +1,4 @@
+import { JarvisDashboardService } from './jarvis-dashboard.service';
 import { JarvisRadianService } from './jarvis-radian.service';
 import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
 import { ParseUUIDPipe } from '@nestjs/common';
@@ -77,7 +78,13 @@ import { JarvisTercerosService } from './jarvis-terceros.service';
 @ApiTags('integrations/jarvis')
 @Controller('integrations/jarvis')
 export class JarvisController {
+  @Get('dashboard')
+  dashboard(@CurrentUser() user: AuthenticatedUser, @Query('month') month?: string) {
+    return this.dashboardService.summary(getAuthenticatedCompanyId(user), month);
+  }
+
   constructor(
+    private readonly dashboardService: JarvisDashboardService,
     private readonly radian: JarvisRadianService,
     private readonly invoicePdf: JarvisInvoicePdfService,
     private readonly paymentMethodsService: JarvisPaymentMethodsService,
@@ -106,6 +113,11 @@ export class JarvisController {
   @Get('radian/invoices/:cufe/events')
   getRadianEvents(@CurrentUser() user: AuthenticatedUser, @Param('cufe') cufe: string) {
     return this.radian.history(getAuthenticatedCompanyId(user), cufe);
+  }
+
+  @Get('radian/invoices')
+  listRadianInvoices(@CurrentUser() user: AuthenticatedUser, @Query('cursor') cursor?: string) {
+    return this.radian.listInvoices(getAuthenticatedCompanyId(user), cursor);
   }
 
   @Post('radian/invoices/:cufe/events/reconcile')

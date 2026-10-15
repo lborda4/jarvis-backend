@@ -45,6 +45,8 @@ export class JarvisRadianService {
       );
     const normalizedCufe = cufe.trim().toLowerCase();
     const result = await this.client.getInvoiceByCufe(normalizedCufe, token);
+    if (result.outcome === 'not_found')
+      throw new BadRequestException('No se encontró una factura para este CUFE. Verifica la información ingresada.');
     if (result.outcome !== 'found')
       throw new BadGatewayException(
         'No pudimos consultar la factura. Inténtalo más tarde o comunícate con soporte.',
@@ -55,25 +57,24 @@ export class JarvisRadianService {
         .split('-')[0]
         .replace(/\D/g, '');
     if (
-      data.customer?.identification_number &&
-      nit(data.customer.identification_number) !== nit(company?.nit)
+      !nit(data.customer?.identification_number) ||
+      !nit(company?.nit) ||
+      nit(data.customer?.identification_number) !== nit(company?.nit)
     )
       throw new BadRequestException(
-        'La factura no corresponde a la empresa activa.',
+        'La factura no corresponde a una compra recibida por la empresa activa. Verifica la información y la empresa seleccionada.',
       );
     if (
-      data.type_document_id != null &&
       ![1, 2].includes(Number(data.type_document_id))
     )
       throw new BadRequestException(
-        'El documento no es una factura electrónica.',
+        'El documento consultado no es una factura electrónica de venta válida para RADIAN. Verifica el CUFE ingresado.',
       );
     if (
-      data.payment_form?.payment_form_id != null &&
-      Number(data.payment_form.payment_form_id) !== 2
+      Number(data.payment_form?.payment_form_id) !== 2
     )
       throw new BadRequestException(
-        'La factura no corresponde a la forma de pago habilitada para RADIAN.',
+        'La factura no está identificada como una venta a crédito. RADIAN requiere forma de pago 2 (crédito). Verifica la información del documento.',
       );
     const number = String(data.number ?? '');
     const prefix = data.prefix ?? '';
@@ -179,6 +180,23 @@ export class JarvisRadianService {
       ...(row.dianCode ? { dianCode: row.dianCode } : {}),
       ...(row.message ? { message: row.message } : {}),
     };
+  }
+
+  async listInvoices(companyId: string, cursor = '') {
+    if (cursor && !/^[a-f0-9]{96}$/.test(cursor)) throw new BadRequestException('El cursor no es válido.');
+    const rows: Array<{ cufe: string; eventId: number; status: JarvisRadianEvent['status']; cude: string | null; dianCode: string | null; message: string | null; typeRejectionId: number | null; updatedAt: Date; number: string | null; supplier: string | null; nit: string | null; date: string | null }> = await this.events.listInvoices(companyId, cursor);
+    const grouped = new Map<string, { cufe: string; number: string; supplier: string; nit: string; date: string; valid: boolean; events: Array<{ eventId: number; status: 'sent' | 'failed' | 'unknown'; cude: string | null; dianCode: string | null; message: string | null; typeRejectionId: number | null; updatedAt: Date }> }>();
+    for (const row of rows) {
+      let invoice = grouped.get(row.cufe);
+      if (!invoice) { invoice = { cufe: row.cufe, number: '', supplier: '', nit: '', date: '', valid: true, events: [] }; grouped.set(row.cufe, invoice); }
+      invoice.number ||= row.number || '';
+      invoice.supplier ||= row.supplier || '';
+      invoice.nit ||= row.nit || '';
+      invoice.date ||= row.date?.slice(0, 10) || '';
+      invoice.events.push({ eventId: row.eventId, status: row.status === 'processing' ? 'unknown' : row.status, cude: row.cude, dianCode: row.dianCode, message: row.message, typeRejectionId: row.typeRejectionId, updatedAt: row.updatedAt });
+    }
+    const items = [...grouped.values()];
+    return { items: items.slice(0, 100), nextCursor: items.length > 100 ? items[99].cufe : null };
   }
 
   async history(companyId: string, cufe: string, reconcile = false) {

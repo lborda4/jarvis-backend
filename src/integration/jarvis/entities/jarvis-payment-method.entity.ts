@@ -9,6 +9,7 @@ export class JarvisPaymentMethod {
   @Column({ type: 'varchar', length: 120 }) name: string;
   @Column({ name: 'nextpyme_method_id', type: 'integer' }) nextpymeMethodId: number;
   @Column({ name: 'nextpyme_method_name', type: 'varchar', length: 255 }) nextpymeMethodName: string;
+  @Column({ name: 'negotiation', type: 'varchar', length: 6, default: 'CASH' }) negotiation: 'CASH' | 'CREDIT';
   @CreateDateColumn({ name: 'created_at' }) createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt: Date;
   @ManyToOne(() => Company, { onDelete: 'CASCADE' })

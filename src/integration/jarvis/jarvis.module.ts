@@ -1,3 +1,4 @@
+import { JarvisDashboardService } from './jarvis-dashboard.service';
 import { JarvisRadianEvent } from './entities/jarvis-radian-event.entity';
 import { JarvisRadianEventsRepository } from './repositories/jarvis-radian-events.repository';
 import { JarvisRadianService } from './jarvis-radian.service';
@@ -42,6 +43,7 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
   ],
   controllers: [JarvisController],
   providers: [
+    JarvisDashboardService,
     JarvisRadianService,
     JarvisRadianEventsRepository,
     JarvisInvoicePdfService,

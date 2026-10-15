@@ -372,6 +372,33 @@ describe('consulta de facturas y reclamos RADIAN', () => {
       'empresa activa',
     );
   });
+  it.each([1, null, undefined])('rechaza contado o forma de pago ausente: %s', async paymentForm => {
+    const { service, client, data } = setup();
+    client.getInvoiceByCufe.mockResolvedValue({ outcome: 'found', data: { ...data, payment_form: { payment_form_id: paymentForm } } });
+    await expect(service.lookup('owner', cufe)).rejects.toThrow('crédito');
+  });
+  it.each([11, 4, null, undefined])('rechaza documentos distintos de factura o sin tipo: %s', async documentType => {
+    const { service, client, data } = setup();
+    client.getInvoiceByCufe.mockResolvedValue({ outcome: 'found', data: { ...data, type_document_id: documentType } });
+    await expect(service.lookup('owner', cufe)).rejects.toThrow('factura electrónica de venta');
+  });
+  it.each(['', null, undefined, '21111967'])('rechaza comprador ausente o ajeno: %s', async identification => {
+    const { service, client, data } = setup();
+    client.getInvoiceByCufe.mockResolvedValue({ outcome: 'found', data: { ...data, customer: { identification_number: identification } } });
+    await expect(service.lookup('owner', cufe)).rejects.toThrow('Verifica la información');
+  });
+  it('acepta códigos de texto e identifica el NIT sin separadores', async () => {
+    const { service, client, data } = setup();
+    client.getInvoiceByCufe.mockResolvedValue({ outcome: 'found', data: { ...data, type_document_id: '1', payment_form: { payment_form_id: '2' }, customer: { identification_number: '900.123.456-7' } } });
+    await expect(service.lookup('owner', cufe)).resolves.toMatchObject({ valid: true });
+  });
+  it('distingue factura inexistente de un fallo de consulta', async () => {
+    const { service, client } = setup();
+    client.getInvoiceByCufe.mockResolvedValue({ outcome: 'not_found' });
+    await expect(service.lookup('owner', cufe)).rejects.toThrow('Verifica la información');
+    client.getInvoiceByCufe.mockResolvedValue({ outcome: 'error' });
+    await expect(service.lookup('owner', cufe)).rejects.toThrow('No pudimos consultar');
+  });
   it('envía el reclamo con type_rejection_id obligatorio', async () => {
     const { service, client } = setup();
     await service.send('owner', { cufe, eventId: 2, typeRejectionId: 1 });

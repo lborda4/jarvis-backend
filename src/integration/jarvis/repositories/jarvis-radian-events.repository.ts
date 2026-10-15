@@ -8,6 +8,18 @@ import type { RadianEventResult } from '../nextpyme/nextpyme-radian-result';
 export class JarvisRadianEventsRepository {
   constructor(private readonly source: DataSource) {}
 
+  listInvoices(companyId: string, cursor: string) {
+    return this.source.query(`SELECT cufe,event_id AS "eventId",status,cude,dian_code AS "dianCode",
+      message,rejection_id AS "typeRejectionId",updated_at AS "updatedAt",
+      COALESCE(response->>'invoice_number',history->0->'result'->'response'->>'invoice_number') AS number,
+      COALESCE(response->>'receiver_name',history->0->'result'->'response'->>'receiver_name') AS supplier,
+      COALESCE(response->>'receiver_id',history->0->'result'->'response'->>'receiver_id') AS nit,
+      COALESCE(response->>'invoice_date',history->0->'result'->'response'->>'invoice_date') AS date
+      FROM jarvis_radian_events WHERE company_id=$1 AND cufe IN
+      (SELECT DISTINCT cufe FROM jarvis_radian_events WHERE company_id=$1 AND cufe>$2 ORDER BY cufe LIMIT 101)
+      ORDER BY cufe,event_id`, [companyId, cursor]);
+  }
+
   list(companyId: string, cufe: string) {
     return this.source
       .getRepository(JarvisRadianEvent)

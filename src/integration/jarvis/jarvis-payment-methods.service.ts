@@ -16,6 +16,12 @@ export class JarvisPaymentMethodsService {
     private readonly catalogs: NextPymeMasterCatalogService,
   ) {}
 
+  private negotiation(item: { name: string; negotiation?: 'CASH' | 'CREDIT' }): 'CASH' | 'CREDIT' {
+    if (item.negotiation) return item.negotiation;
+    const name = item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    return /^credito\b/.test(name) || /\bcuentas? por (cobrar|pagar)\b/.test(name) ? 'CREDIT' : 'CASH';
+  }
+
   private async requireCompany(companyId: string) {
     if (!companyId?.trim()) throw new BadRequestException('No se pudo determinar la empresa activa.');
     const jarvis = await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.JARVIS);
@@ -46,7 +52,7 @@ export class JarvisPaymentMethodsService {
           this.logger.warn('No está disponible el medio de pago maestro con código ' + preset.code);
           return [];
         }
-        return [{ companyId, name: preset.name, nextpymeMethodId: master.id, nextpymeMethodName: master.name }];
+        return [{ companyId, name: preset.name, negotiation: this.negotiation(preset), nextpymeMethodId: master.id, nextpymeMethodName: master.name }];
       });
       // La restricción única por empresa y nombre evita duplicados en cargas simultáneas.
       if (values.length) await this.repository.createQueryBuilder().insert().values(values).orIgnore().execute();
@@ -68,6 +74,8 @@ export class JarvisPaymentMethodsService {
     }
     const master = (await this.catalogs.getPaymentMethods(companyId)).find(row => row.id === request.nextpymeMethodId);
     if (!master) throw new BadRequestException('La forma de pago seleccionada no existe en NextPyme.');
+    if (request.negotiation !== undefined && !['CASH', 'CREDIT'].includes(request.negotiation)) throw new BadRequestException('Selecciona Contado o Crédito.');
+    item.negotiation = request.negotiation ?? item.negotiation ?? this.negotiation({ name });
     item.name = name;
     item.nextpymeMethodId = master.id;
     item.nextpymeMethodName = master.name;
@@ -87,6 +95,6 @@ export class JarvisPaymentMethodsService {
   }
 
   private toDto(item: JarvisPaymentMethod) {
-    return { id: item.id, name: item.name, nextpymeMethodId: item.nextpymeMethodId, nextpymeMethodName: item.nextpymeMethodName };
+    return { id: item.id, name: item.name, negotiation: this.negotiation(item), nextpymeMethodId: item.nextpymeMethodId, nextpymeMethodName: item.nextpymeMethodName };
   }
 }
