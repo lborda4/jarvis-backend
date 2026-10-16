@@ -80,6 +80,12 @@ export class AdminIntegrationItemDto {
 }
 
 export class AdminCompanyListItemDto {
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Correo de la primera cuenta activa de usuario vinculada a la empresa.',
+  })
+  email?: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   commercial?: string | null;
   @ApiPropertyOptional({ enum: ['MONTHLY', 'ANNUAL'], nullable: true })

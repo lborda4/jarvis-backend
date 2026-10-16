@@ -1,3 +1,4 @@
+import { UpdateAdminPlanRequestDto } from './dto/admin-plan.dto';
 import { companyDueDate, normalizeCompanyTracking } from './company-tracking';
 import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
 import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
@@ -14,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
+import { UserRole } from '../auth/enums/user-role.enum';
 import { Company } from '../company/entities/company.entity';
 import { CompanyPersonType } from '../company/enums/company-person-type.enum';
 import { CompaniesRepository } from '../company/repositories/companies.repository';
@@ -162,6 +164,36 @@ export class AdminService {
     };
   }
 
+  async addCompanyIntegration(companyId: string, provider: IntegrationProvider) {
+    if (!ALLOWED_INTEGRATIONS.has(provider)) {
+      throw new BadRequestException('Seleccione Siigo, Jarvis o Bold.');
+    }
+    await this.dataSource.transaction(async manager => {
+      const company = await manager.getRepository(Company).findOne({
+        where: { id: companyId }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!company) throw new NotFoundException('Empresa no encontrada.');
+      const repository = manager.getRepository(Integration);
+      const existing = await repository.findOne({ where: { companyId, provider } });
+      if (existing) {
+        if (!existing.active) {
+          existing.active = true;
+          await repository.save(existing);
+        }
+        return;
+      }
+      if (provider === IntegrationProvider.SIIGO) {
+        await ensureSiigoIntegration(manager, companyId);
+      } else if (provider === IntegrationProvider.JARVIS) {
+        await ensureJarvisIntegration(manager, companyId);
+      } else {
+        await ensureBoldIntegration(manager, companyId);
+      }
+    });
+    const company = (await this.companiesRepository.findAllWithIntegrations()).find(item => item.id === companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    return { company: this.mapCompany(company) };
+  }
   async selectCompanyIntegration(companyId: string, provider: IntegrationProvider) {
     if (![IntegrationProvider.SIIGO, IntegrationProvider.JARVIS].includes(provider)) {
       throw new BadRequestException('Seleccione SIIGO o Jarvis.');
@@ -213,6 +245,28 @@ export class AdminService {
     }, jarvisToken) };
   }
 
+  async updatePlan(planId: string, request: UpdateAdminPlanRequestDto): Promise<{ plan: AdminPlanDto }> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(planId)) {
+      throw new BadRequestException('Identificador de plan invalido.');
+    }
+    if (typeof request?.name !== 'string' || !request.name.trim() || request.name.trim().length > 255) {
+      throw new BadRequestException('Ingrese un nombre de plan de hasta 255 caracteres.');
+    }
+    const limit = request.documentLimit;
+    if (limit !== null && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 2147483647)) {
+      throw new BadRequestException('El cupo debe ser un entero positivo o null para un plan sin limite.');
+    }
+    const plan = await this.plansRepository.findById(planId);
+    if (!plan) throw new NotFoundException('Plan no encontrado.');
+    if (plan.provider !== IntegrationProvider.SIIGO && plan.provider !== IntegrationProvider.JARVIS) {
+      throw new BadRequestException('Solo se pueden editar planes de Siigo y Jarvis.');
+    }
+    // El proveedor y el codigo se conservan para no mover suscripciones entre integraciones.
+    plan.name = request.name.trim();
+    plan.documentLimit = limit;
+    const saved = await this.dataSource.getRepository(Plan).save(plan);
+    return { plan: this.mapPlan(saved) };
+  }
   async listPlans(): Promise<ListAdminPlansResponseDto> {
     const plans = await this.plansRepository.findAllActive();
 
@@ -799,6 +853,10 @@ export class AdminService {
       id: company.id,
       nit: company.nit,
       name: company.name,
+      email: [...(company.userCompanies ?? [])]
+        .filter((link) => link.user?.active && link.user.role === UserRole.USER && link.user.email?.trim())
+        .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id))
+        [0]?.user.email.trim() ?? null,
       description: readCompanyAiContext(company.description).description || null,
       aiRules: readCompanyAiContext(company.description).rules,
       personType: company.personType,

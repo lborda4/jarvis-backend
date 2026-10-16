@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { BoldWebhookService } from './bold-webhook.service';
 import { computeBoldWebhookSignature } from './helpers/bold-webhook-signature.helper';
 
@@ -32,6 +32,7 @@ function setup(overrides?: {
 }
 
 describe('BoldWebhookService', () => {
+  afterEach(() => jest.restoreAllMocks());
   const signature = computeBoldWebhookSignature(BODY, SECRET);
   const testSignature = computeBoldWebhookSignature(BODY, '');
   const payload = JSON.parse(BODY);
@@ -115,5 +116,36 @@ describe('BoldWebhookService', () => {
       service.receiveTest({ rawBody: BODY, signature, body: payload }),
     ).rejects.toThrow(UnauthorizedException);
     expect(events.insertIfNew).not.toHaveBeenCalled();
+  });
+
+  it('diagnoses a company-signed notification on the test route without accepting or exposing it', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { service, events } = setup();
+    await expect(service.receiveTest({ rawBody: BODY, signature, body: payload }))
+      .rejects.toThrow(UnauthorizedException);
+    const message = String(warn.mock.calls[0][0]);
+    expect(message).toContain('"matchesCompanySecret":true');
+    expect(message).toContain('"matchesTestKey":false');
+    expect(message).not.toContain(SECRET);
+    expect(message).not.toContain(signature);
+    expect(message).not.toContain('PAY1');
+    expect(events.insertIfNew).not.toHaveBeenCalled();
+  });
+
+  it('diagnoses a test signature sent to production and keeps rejecting it', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { service } = setup();
+    await expect(service.receiveProduction({ rawBody: BODY, signature: testSignature, body: payload }))
+      .rejects.toThrow(UnauthorizedException);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"matchesTestKey":true'));
+  });
+
+  it('reports missing raw body without exposing the supplied signature', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { service } = setup();
+    await expect(service.receiveTest({ rawBody: undefined, signature, body: payload }))
+      .rejects.toThrow(UnauthorizedException);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"rawBodyPresent":false'));
+    expect(String(warn.mock.calls[0][0])).not.toContain(signature);
   });
 });

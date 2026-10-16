@@ -50,6 +50,7 @@ export class BoldWebhookService {
     const rawBody = input.rawBody;
     const signature = readBoldSignatureHeader(input.signature);
     if (!rawBody || rawBody.length === 0 || !signature) {
+      this.logInvalidSignature(rawBody, signature, environment, 'missing_body_or_signature');
       throw new UnauthorizedException(
         'No se pudo verificar el origen de la notificación.',
       );
@@ -61,7 +62,6 @@ export class BoldWebhookService {
       environment,
     );
     if (companyId === undefined) {
-      this.logger.warn(`Webhook Bold ${environment} con firma inválida`);
       throw new UnauthorizedException(
         'No se pudo verificar el origen de la notificación.',
       );
@@ -113,31 +113,58 @@ export class BoldWebhookService {
       IntegrationProvider.BOLD,
     );
 
-    if (environment === 'test') {
-      if (!isBoldWebhookSignatureValid(rawBody, '', signature)) {
-        return undefined;
-      }
+    const matchesTestKey = isBoldWebhookSignatureValid(rawBody, '', signature);
+    if (environment === 'test' && matchesTestKey) {
       return integrations[0]?.companyId ?? null;
     }
 
+    let configuredCompanySecrets = 0;
+    let matchesCompanySecret = false;
     for (const integration of integrations) {
       const secret = (integration.credentials as BoldCredentials | undefined)
         ?.secret_key?.trim();
       if (!secret) continue;
+      configuredCompanySecrets += 1;
       if (isBoldWebhookSignatureValid(rawBody, secret, signature)) {
-        return integration.companyId;
+        if (environment === 'production') return integration.companyId;
+        matchesCompanySecret = true;
       }
     }
 
     const envSecret = this.configService.get('bold', { infer: true }).key;
-    if (
-      envSecret &&
-      isBoldWebhookSignatureValid(rawBody, envSecret, signature)
-    ) {
+    const matchesEnvSecret = Boolean(envSecret &&
+      isBoldWebhookSignatureValid(rawBody, envSecret, signature));
+    if (environment === 'production' && matchesEnvSecret) {
       return integrations[0]?.companyId ?? null;
     }
 
+    this.logInvalidSignature(rawBody, signature, environment, 'hmac_mismatch', {
+      activeIntegrations: integrations.length,
+      configuredCompanySecrets,
+      envSecretConfigured: Boolean(envSecret),
+      matchesTestKey,
+      matchesCompanySecret,
+      matchesEnvSecret,
+    });
     return undefined;
+  }
+
+  private logInvalidSignature(
+    rawBody: Buffer | string | undefined,
+    signature: string,
+    environment: BoldWebhookEnvironment,
+    reason: string,
+    checks: Record<string, number | boolean> = {},
+  ): void {
+    // Only diagnostic metadata: never log the payload, keys or signature values.
+    this.logger.warn(`Webhook Bold ${environment} con firma inválida ${JSON.stringify({
+      reason,
+      rawBodyPresent: rawBody !== undefined,
+      rawBodyBytes: rawBody === undefined ? 0 : Buffer.byteLength(rawBody),
+      signatureLength: signature.length,
+      signatureIsHex64: /^[a-f0-9]{64}$/.test(signature),
+      ...checks,
+    })}`);
   }
 
   private notificationId(

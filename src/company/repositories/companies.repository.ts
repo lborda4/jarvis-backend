@@ -11,7 +11,10 @@ export class CompaniesRepository {
   ) {}
 
   findById(id: string): Promise<Company | null> {
-    return this.repository.findOne({ where: { id } });
+    return this.repository.findOne({
+      where: { id },
+      relations: { userCompanies: { user: true } },
+    });
   }
 
   findByNit(nit: string): Promise<Company | null> {
@@ -49,6 +52,7 @@ export class CompaniesRepository {
   findAllWithIntegrations(): Promise<Company[]> {
     return this.repository.find({
       relations: {
+        userCompanies: { user: true },
         integrations: {
           plan: true,
         },

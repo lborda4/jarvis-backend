@@ -1,3 +1,4 @@
+import { UpdateAdminPlanRequestDto } from './dto/admin-plan.dto';
 import { AdminAssignPackageDto } from './dto/admin-package.dto';
 import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
 import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
@@ -51,6 +52,14 @@ import { RutParserService } from './rut-parser.service';
 @Controller('admin')
 @UseGuards(AdminGuard)
 export class AdminController {
+  @Post('companies/:companyId/integrations/:provider')
+  @ApiOperation({ summary: 'Agregar una integracion sin desactivar las existentes' })
+  addCompanyIntegration(
+    @Param('companyId') companyId: string,
+    @Param('provider', new ParseEnumPipe(IntegrationProvider)) provider: IntegrationProvider,
+  ) {
+    return this.adminService.addCompanyIntegration(companyId, provider);
+  }
   @Patch('companies/:companyId/integrations/:provider/select')
   selectCompanyIntegration(
     @Param('companyId') companyId: string,
@@ -92,6 +101,11 @@ export class AdminController {
     return this.adminService.updateCompanyTracking(companyId, request);
   }
 
+  @Patch('plans/:planId')
+  @ApiOperation({ summary: 'Editar nombre y cupo de un plan existente' })
+  updatePlan(@Param('planId') planId: string, @Body() request: UpdateAdminPlanRequestDto) {
+    return this.adminService.updatePlan(planId, request);
+  }
   @Get('plans')
   @ApiOperation({
     summary: 'Listar planes',
