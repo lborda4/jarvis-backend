@@ -78,6 +78,10 @@ export class JarvisSupportDocumentSendService {
     private readonly jarvisSetupService: JarvisSetupService,
   ) {}
 
+  async listNoteDiscrepancyResponses(companyId: string, kind: 'credit' | 'debit') {
+    const rows = await this.nextPymeMasterCatalogService.getNoteDiscrepancyResponses(kind, companyId);
+    return rows.map(({ id, name, code }) => ({ id, name, code: String(code ?? id) }));
+  }
   async listTypeRejections(companyId?: string) {
     const rows = await this.nextPymeMasterCatalogService.getTypeRejections(companyId);
     return rows.map(({ id, name, code }) => ({ id, name, code: code ?? null }));

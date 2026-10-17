@@ -113,6 +113,12 @@ export class NextPymeMasterCatalogService {
     return IVA_TAX_ID;
   }
 
+  async getNoteDiscrepancyResponses(kind: 'credit' | 'debit', companyId?: string): Promise<NextPymeMasterRow[]> {
+    return this.getTable(
+      kind === 'debit' ? 'debit_note_discrepancy_responses' : 'credit_note_discrepancy_responses',
+      await this.requireCompanyToken(companyId),
+    );
+  }
   async getTypeRejections(companyId?: string): Promise<NextPymeMasterRow[]> {
     return this.getTable(
       'type_rejections',

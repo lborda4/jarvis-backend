@@ -88,6 +88,7 @@ export class JarvisRadianEventsRepository {
     await this.source.query(
       `UPDATE jarvis_radian_events SET status=$1, cude=COALESCE($2,cude),
       dian_code=$3, message=$4, response=$5::jsonb, updated_at=now(),
+      sent_at=CASE WHEN $1='sent' THEN COALESCE(sent_at,now()) ELSE sent_at END,
       history=history || jsonb_build_array(jsonb_build_object('attemptId',attempt_id,'recordedAt',now(),'result',$6::jsonb))
       WHERE company_id=$7 AND cufe=$8 AND event_id=$9 AND attempt_id=$10
       AND (status <> 'sent' OR $1 = 'sent')`,

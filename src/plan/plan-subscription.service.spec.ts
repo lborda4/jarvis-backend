@@ -42,6 +42,7 @@ function buildService(
   integration: Integration | null,
   documentsUsed: number,
   salesDocumentsUsed = 0,
+  radianEventsUsed = 0,
 ): PlanSubscriptionService {
   const integrationsRepository = {
     findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration),
@@ -62,6 +63,7 @@ function buildService(
     integrationsRepository as any,
     electronicDocumentsRepository as any,
     buildJarvisSalesRepository(salesDocumentsUsed) as any,
+    buildJarvisSalesRepository(radianEventsUsed) as any,
   );
 }
 
@@ -244,7 +246,7 @@ describe('cupos manuales independientes de Siigo', () => {
       const query = { where: jest.fn().mockReturnThis(), andWhere: jest.fn((sql, params) => { if (params.documentType) type = params.documentType; return query; }), getCount: jest.fn(async () => type === 'PURCHASE_INVOICE' ? 20 : 5) };
       queries.push(query); return query;
     } };
-    const service = new PlanSubscriptionService({} as never, { findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration()) } as never, repo as never, buildJarvisSalesRepository() as never);
+    const service = new PlanSubscriptionService({} as never, { findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration()) } as never, repo as never, buildJarvisSalesRepository() as never, buildJarvisSalesRepository() as never);
     const snapshot = await service.getSubscription(COMPANY_ID, IntegrationProvider.SIIGO);
     expect(snapshot.documentQuotas).toEqual({ PURCHASE_INVOICE: {documentLimit: 100, documentsUsed: 20, remaining: 80}, SUPPORT_DOCUMENT: {documentLimit: 50, documentsUsed: 5, remaining: 45} });
     expect(snapshot.remaining).toBe(125);
@@ -272,6 +274,28 @@ describe('cupo compartido Jarvis', () => {
       provider: IntegrationProvider.JARVIS,
       includedDocumentTypes: [ElectronicDocumentType.SUPPORT_DOCUMENT],
     });
+
+  it('descuenta los eventos RADIAN aceptados del mismo cupo de documentos', async () => {
+    const service = buildService(jarvis(), 7, 5, 3);
+    const snapshot = await service.getSubscription(COMPANY_ID, IntegrationProvider.JARVIS);
+    expect(snapshot.documentsUsed).toBe(15);
+    expect(snapshot.remaining).toBe(85);
+    const result = await service.resolveAllowedQuantity({
+      companyId: COMPANY_ID, provider: IntegrationProvider.JARVIS,
+      documentType: ElectronicDocumentType.SUPPORT_DOCUMENT, requestedQuantity: 100,
+    });
+    expect(result.allowed).toBe(85);
+  });
+
+  it('cuenta RADIAN por empresa, estado aceptado y fecha de primera aceptación', async () => {
+    const service = buildService(jarvis(), 0);
+    const events = buildJarvisSalesRepository(2);
+    (service as any).radianEventsRepository = events;
+    await service.getSubscription(COMPANY_ID, IntegrationProvider.JARVIS);
+    expect(events.queryBuilder.where).toHaveBeenCalledWith('event.companyId = :companyId', { companyId: COMPANY_ID });
+    expect(events.queryBuilder.andWhere).toHaveBeenCalledWith('event.status = :status', { status: 'sent' });
+    expect(events.queryBuilder.andWhere).toHaveBeenCalledWith('event.sentAt >= :since', { since: jarvis().subscriptionStartedAt });
+  });
 
   it('suma documentos soporte y facturas de venta en el mismo pozo', async () => {
     const service = buildService(jarvis(), 7, 5);

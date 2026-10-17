@@ -6,6 +6,7 @@ import type {
 export type JarvisInvoicePdfParty = PurchaseInvoiceDownloadPartyDto;
 
 export type JarvisInvoicePdfData = PurchaseInvoiceDownloadDto & {
+  sellers?: Array<{ id: string; name: string }>;
   documentKind?: string | null;
   logoDataUrl?: string | null;
 };

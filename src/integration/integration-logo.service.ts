@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, Optional, PayloadTooLargeException, forwardRef } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, InternalServerErrorException, Logger, NotFoundException, Optional, PayloadTooLargeException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Integration } from './entities/integration.entity';
@@ -39,6 +39,7 @@ export function logoMime(data: Buffer): 'image/png' | 'image/jpeg' {
 
 @Injectable()
 export class IntegrationLogoService {
+  private readonly logger = new Logger(IntegrationLogoService.name);
   constructor(
     @InjectRepository(Integration) private readonly integrations: Repository<Integration>,
     @Optional()
@@ -54,6 +55,7 @@ export class IntegrationLogoService {
       .andWhere('integration.provider = :provider', { provider })
       .andWhere('integration.active = true').getOne();
     if (!integration) throw new NotFoundException('No se encontró la integración de la empresa.');
+    this.logger.log(`Logo consultado company=${companyId} provider=${provider} integration=${integration.id} bytes=${integration.logo?.length ?? 0}`);
     return { logoDataUrl: integration.logo ? `data:${logoMime(integration.logo)};base64,${integration.logo.toString('base64')}` : null };
   }
   async save(companyId: string, provider: IntegrationProvider, file?: Express.Multer.File) {
@@ -70,10 +72,19 @@ export class IntegrationLogoService {
       await this.nextPymeApiClient.putConfigLogo(file.buffer.toString('base64'), token);
     }
     await this.update(companyId, provider, file.buffer);
-    return { logoDataUrl: `data:${mime};base64,${file.buffer.toString('base64')}` };
+    // Confirm using the same read path used after a new login, rather than
+    // returning the uploaded file as if persistence had already been verified.
+    const saved = await this.get(companyId, provider);
+    if (saved.logoDataUrl !== `data:${mime};base64,${file.buffer.toString('base64')}`) {
+      this.logger.error(`Logo no confirmado company=${companyId} provider=${provider} bytes=${file.buffer.length}`);
+      throw new InternalServerErrorException('No se pudo confirmar que el logo quedara guardado. Intenta nuevamente.');
+    }
+    this.logger.log(`Logo guardado company=${companyId} provider=${provider} bytes=${file.buffer.length}`);
+    return saved;
   }
   async remove(companyId: string, provider: IntegrationProvider) {
     await this.update(companyId, provider, null);
+    this.logger.log(`Logo eliminado company=${companyId} provider=${provider}`);
     return { logoDataUrl: null };
   }
   private async update(companyId: string, provider: IntegrationProvider, logo: Buffer | null) {

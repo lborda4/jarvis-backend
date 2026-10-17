@@ -26,4 +26,6 @@ export class JarvisRadianEvent {
   history: unknown[];
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
+  @Column({ name: 'sent_at', type: 'timestamptz', nullable: true })
+  sentAt: Date | null;
 }

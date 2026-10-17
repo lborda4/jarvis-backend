@@ -18,7 +18,7 @@ function setup(
     connect: jest.fn(), startTransaction: jest.fn(), query: jest.fn(),
     commitTransaction: jest.fn(), rollbackTransaction: jest.fn(), release: jest.fn(),
   };
-  const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
+  const dataSource = { createQueryRunner: jest.fn(() => queryRunner), query: jest.fn().mockResolvedValue([]) };
   const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: token }) };
   const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportCreditNote: jest.fn().mockResolvedValue({ cuds: 'adjustment-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }), sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
   const catalog = {
@@ -66,7 +66,7 @@ function setup(
     issueDate: '2026-09-16', customerDocumentType: 'NIT', customerIdentification: '901335977',
     items: [{ description: 'Servicio', quantity: 1, unitValue: 250000, code: '01' }],
   };
-  return { service, request, client, companies, numbering, history, integrations, siigoNumbering, invoicePdf, plans };
+  return { service, request, client, companies, numbering, history, integrations, siigoNumbering, invoicePdf, plans, dataSource };
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
@@ -658,5 +658,27 @@ describe('cupo Jarvis al enviar', () => {
       companyId: 'company-1', provider: 'JARVIS', quantity: 1,
       documentType: kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? 'SUPPORT_DOCUMENT' : 'PURCHASE_INVOICE',
     });
+  });
+});
+
+describe('vendedores internos de facturas', () => {
+  it('conserva vendedores en el historial y no los agrega al payload DIAN', async () => {
+    const seller = { id: '11111111-1111-4111-8111-111111111111', name: 'Laura Perez' };
+    const baseline = setup();
+    await baseline.service.createAndSendInvoice(baseline.request, 'company-1');
+    const current = setup();
+    current.dataSource.query.mockResolvedValue([seller]);
+    await current.service.createAndSendInvoice({ ...current.request, sellerIds: [seller.id] }, 'company-1');
+    const body = current.client.createInvoice.mock.calls[0][0];
+    expect(body).toEqual(baseline.client.createInvoice.mock.calls[0][0]);
+    expect(JSON.stringify(body)).not.toContain(seller.name);
+    expect(body).not.toHaveProperty('sellerIds');
+    expect(body).not.toHaveProperty('sellers');
+    expect(current.history.record).toHaveBeenCalledWith(expect.objectContaining({ sourceRequest: expect.objectContaining({ sellers: [seller] }) }));
+  });
+  it('rechaza vendedores de otra empresa antes de emitir', async () => {
+    const { service, request, client } = setup();
+    await expect(service.createAndSendInvoice({ ...request, sellerIds: ['11111111-1111-4111-8111-111111111111'] }, 'company-1')).rejects.toThrow('no pertenecen');
+    expect(client.createInvoice).not.toHaveBeenCalled();
   });
 });

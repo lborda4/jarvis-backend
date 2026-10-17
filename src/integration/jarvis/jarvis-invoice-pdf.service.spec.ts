@@ -5,6 +5,19 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
+  it('no agrega los vendedores internos al PDF del correo automatico', async () => {
+    const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { sellers: [{ id: 'seller-1', name: 'Laura Perez' }] } });
+    const renderer = jest.requireMock('./pdf/sales-invoice-pdf.renderer');
+    renderer.renderJarvisInvoicePdfBase64.mockClear();
+    await service.renderGraphicBase64({ companyId: 'company', historyId: 'id' });
+    expect(renderer.renderJarvisInvoicePdfBase64).toHaveBeenCalled();
+    expect(renderer.renderJarvisInvoicePdfBase64.mock.calls[0][0]).not.toHaveProperty('sellers');
+  });
+  it('incluye los vendedores guardados aunque no existan en el XML DIAN', async () => {
+    const sellers = [{ id: 'seller-1', name: 'Laura Perez' }, { id: 'seller-2', name: 'Juan Diaz' }];
+    const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { sellers } });
+    expect((await service.getData('company', 'id')).sellers).toEqual(sellers);
+  });
   function setup(invoice: unknown) {
     const query = { addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn().mockResolvedValue(invoice) };
     const repository = { createQueryBuilder: jest.fn(() => query), update: jest.fn() };

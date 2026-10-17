@@ -17,6 +17,7 @@ import {
 } from './pdf/map-jarvis-issued-document-to-pdf-data';
 import { renderJarvisInvoicePdfBase64 } from './pdf/sales-invoice-pdf.renderer';
 import { buildJarvisDocumentEmail } from './helpers/jarvis-document-email.helper';
+import { randomUUID } from 'node:crypto';
 
 function uniqueCodeLabel(kind?: string | null) {
   if (
@@ -47,6 +48,28 @@ export class JarvisInvoicePdfService {
   ) {}
 
   async sendEmail(companyId: string, id: string, request: { additionalEmails?: string[]; message?: string }) {
+    const trace = { requestId: randomUUID(), companyId, documentId: id };
+    return this.traceEmailStep(trace, 'reenvio', () => this.performSendEmail(companyId, id, request, trace));
+  }
+
+  private async traceEmailStep<T>(trace: Record<string, string>, step: string, work: () => Promise<T>): Promise<T> {
+    const started = Date.now();
+    console.log('[document-email] antes', { ...trace, step });
+    try {
+      const result = await work();
+      console.log('[document-email] despues', { ...trace, step, elapsedMs: Date.now() - started });
+      return result;
+    } catch (error) {
+      // Do not log request objects, tokens, recipients or the base64 PDF.
+      console.error('[document-email] error', {
+        ...trace, step, elapsedMs: Date.now() - started,
+        error: error instanceof Error ? error.message : 'Error no identificado',
+      });
+      throw error;
+    }
+  }
+
+  private async performSendEmail(companyId: string, id: string, request: { additionalEmails?: string[]; message?: string }, trace: Record<string, string>) {
     if (!request || (request.additionalEmails !== undefined && (!Array.isArray(request.additionalEmails) || request.additionalEmails.length > 50)) || (request.message !== undefined && (typeof request.message !== 'string' || request.message.length > 500))) {
       throw new BadRequestException('Los correos adicionales o el mensaje no son válidos.');
     }
@@ -54,15 +77,15 @@ export class JarvisInvoicePdfService {
     if (extras.some(email => typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))) {
       throw new BadRequestException('Revisa los correos adicionales.');
     }
-    const invoice = await this.invoices.findOne({ where: { companyId, id } });
+    const invoice = await this.traceEmailStep(trace, 'consultar-documento', () => this.invoices.findOne({ where: { companyId, id } }));
     if (!invoice) throw new NotFoundException('No se encontró el documento.');
-    const data = await this.getData(companyId, id);
+    const data = await this.traceEmailStep(trace, 'consultar-datos-pdf', () => this.getData(companyId, id));
     const registered = data.buyer.email?.trim().toLowerCase();
     const emails = [...new Set([registered, ...extras.map(email => email.trim().toLowerCase())].filter((email): email is string => Boolean(email)))];
     if (!emails.length || emails.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) throw new BadRequestException('Se requiere al menos un correo válido.');
-    const company = await this.companies.findById(companyId);
+    const company = await this.traceEmailStep(trace, 'consultar-empresa', () => this.companies.findById(companyId));
     if (!company?.nextPymeToken) throw new BadRequestException('La empresa no tiene un token de correo configurado.');
-    const graphic = await renderJarvisInvoicePdfBase64(data);
+    const graphic = await this.traceEmailStep(trace, 'generar-pdf', () => renderJarvisInvoicePdfBase64(data));
     const message = request.message?.trim() ?? '';
     const html = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\r?\n/g, '<br>');
     const template = buildJarvisDocumentEmail({
@@ -79,7 +102,7 @@ export class JarvisInvoicePdfService {
     if (html) {
       template.html_body += `<table role="presentation" align="center" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:760px;margin:0 auto;border-collapse:collapse;font-family:Arial,sans-serif;"><tr><td style="padding:4px 12px;font-size:12px;"><p style="margin:0;">${html}</p></td></tr></table>`;
     }
-    const response = await this.nextPyme.sendDocumentEmail({
+    const response = await this.traceEmailStep(trace, 'servicio-reenvio-correo', () => this.nextPyme.sendDocumentEmail({
       prefix: invoice.prefix,
       number: invoice.number.startsWith(invoice.prefix) ? invoice.number.slice(invoice.prefix.length) : invoice.number,
       alternate_email: emails[0],
@@ -88,7 +111,7 @@ export class JarvisInvoicePdfService {
       base64graphicrepresentation: graphic,
       showacceptrejectbuttons: false,
       ...template,
-    }, company.nextPymeToken);
+    }, company.nextPymeToken!));
     if (response.success === false) throw new BadGatewayException('El proveedor no confirmó el envío del correo.');
     return { success: true };
   }
@@ -103,7 +126,7 @@ export class JarvisInvoicePdfService {
     const code = uniqueCodeLabel(invoice.documentKind);
     if (!invoice.cufe) throw new BadGatewayException(`El documento aún no tiene ${code} disponible. No vuelvas a emitirlo; actualiza el listado e intenta visualizarlo después.`);
     const logo = await this.safeLogo(companyId);
-    const withKind = { documentKind: invoice.documentKind, ...logo };
+    const withKind = { documentKind: invoice.documentKind, sellers: invoice.sourceRequest?.sellers ?? [], ...logo };
     if (invoice.invoiceXml) {
       try { return { ...mapInvoiceXmlToPurchaseInvoiceDownload(invoice.invoiceXml, id, invoice.cufe), ...withKind }; } catch { /* An emission envelope can contain an incomplete XML; recover the DIAN copy. */ }
     }
@@ -143,7 +166,8 @@ export class JarvisInvoicePdfService {
     try {
       const data = await this.buildPdfData(input);
       if (!data?.dianQrText) return '';
-      return await renderJarvisInvoicePdfBase64(data);
+      const { sellers: _internalSellers, ...emailData } = data;
+      return await renderJarvisInvoicePdfBase64(emailData);
     } catch (error) {
       this.logger.warn(
         `[companyId=${input.companyId}] No se pudo generar el PDF JARVIS para el correo: ${

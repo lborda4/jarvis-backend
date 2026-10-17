@@ -15,6 +15,7 @@ import { ElectronicDocumentType } from '../electronic-document/enums/electronic-
 import { Integration } from '../integration/entities/integration.entity';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
 import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
+import { JarvisRadianEvent } from '../integration/jarvis/entities/jarvis-radian-event.entity';
 import { JarvisResolutionKind } from '../integration/jarvis/enums/jarvis-resolution-kind.enum';
 import { IntegrationsRepository } from '../integration/repositories/integrations.repository';
 import { Plan } from './entities/plan.entity';
@@ -75,6 +76,8 @@ export class PlanSubscriptionService {
     private readonly electronicDocumentsRepository: Repository<ElectronicDocument>,
     @InjectRepository(JarvisSalesInvoice)
     private readonly jarvisSalesInvoicesRepository: Repository<JarvisSalesInvoice>,
+    @InjectRepository(JarvisRadianEvent)
+    private readonly radianEventsRepository: Repository<JarvisRadianEvent>,
   ) {}
   async withSiigoQuotaLock<T>(companyId: string, work: () => Promise<T>): Promise<T> {
     return withPostgresAdvisoryLock(this.electronicDocumentsRepository.manager.connection, 'siigo-quota:' + companyId, work);
@@ -432,12 +435,12 @@ export class PlanSubscriptionService {
     return query.getCount();
   }
 
-  /** Documentos soporte enviados + facturas de venta y todas sus notas enviadas. */
+  /** Documentos enviados y eventos RADIAN aceptados por la DIAN. */
   private async countJarvisBillableDocuments(
     companyId: string,
     since: Date,
   ): Promise<number> {
-    const [supportDocuments, salesDocuments] = await Promise.all([
+    const [supportDocuments, salesDocuments, radianEvents] = await Promise.all([
       this.countDocumentsSince(
         companyId,
         ElectronicDocumentType.SUPPORT_DOCUMENT,
@@ -452,8 +455,14 @@ export class PlanSubscriptionService {
         })
         .andWhere('invoice.sentAt >= :since', { since })
         .getCount(),
+      this.radianEventsRepository
+        .createQueryBuilder('event')
+        .where('event.companyId = :companyId', { companyId })
+        .andWhere('event.status = :status', { status: 'sent' })
+        .andWhere('event.sentAt >= :since', { since })
+        .getCount(),
     ]);
-    return supportDocuments + salesDocuments;
+    return supportDocuments + salesDocuments + radianEvents;
   }
 
   buildJarvisQuotaNotice(

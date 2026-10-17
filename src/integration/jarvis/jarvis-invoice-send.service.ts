@@ -1,3 +1,4 @@
+import { resolveInvoiceSellers } from './helpers/jarvis-invoice-sellers.helper';
 import { buildJarvisDocumentEmail, type JarvisDocumentEmailData } from './helpers/jarvis-document-email.helper';
 import {
   BadGatewayException,
@@ -92,6 +93,7 @@ export class JarvisInvoiceSendService {
     const isSupport = kind === JarvisResolutionKind.SUPPORT_DOCUMENT;
     const isSaleInvoice = kind === JarvisResolutionKind.ELECTRONIC_INVOICE;
     const documentLabel = isDebitNote ? "nota débito" : isSupportCreditNote ? "nota de ajuste" : isNote ? "nota crédito" : isSupport ? "documento soporte" : "factura de venta";
+    const sellers = kind === JarvisResolutionKind.ELECTRONIC_INVOICE ? await resolveInvoiceSellers(this.dataSource, companyId, request.sellerIds) : [];
     const issueDate = request.issueDate?.trim();
     const customerIdentification = normalizeJarvisDocumentNumber(
       request.customerIdentification ?? '',
@@ -673,7 +675,7 @@ export class JarvisInvoiceSendService {
           try {
             historyId = await this.invoiceHistory.record({
               invoiceXml,
-              sourceRequest: JSON.parse(JSON.stringify(request)) as CreateJarvisInvoiceRequestDto,
+              sourceRequest: JSON.parse(JSON.stringify({ ...request, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
               companyId, documentKind: kind, providerId: createdId, prefix: numbering.prefix, number: String(createdNumber),
               issueDate, customerName: request.customerName?.trim() || tercero.name,
               customerIdentification, currency, total: formatMoney(payable), cufe: createdCufe,

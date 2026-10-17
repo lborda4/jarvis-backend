@@ -9,7 +9,10 @@ describe('integration logos', () => {
   const provider = IntegrationProvider.JARVIS;
   function setup(logo: Buffer | null = null) {
     const query = { addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn().mockResolvedValue({ logo }) };
-    const repository = { createQueryBuilder: jest.fn(() => query), update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    const repository = { createQueryBuilder: jest.fn(() => query), update: jest.fn().mockImplementation(async (_criteria, update) => {
+      query.getOne.mockResolvedValue({ logo: update.logo });
+      return { affected: 1 };
+    }) };
     const nextPymeApiClient = { putConfigLogo: jest.fn().mockResolvedValue({}) };
     const nextPymeMasterCatalog = { requireCompanyToken: jest.fn().mockResolvedValue('company-token') };
     return {
@@ -36,6 +39,19 @@ describe('integration logos', () => {
   });
   it('allows a company without a logo', async () => {
     expect(await setup().service.get('owner', provider)).toEqual({ logoDataUrl: null });
+  });
+  it('returns the persisted logo and reloads it from a new service instance', async () => {
+    const { service, repository } = setup();
+    const saved = await service.save('owner', provider, { buffer: jpeg } as Express.Multer.File);
+    const newSessionService = new IntegrationLogoService(repository as never);
+    expect(await newSessionService.get('owner', provider)).toEqual(saved);
+    expect(saved.logoDataUrl).toBe(`data:image/jpeg;base64,${jpeg.toString('base64')}`);
+  });
+  it('does not confirm a save if the logo cannot be read back', async () => {
+    const { service, repository } = setup();
+    repository.update.mockResolvedValue({ affected: 1 });
+    await expect(service.save('owner', provider, { buffer: jpeg } as Express.Multer.File))
+      .rejects.toThrow('No se pudo confirmar');
   });
   it('saves binary content and removes it without changing other integration settings', async () => {
     const { service, repository, nextPymeApiClient } = setup();

@@ -1,6 +1,14 @@
 import { NextPymeMasterCatalogService } from './nextpyme-master-catalog.service';
 
 describe('NextPyme company catalogs', () => {
+  it.each([
+    ['credit', 'credit_note_discrepancy_responses'],
+    ['debit', 'debit_note_discrepancy_responses'],
+  ] as const)('consulta motivos %s en su tabla maestra con el token de la empresa', async (kind, table) => {
+    const { service, client } = setup();
+    await service.getNoteDiscrepancyResponses(kind, 'notes-company');
+    expect(client.fetchMasterTable).toHaveBeenCalledWith(table, 'token-notes-company');
+  });
   function setup() {
     const companies = {
       findById: jest.fn(async (id: string) => ({

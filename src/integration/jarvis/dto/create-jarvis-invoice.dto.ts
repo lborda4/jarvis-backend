@@ -36,6 +36,9 @@ export class CreateJarvisInvoiceItemDto {
 }
 
 export class CreateJarvisInvoiceRequestDto {
+  @ApiPropertyOptional({ description: 'Vendedores internos de Jarvis. No se incluyen en el payload DIAN.' })
+  sellerIds?: string[];
+  sellers?: Array<{ id: string; name: string }>;
   @ApiPropertyOptional({ description: 'Consecutivo explícito de la nota crédito.' })
   number?: number;
   @ApiPropertyOptional({ description: 'Prefijo de la nota crédito enviado a NextPyme.' })

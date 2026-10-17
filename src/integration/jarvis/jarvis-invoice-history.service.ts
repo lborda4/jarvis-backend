@@ -33,13 +33,35 @@ export class JarvisInvoiceHistoryService {
     }
     if (filters.from && filters.to && filters.from > filters.to) throw new BadRequestException('La fecha inicial no puede superar la final.');
     const pageSize = 20;
-    const query = this.repository.createQueryBuilder('invoice').where('invoice.companyId = :companyId', { companyId: companyId.trim() });
-    query.andWhere('invoice.documentKind = :documentKind', { documentKind });
+    const documents = `WITH documents AS (
+      SELECT id, provider_id AS "providerId", prefix, number,
+        issue_date::text AS "issueDate", customer_name AS "customerName",
+        customer_identification AS "customerIdentification", currency, total::text AS total,
+        cufe, sent_at AS "sentAt", 'SENT'::text AS status
+      FROM jarvis_sales_invoices WHERE company_id=$1 AND document_kind=$2
+      UNION ALL
+      SELECT id, ''::text, ''::text, ''::text,
+        COALESCE(state->>'issueDate',''), COALESCE(state->'selectedCustomer'->>'name',''),
+        COALESCE(state->'selectedCustomer'->>'document_number',''), COALESCE(state->>'currency','COP'),
+        CASE WHEN state->>'documentTotal' ~ '^-?[0-9]+([.][0-9]+)?$' THEN state->>'documentTotal' ELSE '' END,
+        NULL::text, updated_at, 'SAVED'::text
+      FROM jarvis_invoice_drafts WHERE company_id=$1 AND document_kind=$2
+    )`;
+    const parameters: unknown[] = [companyId.trim(), documentKind];
+    const conditions: string[] = [];
     const search = filters.search?.trim();
-    if (search) query.andWhere("(invoice.customerName ILIKE :search OR invoice.customerIdentification ILIKE :search OR CONCAT(invoice.prefix, invoice.number) ILIKE :search OR invoice.cufe ILIKE :search)", { search: '%' + search + '%' });
-    if (filters.from) query.andWhere('invoice.issueDate >= :from', { from: filters.from });
-    if (filters.to) query.andWhere('invoice.issueDate <= :to', { to: filters.to });
-    const [items, total] = await query.orderBy('invoice.sentAt', 'DESC').addOrderBy('invoice.id', 'DESC').skip((page - 1) * pageSize).take(pageSize).getManyAndCount();
-    return { items: items.map(({ companyId: _company, company: _relation, ...invoice }) => ({ ...invoice, status: 'SENT' as const })), total, page, pageSize };
+    if (search) {
+      parameters.push('%' + search + '%');
+      const index = parameters.length;
+      conditions.push(`("customerName" ILIKE $${index} OR "customerIdentification" ILIKE $${index} OR CONCAT(prefix,number) ILIKE $${index} OR cufe ILIKE $${index})`);
+    }
+    if (filters.from) { parameters.push(filters.from); conditions.push(`"issueDate" >= $${parameters.length}`); }
+    if (filters.to) { parameters.push(filters.to); conditions.push(`"issueDate" <= $${parameters.length}`); }
+    const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
+    const [count] = await this.repository.query(documents + ' SELECT COUNT(*) AS total FROM documents' + where, parameters);
+    const items = await this.repository.query(documents + ' SELECT * FROM documents' + where +
+      ` ORDER BY "sentAt" DESC,id DESC LIMIT $${parameters.length + 1} OFFSET $${parameters.length + 2}`,
+      [...parameters, pageSize, (page - 1) * pageSize]);
+    return { items, total: Number(count.total), page, pageSize };
   }
 }

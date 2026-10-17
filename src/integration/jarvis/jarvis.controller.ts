@@ -120,11 +120,6 @@ export class JarvisController {
     return this.radian.listInvoices(getAuthenticatedCompanyId(user), cursor);
   }
 
-  @Post('radian/invoices/:cufe/events/reconcile')
-  reconcileRadianEvents(@CurrentUser() user: AuthenticatedUser, @Param('cufe') cufe: string) {
-    return this.radian.history(getAuthenticatedCompanyId(user), cufe, true);
-  }
-
   @Post('credentials')
   @ApiOperation({
     summary: 'Guardar configuración inicial Jarvis',
@@ -200,8 +195,19 @@ export class JarvisController {
     );
   }
 
+  @Get('catalogs/credit-note-discrepancy-responses')
+  @ApiOperation({ summary: 'Motivos de nota credito y nota de ajuste desde credit_note_discrepancy_responses' })
+  listCreditNoteReasons(@CurrentUser() user: AuthenticatedUser) {
+    return this.jarvisSupportDocumentSendService.listNoteDiscrepancyResponses(getAuthenticatedCompanyId(user), 'credit');
+  }
+
+  @Get('catalogs/debit-note-discrepancy-responses')
+  @ApiOperation({ summary: 'Motivos de nota debito desde debit_note_discrepancy_responses' })
+  listDebitNoteReasons(@CurrentUser() user: AuthenticatedUser) {
+    return this.jarvisSupportDocumentSendService.listNoteDiscrepancyResponses(getAuthenticatedCompanyId(user), 'debit');
+  }
   @Get('catalogs/type-rejections')
-  @ApiOperation({ summary: 'Motivos de las notas desde la tabla maestra type_rejections' })
+  @ApiOperation({ summary: 'Motivos de reclamo RADIAN desde la tabla maestra type_rejections' })
   listTypeRejections(@CurrentUser() user: AuthenticatedUser) {
     return this.jarvisSupportDocumentSendService.listTypeRejections(getAuthenticatedCompanyId(user));
   }

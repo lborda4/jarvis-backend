@@ -43,6 +43,7 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
   const base = data.taxExclusiveAmount ?? data.subtotal;
   const totalTaxes = (data.taxes ?? []).reduce((sum, tax) => sum + tax.amount, 0);
   const beforeRetentions = data.taxInclusiveAmount ?? base + totalTaxes;
+  const netPayable = Number((beforeRetentions - data.withholdings.reduce((sum, tax) => sum + (tax.amount ?? 0), 0)).toFixed(2));
   const retention = (code: string) => data.withholdings.filter(t => t.dianTaxCode === code).reduce((sum, t) => sum + (t.amount ?? 0), 0);
   const days = data.issueDate && data.dueDate ? Math.max(0, Math.round((Date.parse(data.dueDate) - Date.parse(data.issueDate)) / 86400000)) : null;
   const totals: [string, number][] = [['Total bruto', gross], ['Descuentos', gross - base], ['Subtotal', base], ['IVA', data.iva],
@@ -58,6 +59,7 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
       {related.length > 0 && <View style={{ paddingVertical: 10, borderBottom: '0.6 solid #cbd9e6' }} wrap={false}>
         {related.map((item, index) => <Text key={`${item.number}-${index}`} style={s.field}>{item.type === 'Factura relacionada' ? copy.related : item.type}: {item.number}{item.date ? ` · ${item.date}` : ''}</Text>)}
       </View>}
+      {Boolean(data.sellers?.length) && <View style={{ paddingVertical: 8 }} wrap={false}><Text style={s.field}>Vendedores: {data.sellers?.map(seller => seller.name).join(', ')}</Text></View>}
       <View style={s.table}>
         <View style={s.tableRow} wrap={false}>{['#', 'Producto / servicio', 'Descripción', 'Cant.', 'Valor unitario', 'Descuento', 'IVA (%)', 'ReteFuente (%)', 'ReteICA (‰)', 'ReteIVA (%)', 'Valor total'].map((title, i) => <Text key={title} style={[s.cell, s.tableHead, { width: widths[i] }]}>{title}</Text>)}</View>
         {data.items.map((item, i) => {
@@ -78,10 +80,10 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
         <View style={s.box} wrap={false}>{totals.map(([label, amount]) => <View key={label} style={s.totalRow}><Text>{label}:</Text><Text>{money(amount)}</Text></View>)}
           <View style={[s.totalRow, s.total]}><Text>Total antes de retenciones:</Text><Text>{money(beforeRetentions)}</Text></View>
           {([['ReteFuente', '06'], ['ReteICA', '07'], ['ReteIVA', '05']] as const).map(([label, code]) => <View key={code} style={s.totalRow}><Text>{label}:</Text><Text>-{money(retention(code))}</Text></View>)}
-          <View style={[s.totalRow, s.total]}><Text>Total neto a pagar:</Text><Text>{money(data.total)}</Text></View>
+          <View style={[s.totalRow, s.total]}><Text>Total neto a pagar:</Text><Text>{money(netPayable)}</Text></View>
         </View>
       </View>
-      <View style={s.words} wrap={false}><Text style={s.heading}>Valor en letras</Text><Text style={s.small}>{amountInSpanish(data.total, data.currency).toUpperCase()}</Text></View>
+      <View style={s.words} wrap={false}><Text style={s.heading}>Valor en letras</Text><Text style={s.small}>{amountInSpanish(netPayable, data.currency).toUpperCase()}</Text></View>
       <View style={s.dian} wrap={false}>
         <Image src={qr} style={s.qr} />
         <View style={s.half}><Text style={s.name}>Documento electrónico validado por la DIAN</Text><Text style={s.field}>{copy.uniqueCode}:</Text><Text style={s.small}>{data.cufe.match(/.{1,32}/g)?.join('\n')}</Text><Text style={[s.field, { marginTop: 7 }]}>Fecha y hora de generación:</Text><Text style={s.small}>{data.issueDate} {data.issueTime}</Text></View>
@@ -89,7 +91,7 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
           <Text style={s.small}>Régimen: {value(data.issuer.fiscalRegime)}</Text><Text style={s.small}>Responsabilidad tributaria: {value(data.issuer.taxResponsibility)}</Text><Text style={s.small}>Actividad económica: {value(data.issuer.economicActivity)}</Text>
           <Text style={s.small}>Resolución No. {value(data.authorization?.number)}</Text><Text style={s.small}>Prefijo: {value(data.prefix)}</Text><Text style={s.small}>Desde: {value(data.authorization?.from)}  Hasta: {value(data.authorization?.to)}</Text><Text style={s.small}>Vigencia: {value(data.authorization?.startDate)} a {value(data.authorization?.endDate)}</Text></View>
       </View>
-      <Text style={s.footer}>Esta es una representación gráfica de la {copy.footer}.{'\n'}Documento electrónico generado por Jarvis</Text>
+      <Text style={s.footer}>Esta es una representación gráfica de la {copy.footer}.{'\n'}Emitido por Jarvis Colombia</Text>
       <Text fixed style={s.pageNumber} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
     </Page>
   </Document>;

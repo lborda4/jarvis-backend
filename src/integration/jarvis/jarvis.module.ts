@@ -1,3 +1,5 @@
+import { JarvisSellersController } from './jarvis-sellers.controller';
+import { JarvisInvoiceDraftsController } from './jarvis-invoice-drafts.controller';
 import { JarvisDashboardService } from './jarvis-dashboard.service';
 import { JarvisRadianEvent } from './entities/jarvis-radian-event.entity';
 import { JarvisRadianEventsRepository } from './repositories/jarvis-radian-events.repository';
@@ -41,7 +43,7 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     forwardRef(() => ElectronicDocumentModule),
     TypeOrmModule.forFeature([JarvisRadianEvent, JarvisPaymentMethod, JarvisTercero, JarvisTax, JarvisSalesInvoice]),
   ],
-  controllers: [JarvisController],
+  controllers: [JarvisController, JarvisSellersController, JarvisInvoiceDraftsController],
   providers: [
     JarvisDashboardService,
     JarvisRadianService,

@@ -293,6 +293,23 @@ describe('historial persistente RADIAN', () => {
     );
     expect(store.complete).toHaveBeenCalledTimes(2);
   });
+  it('recupera un pendiente con CUDE sin volver a emitir el evento', async () => {
+    const { service, client } = setup();
+    client.sendRadianEvent.mockResolvedValue({ status: 'unknown', cude: 'event-cude' } as never);
+    client.getRadianEventStatus.mockResolvedValueOnce({ status: 'unknown', cude: 'event-cude' } as never);
+    await service.send('company', { cufe, eventId: 1 });
+    expect(await service.send('company', { cufe, eventId: 1 })).toEqual({ status: 'sent', cude: 'event-cude' });
+    expect(client.sendRadianEvent).toHaveBeenCalledTimes(1);
+    expect(client.getRadianEventStatus).toHaveBeenCalledTimes(2);
+  });
+  it('explica el pendiente sin CUDE y no crea un segundo envio', async () => {
+    const { service, client } = setup();
+    client.sendRadianEvent.mockResolvedValue({ status: 'unknown' } as never);
+    await service.send('company', { cufe, eventId: 1 });
+    expect(await service.send('company', { cufe, eventId: 1 })).toMatchObject({ status: 'unknown', message: expect.stringContaining('soporte') });
+    expect(client.sendRadianEvent).toHaveBeenCalledTimes(1);
+    expect(client.getRadianEventStatus).not.toHaveBeenCalled();
+  });
   it('no incluye la respuesta cruda en el historial público', async () => {
     const { service } = setup();
     await service.send('company', { cufe, eventId: 1 });

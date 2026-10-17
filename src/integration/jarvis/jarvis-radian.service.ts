@@ -142,7 +142,20 @@ export class JarvisRadianService {
       eventId,
       eventId === 2 ? request.typeRejectionId! : null,
     );
-    if (!claim.claimed) return this.publicResult(claim.row);
+    if (!claim.claimed) {
+      if (claim.row.status !== 'sent' && claim.row.cude) {
+        const confirmed = await this.client.getRadianEventStatus(claim.row.cude, token);
+        await this.events.complete(claim.row, confirmed);
+        const { response, ...visible } = confirmed;
+        return visible;
+      }
+      return {
+        ...this.publicResult(claim.row),
+        ...(claim.row.status !== 'sent' && !claim.row.cude ? {
+          message: 'El proveedor no devolvio una confirmacion ni un CUDE. Comparte el CUFE con soporte para recuperar el resultado del envio.',
+        } : {}),
+      };
+    }
     let result: RadianEventResult;
     try {
       result = await this.client.sendRadianEvent(
@@ -199,44 +212,14 @@ export class JarvisRadianService {
     return { items: items.slice(0, 100), nextCursor: items.length > 100 ? items[99].cufe : null };
   }
 
-  async history(companyId: string, cufe: string, reconcile = false) {
+  async history(companyId: string, cufe: string) {
     if (typeof cufe !== 'string' || !/^[a-f0-9]{96}$/i.test(cufe.trim()))
       throw new BadRequestException('El CUFE no es válido.');
     const company = await this.companies.findById(companyId);
     if (!company) throw new BadRequestException('Empresa no encontrada.');
     const rows = await this.events.list(companyId, cufe.trim().toLowerCase());
-    if (reconcile) {
-      const integration = await this.integrations.findByCompanyAndProvider(
-        companyId,
-        IntegrationProvider.JARVIS,
-      );
-      if (
-        !integration ||
-        (integration.subscriptionStatus != null &&
-          integration.subscriptionStatus !== SubscriptionStatus.ACTIVE)
-      )
-        throw new ForbiddenException(
-          'Esta función requiere una integración Jarvis activa.',
-        );
-      const token = company.nextPymeToken?.trim();
-      if (!token)
-        throw new BadRequestException(
-          'La configuración de la empresa no está completa.',
-        );
-      for (const row of rows) {
-        if (row.cude && row.status !== 'sent') {
-          const result = await this.client.getRadianEventStatus(
-            row.cude,
-            token,
-          );
-          await this.events.complete(row, result);
-        }
-      }
-    }
     return {
-      events: (
-        await this.events.list(companyId, cufe.trim().toLowerCase())
-      ).map((row) => ({
+      events: rows.map((row) => ({
         eventId: row.eventId,
         typeRejectionId: row.rejectionId,
         ...this.publicResult(row),

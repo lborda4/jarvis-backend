@@ -225,6 +225,34 @@ describe('NextPymeApiClient.createInvoice', () => {
 });
 
 describe('NextPymeApiClient.sendDocumentEmail', () => {
+  it('reports a mail connection failure without implying that issuance prevents resending', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(throwError(() => ({ isAxiosError: true, code: 'ECONNRESET' })));
+    await expect(client.sendDocumentEmail({ prefix: 'FE', number: '1' }, 'company-token'))
+      .rejects.toThrow('servicio de reenvío de correo');
+    expect(httpService.post).toHaveBeenCalledTimes(1);
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/send-email', expect.any(Object), expect.any(Object));
+  });
+
+  it('retains an HTTP error response raised by the transport', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(throwError(() => ({ isAxiosError: true, response: { status: 422, data: { message: 'Destinatario no válido' } } })));
+    await expect(client.sendDocumentEmail({ prefix: 'FE', number: '1' }, 'company-token'))
+      .rejects.toThrow('Destinatario no válido');
+  });
+  it('preserves the provider reason when HTTP 200 reports a failed delivery', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { success: false, message: 'Documento no encontrado' } }));
+    await expect(client.sendDocumentEmail({ prefix: 'FE', number: '1' }, 'company-token'))
+      .rejects.toThrow('Documento no encontrado');
+  });
+
+  it('reports an unconfirmed timeout without suggesting a blind retry', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(throwError(() => ({ isAxiosError: true, code: 'ECONNABORTED' })));
+    await expect(client.sendDocumentEmail({ prefix: 'FE', number: '1' }, 'company-token'))
+      .rejects.toThrow('Comprueba si llegó');
+  });
   it('POST /send-email with prefix, number and the company token', async () => {
     const { client, httpService } = buildClient();
     httpService.post.mockReturnValue(of({ status: 200, data: { success: true } }));

@@ -795,6 +795,12 @@ export class NextPymeApiClient {
         : {}),
     };
     try {
+      console.log('[send-email] antes del servicio', {
+        document: `${prefix}${number}`,
+        url: `${this.getBaseUrl()}/send-email`,
+        pdfBase64Length: body.base64graphicrepresentation?.length ?? 0,
+        copies: body.email_cc_list?.length ?? 0,
+      });
       const response = await firstValueFrom(
         this.httpService.post<unknown>(`${this.getBaseUrl()}/send-email`, body, {
           headers: this.buildAuthHeaders(token),
@@ -802,10 +808,15 @@ export class NextPymeApiClient {
           validateStatus: () => true,
         }),
       );
+      console.log('[send-email] despues del servicio', {
+        document: `${prefix}${number}`, status: response.status,
+        success: (response.data as UnknownRecord | null)?.success,
+      });
       this.logger.log(
         `[send-email] ${prefix}${number} status=${response.status} respuesta=${this.preview(response.data)}`,
       );
-      if (response.status < 200 || response.status >= 300) {
+      if (response.status < 200 || response.status >= 300 ||
+          (response.data as UnknownRecord | null)?.success === false) {
         throw new BadGatewayException(
           this.extractErrorMessage(response.data) ||
             `No se pudo enviar el correo del documento (código ${response.status}).`,
@@ -813,9 +824,29 @@ export class NextPymeApiClient {
       }
       return (response.data as UnknownRecord) ?? {};
     } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Error no identificado';
+      console.error('[send-email] error del servicio', {
+        document: `${prefix}${number}`,
+        error: detail.split(token).join('[REDACTED]'),
+        code: axios.isAxiosError(error) ? error.code : undefined,
+        status: axios.isAxiosError(error) ? error.response?.status : undefined,
+      });
       if (error instanceof BadGatewayException) throw error;
+      const transportError = axios.isAxiosError(error) ? error : undefined;
+      const code = transportError?.code;
+      const status = transportError?.response?.status;
+      this.logger.warn(`[send-email] ${prefix}${number} fallo en reenvío code=${code ?? 'unknown'} status=${status ?? 'sin respuesta'}`);
+      if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+        throw new BadGatewayException('No se pudo confirmar el envío del correo a tiempo. Comprueba si llegó antes de volver a enviarlo.');
+      }
+      if (transportError?.response) {
+        throw new BadGatewayException(
+          this.extractErrorMessage(transportError.response.data) ||
+          `No se pudo reenviar el correo del documento (código ${status}).`,
+        );
+      }
       throw new BadGatewayException(
-        'No fue posible enviar el correo del documento. El documento ya quedó emitido ante la DIAN.',
+        'No se pudo conectar con el servicio de reenvío de correo. Inténtalo más tarde.',
       );
     }
   }
