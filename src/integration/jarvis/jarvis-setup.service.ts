@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import {
@@ -208,8 +208,16 @@ export class JarvisSetupService {
    * Documento soporte. Al elegir uno, `saveResolution` hace el PUT
    * /config/resolution con esos datos; si elige ambos, son dos PUTs. */
   async listAvailableResolutions(companyId?: string): Promise<ListJarvisAvailableResolutionsResponseDto> {
-    const resolutions =
-      await this.nextPymeMasterCatalogService.listResolutions(companyId);
+    let resolutions: NextPymeResolution[];
+    try {
+      resolutions = await this.nextPymeMasterCatalogService.listResolutions(companyId);
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+      if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(String(code))) {
+        throw new ServiceUnavailableException('No se pudo conectar con la base de datos para cargar la configuración de la empresa. Revisa la conexión del backend e intenta nuevamente.');
+      }
+      throw error;
+    }
     const today = new Date().toISOString().slice(0, 10);
 
     const available = resolutions

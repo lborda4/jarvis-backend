@@ -1,6 +1,13 @@
 import { NextPymeMasterCatalogService } from './nextpyme-master-catalog.service';
 
 describe('NextPyme company catalogs', () => {
+  it('in local/QA only requires the company token, even without IDSoftware', async () => {
+    const { service, client, integrations } = setup();
+    client.usesTestResolutionEndpoint.mockReturnValue(true);
+    await service.listResolutions('a');
+    expect(client.listResolutions).toHaveBeenCalledWith('', 'token-a');
+    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
+  });
   it.each([
     ['credit', 'credit_note_discrepancy_responses'],
     ['debit', 'debit_note_discrepancy_responses'],
@@ -23,6 +30,7 @@ describe('NextPyme company catalogs', () => {
       ),
     };
     const client = {
+      usesTestResolutionEndpoint: jest.fn().mockReturnValue(false),
       listResolutions: jest.fn(async (idSoftware: string, token: string) => [
         { prefix: token, resolution: idSoftware },
       ]),
@@ -38,17 +46,17 @@ describe('NextPyme company catalogs', () => {
     return { service, client, integrations };
   }
 
-  it('consults each company resolutions with its own token and IDSoftware', async () => {
+  it('consults production resolutions with each company IDSoftware', async () => {
     const { service, client } = setup();
     const [a, b] = await Promise.all([
       service.listResolutions('a'),
       service.listResolutions('b'),
     ]);
-    expect(a[0].prefix).toBe('token-a');
-    expect(b[0].prefix).toBe('token-b');
+    expect(a[0].resolution).toBe('software-a');
+    expect(b[0].resolution).toBe('software-b');
     expect(client.listResolutions.mock.calls).toEqual([
-      ['software-a', 'token-a'],
-      ['software-b', 'token-b'],
+      ['software-a'],
+      ['software-b'],
     ]);
   });
 

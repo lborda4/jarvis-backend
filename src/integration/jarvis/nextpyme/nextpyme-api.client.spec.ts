@@ -2,8 +2,25 @@ import { of, throwError } from 'rxjs';
 import { NextPymeApiClient } from './nextpyme-api.client';
 
 describe('NextPyme company authentication', () => {
+  it.each(['local', 'qa', 'development'])('consulta resoluciones de %s con token y cuerpo vacío sin requerir IDSoftware', async environment => {
+    const { client, httpService } = buildClient({ 'app.nodeEnv': environment });
+    httpService.post.mockReturnValue(of({ status: 200, data: { resolutions: [] } }));
+    await client.listResolutions('', 'company-token');
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/reports/resolutions', '', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer company-token' }),
+    }));
+  });
+
+  it.each(['pr', 'prod', 'production'])('consulta resoluciones de %s sin necesitar token', async environment => {
+    const { client, httpService } = buildClient({ 'app.nodeEnv': environment });
+    httpService.post.mockReturnValue(of({ status: 200, data: {} }));
+    await client.listResolutions('software-id');
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/numbering-range', { IDSoftware: 'software-id' }, expect.objectContaining({
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    }));
+  });
   it.each([undefined, '', '   '])('rejects a missing company token even with a global token (%s)', async token => {
-    const { client, httpService } = buildClient({ 'nextPyme.apiToken': 'global-token' });
+    const { client, httpService } = buildClient({ 'nextPyme.apiToken': 'global-token', 'app.nodeEnv': 'local' });
     await expect(client.listResolutions('software-id', token)).rejects.toThrow('token de NextPyme');
     await expect(client.putConfigResolution({} as any, token)).rejects.toThrow('token de NextPyme');
     await expect(client.putConfigLogo('/9j/xxxx', token)).rejects.toThrow('token de NextPyme');
@@ -85,6 +102,7 @@ const VALID_NEXTPYME_RESPONSE = {
 
 function buildClient(configOverrides: Record<string, unknown> = {}) {
   const config: Record<string, unknown> = {
+    'app.nodeEnv': 'production',
     'nextPyme.apiToken': 'token',
     'nextPyme.baseUrl': 'https://nextpyme.example',
     'nextPyme.invoiceQueryUrl': 'https://nextpyme.example/return-invoice-data',
@@ -472,7 +490,7 @@ describe('NextPymeApiClient.listResolutions', () => {
     return { client, httpService };
   }
 
-  it('consulta POST /numbering-range con IDSoftware y el token de la empresa', async () => {
+  it('consulta POST /numbering-range en producción con IDSoftware sin autorización', async () => {
     const { client, httpService } = buildClientWithPost(DIAN_NUMBERING_RANGE_RESPONSE);
 
     await client.listResolutions(softwareId, 'company-token');
@@ -484,10 +502,10 @@ describe('NextPymeApiClient.listResolutions', () => {
         headers: expect.objectContaining({
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          Authorization: 'Bearer company-token',
         }),
       }),
     );
+    expect(httpService.post.mock.calls[0][2].headers).not.toHaveProperty('Authorization');
   });
 
   it('lee el sobre DIAN, que no trae id ni type_document_id', async () => {

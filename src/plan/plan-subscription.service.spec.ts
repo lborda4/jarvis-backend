@@ -43,6 +43,7 @@ function buildService(
   documentsUsed: number,
   salesDocumentsUsed = 0,
   radianEventsUsed = 0,
+  payrollDocumentsUsed = 0,
 ): PlanSubscriptionService {
   const integrationsRepository = {
     findByCompanyAndProviderWithPlan: jest.fn().mockResolvedValue(integration),
@@ -53,6 +54,7 @@ function buildService(
     getCount: jest.fn().mockResolvedValue(documentsUsed),
   };
   const electronicDocumentsRepository = {
+    query: jest.fn().mockResolvedValue([{used:payrollDocumentsUsed}]),
     createQueryBuilder: jest
       .fn()
       .mockReturnValue(electronicDocumentsRepositoryQueryBuilder),
@@ -370,4 +372,12 @@ it('Jarvis incluye ambos documentos sin depender de la selección del administra
   const integration = buildIntegration({ provider: IntegrationProvider.JARVIS, includedDocumentTypes: [] });
   const service = buildService(integration, 0);
   expect(service.resolveIncludedDocumentTypes(integration)).toEqual(expect.arrayContaining([ElectronicDocumentType.SUPPORT_DOCUMENT, ElectronicDocumentType.PURCHASE_INVOICE]));
+});
+
+it('Jarvis suma nómina a la misma bolsa de documentos y reserva envíos pendientes', async () => {
+  const integration=buildIntegration({provider:IntegrationProvider.JARVIS});
+  const service=buildService(integration,10,20,5,7);
+  const snapshot=await service.getSubscription(COMPANY_ID,IntegrationProvider.JARVIS);
+  expect(snapshot.documentsUsed).toBe(42);
+  expect(snapshot.remaining).toBe(58);
 });

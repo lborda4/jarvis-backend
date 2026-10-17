@@ -440,7 +440,7 @@ export class PlanSubscriptionService {
     companyId: string,
     since: Date,
   ): Promise<number> {
-    const [supportDocuments, salesDocuments, radianEvents] = await Promise.all([
+    const [supportDocuments, salesDocuments, radianEvents, payrollDocuments] = await Promise.all([
       this.countDocumentsSince(
         companyId,
         ElectronicDocumentType.SUPPORT_DOCUMENT,
@@ -461,8 +461,12 @@ export class PlanSubscriptionService {
         .andWhere('event.status = :status', { status: 'sent' })
         .andWhere('event.sentAt >= :since', { since })
         .getCount(),
+      this.electronicDocumentsRepository.query(
+        `SELECT count(*)::int AS used FROM jarvis_payroll_documents WHERE company_id=$1 AND sent_at >= $2 AND status IN ('ACCEPTED','PROCESSING','UNCERTAIN')`,
+        [companyId, since],
+      ).then(rows => Number(rows[0]?.used ?? 0)),
     ]);
-    return supportDocuments + salesDocuments + radianEvents;
+    return supportDocuments + salesDocuments + radianEvents + payrollDocuments;
   }
 
   buildJarvisQuotaNotice(

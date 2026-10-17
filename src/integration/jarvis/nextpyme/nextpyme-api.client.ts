@@ -497,32 +497,39 @@ export class NextPymeApiClient {
     }
   }
 
+  usesTestResolutionEndpoint(): boolean {
+    const environment = (this.configService.get('app.nodeEnv', { infer: true }) ?? 'local').toLowerCase();
+    return ['local', 'development', 'qa'].includes(environment);
+  }
+
   async listResolutions(
     idSoftware: string,
     companyToken?: string,
   ): Promise<NextPymeResolution[]> {
-    const token = this.requireToken(companyToken);
+    const testEnvironment = this.usesTestResolutionEndpoint();
+    const token = testEnvironment ? this.requireToken(companyToken) : undefined;
     const softwareId = idSoftware?.trim();
-    if (!softwareId) {
+    if (!testEnvironment && !softwareId) {
       throw new ServiceUnavailableException(
-        'La empresa no tiene una llave técnica configurada.',
+        'La empresa no tiene IDSoftware configurado.',
       );
     }
 
     const baseUrl = this.getBaseUrl();
-    const body = { IDSoftware: softwareId };
+    const endpoint = testEnvironment ? 'reports/resolutions' : 'numbering-range';
+    const body = testEnvironment ? '' : { IDSoftware: softwareId };
 
     try {
       const response = await firstValueFrom(
-        this.httpService.post<unknown>(`${baseUrl}/numbering-range`, body, {
-          headers: this.buildAuthHeaders(token),
+        this.httpService.post<unknown>(`${baseUrl}/${endpoint}`, body, {
+          headers: token ? this.buildAuthHeaders(token) : { Accept: 'application/json', 'Content-Type': 'application/json' },
           timeout: 20000,
           validateStatus: () => true,
         }),
       );
 
       this.logger.log(
-        `[numbering-range] status=${response.status} body=${JSON.stringify(
+        `[${endpoint}] status=${response.status} body=${JSON.stringify(
           body,
         )} respuesta=${this.preview(response.data)}`,
       );
@@ -1495,6 +1502,30 @@ export class NextPymeApiClient {
     }
 
     return token;
+  }
+
+  /** Payroll requests deliberately have no automatic retry: a timeout is ambiguous. */
+  async payrollRequest(endpoint: 'payroll' | 'payroll-adjust-note' | 'config/environment', body: unknown, token: string, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
+    const response = await firstValueFrom(this.httpService.request({
+      method, url: `${this.getBaseUrl()}/${endpoint}`, data: body,
+      headers: this.buildAuthHeaders(token), timeout: 25_000,
+    }));
+    return JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
+  }
+
+  async payrollStatus(cune: string, token: string): Promise<unknown> {
+    const response = await firstValueFrom(this.httpService.post(`${this.getBaseUrl()}/status/document/${encodeURIComponent(cune)}`, {}, {headers:this.buildAuthHeaders(token),timeout:20_000}));
+    return JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
+  }
+
+  async payrollPlanInfo(token: string): Promise<unknown> {
+    const response = await firstValueFrom(this.httpService.get(`${this.getBaseUrl()}/plan/infoplanuser`, {headers:this.buildAuthHeaders(token),timeout:20_000}));
+    return JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
+  }
+
+  async payrollDownload(nit: string, filename: string, token: string): Promise<Buffer> {
+    const response = await firstValueFrom(this.httpService.get(`${this.getBaseUrl()}/download/${encodeURIComponent(nit)}/${encodeURIComponent(filename)}`, {headers:this.buildAuthHeaders(token),timeout:20_000,responseType:'arraybuffer',maxContentLength:20*1024*1024}));
+    return Buffer.from(response.data);
   }
 
   private getBaseUrl(): string {

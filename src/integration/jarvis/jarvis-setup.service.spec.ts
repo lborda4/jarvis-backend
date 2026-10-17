@@ -733,3 +733,10 @@ describe('JarvisSetupService.allocateResolutionNumber — DS', () => {
     expect(putConfigResolution).not.toHaveBeenCalled();
   });
 });
+
+describe('resoluciones con base de datos no disponible', () => {
+  it.each(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'])('informa la causa %s sin ocultarla como error de resoluciones', async code => {
+    const { service } = buildService({ listResolutions: jest.fn().mockRejectedValue(Object.assign(new Error('private connection details'), { code })) });
+    await expect(service.listAvailableResolutions('company')).rejects.toThrow('No se pudo conectar con la base de datos');
+  });
+});

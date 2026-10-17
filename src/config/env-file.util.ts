@@ -20,6 +20,7 @@ const ENV_FILE_BY_NODE_ENV: Record<string, string> = {
   qa: '.env.qa',
   production: '.env.production',
   prod: '.env.production',
+  pr: '.env.production',
 };
 
 export function resolveEnvFilePath(nodeEnv = process.env.NODE_ENV?.trim()): string {

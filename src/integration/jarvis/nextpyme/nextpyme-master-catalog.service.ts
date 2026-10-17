@@ -53,16 +53,26 @@ export class NextPymeMasterCatalogService {
     return SUPPORT_DOCUMENT_TYPE_ID;
   }
 
+  async getPayrollWorkerCatalogs(companyId: string) {
+    const token=await this.requireCompanyToken(companyId);
+    const [workerTypes,workerSubtypes,identifications,paymentMethods]=await Promise.all([
+      this.getTable('type_workers',token),this.getTable('sub_type_workers',token),
+      this.getTable('type_document_identifications',token),this.getTable('payment_methods',token),
+    ]);
+    return {workerTypes,workerSubtypes,identifications,paymentMethods};
+  }
+
   getElectronicInvoiceTypeId(): number {
     return ELECTRONIC_INVOICE_TYPE_ID;
   }
 
   async listResolutions(companyId?: string): Promise<NextPymeResolution[]> {
-    const [token, idSoftware] = await Promise.all([
-      this.requireCompanyToken(companyId),
-      this.requireIdSoftware(companyId),
-    ]);
-    return this.nextPymeApiClient.listResolutions(idSoftware, token);
+    if (this.nextPymeApiClient.usesTestResolutionEndpoint()) {
+      const token = await this.requireCompanyToken(companyId);
+      return this.nextPymeApiClient.listResolutions('', token);
+    }
+    const idSoftware = await this.requireIdSoftware(companyId);
+    return this.nextPymeApiClient.listResolutions(idSoftware);
   }
 
   private async requireIdSoftware(companyId?: string): Promise<string> {
