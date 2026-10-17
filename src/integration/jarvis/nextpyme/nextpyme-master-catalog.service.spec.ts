@@ -55,8 +55,8 @@ describe('NextPyme company catalogs', () => {
     expect(a[0].resolution).toBe('software-a');
     expect(b[0].resolution).toBe('software-b');
     expect(client.listResolutions.mock.calls).toEqual([
-      ['software-a'],
-      ['software-b'],
+      ['software-a', 'token-a'],
+      ['software-b', 'token-b'],
     ]);
   });
 

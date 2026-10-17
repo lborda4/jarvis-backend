@@ -71,8 +71,11 @@ export class NextPymeMasterCatalogService {
       const token = await this.requireCompanyToken(companyId);
       return this.nextPymeApiClient.listResolutions('', token);
     }
-    const idSoftware = await this.requireIdSoftware(companyId);
-    return this.nextPymeApiClient.listResolutions(idSoftware);
+    const [idSoftware, token] = await Promise.all([
+      this.requireIdSoftware(companyId),
+      this.requireCompanyToken(companyId),
+    ]);
+    return this.nextPymeApiClient.listResolutions(idSoftware, token);
   }
 
   private async requireIdSoftware(companyId?: string): Promise<string> {

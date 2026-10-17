@@ -11,12 +11,12 @@ describe('NextPyme company authentication', () => {
     }));
   });
 
-  it.each(['pr', 'prod', 'production'])('consulta resoluciones de %s sin necesitar token', async environment => {
+  it.each(['pr', 'prod', 'production'])('consulta resoluciones de %s con el token de la empresa', async environment => {
     const { client, httpService } = buildClient({ 'app.nodeEnv': environment });
     httpService.post.mockReturnValue(of({ status: 200, data: {} }));
-    await client.listResolutions('software-id');
+    await client.listResolutions('software-id', 'company-token');
     expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/numbering-range', { IDSoftware: 'software-id' }, expect.objectContaining({
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: expect.objectContaining({ Authorization: 'Bearer company-token' }),
     }));
   });
   it.each([undefined, '', '   '])('rejects a missing company token even with a global token (%s)', async token => {
@@ -490,7 +490,7 @@ describe('NextPymeApiClient.listResolutions', () => {
     return { client, httpService };
   }
 
-  it('consulta POST /numbering-range en producción con IDSoftware sin autorización', async () => {
+  it('consulta POST /numbering-range en producción con IDSoftware y autorización', async () => {
     const { client, httpService } = buildClientWithPost(DIAN_NUMBERING_RANGE_RESPONSE);
 
     await client.listResolutions(softwareId, 'company-token');
@@ -505,7 +505,7 @@ describe('NextPymeApiClient.listResolutions', () => {
         }),
       }),
     );
-    expect(httpService.post.mock.calls[0][2].headers).not.toHaveProperty('Authorization');
+    expect(httpService.post.mock.calls[0][2].headers.Authorization).toBe('Bearer company-token');
   });
 
   it('lee el sobre DIAN, que no trae id ni type_document_id', async () => {

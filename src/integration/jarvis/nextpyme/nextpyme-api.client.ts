@@ -507,7 +507,7 @@ export class NextPymeApiClient {
     companyToken?: string,
   ): Promise<NextPymeResolution[]> {
     const testEnvironment = this.usesTestResolutionEndpoint();
-    const token = testEnvironment ? this.requireToken(companyToken) : undefined;
+    const token = this.requireToken(companyToken);
     const softwareId = idSoftware?.trim();
     if (!testEnvironment && !softwareId) {
       throw new ServiceUnavailableException(
@@ -522,7 +522,7 @@ export class NextPymeApiClient {
     try {
       const response = await firstValueFrom(
         this.httpService.post<unknown>(`${baseUrl}/${endpoint}`, body, {
-          headers: token ? this.buildAuthHeaders(token) : { Accept: 'application/json', 'Content-Type': 'application/json' },
+          headers: this.buildAuthHeaders(token),
           timeout: 20000,
           validateStatus: () => true,
         }),
