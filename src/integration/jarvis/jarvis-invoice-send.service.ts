@@ -1,3 +1,5 @@
+import { resolveInvoicePayments } from './helpers/jarvis-invoice-payments.helper';
+import { loadDraftAttachment } from './helpers/jarvis-invoice-attachment.helper';
 import { resolveInvoiceSellers } from './helpers/jarvis-invoice-sellers.helper';
 import { buildJarvisDocumentEmail, type JarvisDocumentEmailData } from './helpers/jarvis-document-email.helper';
 import {
@@ -137,6 +139,7 @@ export class JarvisInvoiceSendService {
     const documentType = normalizeJarvisDocumentType(
       request.customerDocumentType,
     );
+    const attachment = await loadDraftAttachment(this.dataSource, companyId, kind, request.attachmentDraftId);
 
     const jarvisIntegration =
       await this.integrationsRepository.findByCompanyAndProvider(
@@ -296,6 +299,65 @@ export class JarvisInvoiceSendService {
       );
     }
 
+    const documentDiscount = Math.max(
+      0,
+      Number(request.discountAmount ?? 0),
+    );
+
+    const lineExtensionTotal = parsedItems.reduce(
+      (sum, item) =>
+        sum + toMoney(item.quantity * item.unitValue - item.discount),
+      0,
+    );
+    if (isNote && (!Number.isFinite(Number(request.discountAmount ?? 0)) || Number(request.discountAmount ?? 0) < 0 || documentDiscount > lineExtensionTotal + parsedItems.reduce((sum, item) => sum + item.taxAmount, 0))) {
+      throw new BadRequestException('El descuento general no puede ser negativo ni superar el total de la nota.');
+    }
+    const taxableBase = toMoney(lineExtensionTotal - (isDebitNote ? 0 : documentDiscount));
+    const ivaTotal = toMoney(
+      parsedItems.reduce((sum, item) => sum + item.taxAmount, 0),
+    );
+    const payable = toMoney(taxableBase + ivaTotal - (isDebitNote ? documentDiscount : 0));
+
+    const taxTotals = isNote || isSupport
+      ? buildJarvisInvoiceChargeTaxTotals(parsedItems, { includeZeroAmount: true })
+      : buildJarvisInvoiceChargeTaxTotals(parsedItems, {
+          includeZeroAmount: isSaleInvoice,
+        });
+    const withholdingTotals: typeof taxTotals = [];
+    const retentionEntries = [
+      ...(request.retentions ?? []).map(retention => ({ retention, base: taxableBase, iva: ivaTotal })),
+      ...parsedItems.filter(item => item.retention).map(item => ({
+        retention: item.retention!, base: toMoney(item.quantity * item.unitValue - item.discount), iva: item.taxAmount,
+      })),
+    ];
+
+    for (const { retention, base, iva } of retentionEntries) {
+      if (!retention?.id || !Number.isFinite(retention.id)) {
+        continue;
+      }
+
+      const percentage = Number(retention.percentage ?? 0);
+      if (!Number.isFinite(percentage) || percentage < 0) throw new BadRequestException('La tarifa de retención no es válida.');
+      const calculated = calculateJarvisRetention(retention.type ?? '', percentage, base, iva);
+
+      const existing = withholdingTotals.find(tax => tax.tax_id === retention.id && Number(tax.percent) === calculated.percent);
+      if (existing) {
+        existing.tax_amount = formatMoney(Number(existing.tax_amount) + calculated.amount);
+        existing.taxable_amount = formatMoney(Number(existing.taxable_amount) + calculated.base);
+        continue;
+      }
+      withholdingTotals.push({
+        tax_id: retention.id,
+        tax_amount: formatMoney(calculated.amount),
+        taxable_amount: formatMoney(calculated.base),
+        percent: String(calculated.percent),
+      });
+    }
+
+    const paymentBreakdown = isSaleInvoice
+      ? await resolveInvoicePayments(this.dataSource, companyId, request, toMoney(payable - withholdingTotals.reduce((sum, tax) => sum + Number(tax.tax_amount), 0)))
+      : undefined;
+
     const resolutionLockKey = `jarvis-resolution:${companyId}:${kind}`;
 
     try {
@@ -357,61 +419,6 @@ export class JarvisInvoiceSendService {
               numbering.prefix,
               companyToken,
             );
-          }
-
-          const documentDiscount = Math.max(
-            0,
-            Number(request.discountAmount ?? 0),
-          );
-
-          const lineExtensionTotal = parsedItems.reduce(
-            (sum, item) =>
-              sum + toMoney(item.quantity * item.unitValue - item.discount),
-            0,
-          );
-          if (isNote && (!Number.isFinite(Number(request.discountAmount ?? 0)) || Number(request.discountAmount ?? 0) < 0 || documentDiscount > lineExtensionTotal + parsedItems.reduce((sum, item) => sum + item.taxAmount, 0))) {
-            throw new BadRequestException('El descuento general no puede ser negativo ni superar el total de la nota.');
-          }
-          const taxableBase = toMoney(lineExtensionTotal - (isDebitNote ? 0 : documentDiscount));
-          const ivaTotal = toMoney(
-            parsedItems.reduce((sum, item) => sum + item.taxAmount, 0),
-          );
-          const payable = toMoney(taxableBase + ivaTotal - (isDebitNote ? documentDiscount : 0));
-
-          const taxTotals = isNote || isSupport
-            ? buildJarvisInvoiceChargeTaxTotals(parsedItems, { includeZeroAmount: true })
-            : buildJarvisInvoiceChargeTaxTotals(parsedItems, {
-                includeZeroAmount: isSaleInvoice,
-              });
-          const withholdingTotals: typeof taxTotals = [];
-          const retentionEntries = [
-            ...(request.retentions ?? []).map(retention => ({ retention, base: taxableBase, iva: ivaTotal })),
-            ...parsedItems.filter(item => item.retention).map(item => ({
-              retention: item.retention!, base: toMoney(item.quantity * item.unitValue - item.discount), iva: item.taxAmount,
-            })),
-          ];
-
-          for (const { retention, base, iva } of retentionEntries) {
-            if (!retention?.id || !Number.isFinite(retention.id)) {
-              continue;
-            }
-
-            const percentage = Number(retention.percentage ?? 0);
-            if (!Number.isFinite(percentage) || percentage < 0) throw new BadRequestException('La tarifa de retención no es válida.');
-            const calculated = calculateJarvisRetention(retention.type ?? '', percentage, base, iva);
-
-            const existing = withholdingTotals.find(tax => tax.tax_id === retention.id && Number(tax.percent) === calculated.percent);
-            if (existing) {
-              existing.tax_amount = formatMoney(Number(existing.tax_amount) + calculated.amount);
-              existing.taxable_amount = formatMoney(Number(existing.taxable_amount) + calculated.base);
-              continue;
-            }
-            withholdingTotals.push({
-              tax_id: retention.id,
-              tax_amount: formatMoney(calculated.amount),
-              taxable_amount: formatMoney(calculated.base),
-              percent: String(calculated.percent),
-            });
           }
 
           const invoiceLines = parsedItems.map((item) => {
@@ -675,7 +682,7 @@ export class JarvisInvoiceSendService {
           try {
             historyId = await this.invoiceHistory.record({
               invoiceXml,
-              sourceRequest: JSON.parse(JSON.stringify({ ...request, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
+              sourceRequest: JSON.parse(JSON.stringify({ ...request, attachmentDraftId: undefined, attachment, paymentBreakdown, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
               companyId, documentKind: kind, providerId: createdId, prefix: numbering.prefix, number: String(createdNumber),
               issueDate, customerName: request.customerName?.trim() || tercero.name,
               customerIdentification, currency, total: formatMoney(payable), cufe: createdCufe,

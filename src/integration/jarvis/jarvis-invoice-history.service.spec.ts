@@ -7,6 +7,11 @@ describe('invoice detail', () => {
     const repository = { createQueryBuilder: jest.fn(() => query), upsert: jest.fn() };
     return { service: new JarvisInvoiceHistoryService(repository as never), query, repository };
   }
+  it('no incluye los bytes del archivo en la consulta normal del detalle', async () => {
+    const attachment = { name: 'soporte.pdf', mimeType: 'application/pdf', size: 5, dataBase64: 'JVBERi0=' };
+    const { service } = setup({ sourceRequest: { attachment } });
+    expect((await service.detail('company', 'invoice')).sourceRequest?.attachment).toEqual({ name: attachment.name, mimeType: attachment.mimeType, size: 5 });
+  });
   it('restricts invoice detail to the authenticated company and sales invoices', async () => {
     const sourceRequest = { items: [{ description: 'Original', unitValue: 100 }] };
     const { service, query } = setup({ id: 'invoice', companyId: 'company', sourceRequest });

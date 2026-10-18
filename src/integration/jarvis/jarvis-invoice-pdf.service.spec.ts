@@ -5,6 +5,16 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
+  it('informa el adjunto sin cargar sus bytes en la respuesta del visor', async () => {
+    const attachment = { name: 'soporte.pdf', mimeType: 'application/pdf', size: 5, dataBase64: 'JVBERi0=' };
+    const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { attachment } });
+    expect((await service.getData('company', 'id')).attachment).toEqual({ name: attachment.name, mimeType: attachment.mimeType, size: 5 });
+  });
+  it('incluye el desglose guardado aunque el XML tenga una sola forma de pago', async () => {
+    const paymentBreakdown = [{ methodId: 'cash', methodName: 'Efectivo', nextpymeMethodId: 10, negotiation: 'CASH', amount: 100 }, { methodId: 'credit', methodName: 'Crédito clientes', nextpymeMethodId: 1, negotiation: 'CREDIT', amount: 138 }];
+    const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { paymentBreakdown } });
+    expect((await service.getData('company', 'id')).paymentBreakdown).toEqual(paymentBreakdown);
+  });
   it('no agrega los vendedores internos al PDF del correo automatico', async () => {
     const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { sellers: [{ id: 'seller-1', name: 'Laura Perez' }] } });
     const renderer = jest.requireMock('./pdf/sales-invoice-pdf.renderer');
@@ -141,7 +151,7 @@ describe('reenvío de correo de documentos emitidos', () => {
       email_cc_list: [{ email: 'copia@correo.com' }], send_email_cc_list_as_email_cc: true,
       base64graphicrepresentation: 'JVBERi0x', showacceptrejectbuttons: false,
       html_buttons: '',
-      html_header: expect.stringContaining('JARVIS'),
+      html_header: expect.not.stringContaining('JARVIS'),
       html_body: expect.stringContaining('&lt;script&gt;alert(1)&lt;/script&gt;'),
       html_footer: expect.stringContaining('https://jarviscol.com'),
     }, 'owner-token');

@@ -8,6 +8,7 @@ import { NextPymeApiClient } from './nextpyme/nextpyme-api.client';
 import { IntegrationLogoService } from '../integration-logo.service';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
+import { attachmentMetadata } from './helpers/jarvis-invoice-attachment.helper';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import type { JarvisInvoicePdfData } from './pdf/jarvis-invoice-pdf-data';
@@ -126,7 +127,7 @@ export class JarvisInvoicePdfService {
     const code = uniqueCodeLabel(invoice.documentKind);
     if (!invoice.cufe) throw new BadGatewayException(`El documento aún no tiene ${code} disponible. No vuelvas a emitirlo; actualiza el listado e intenta visualizarlo después.`);
     const logo = await this.safeLogo(companyId);
-    const withKind = { documentKind: invoice.documentKind, sellers: invoice.sourceRequest?.sellers ?? [], ...logo };
+    const withKind = { documentKind: invoice.documentKind, sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
     if (invoice.invoiceXml) {
       try { return { ...mapInvoiceXmlToPurchaseInvoiceDownload(invoice.invoiceXml, id, invoice.cufe), ...withKind }; } catch { /* An emission envelope can contain an incomplete XML; recover the DIAN copy. */ }
     }

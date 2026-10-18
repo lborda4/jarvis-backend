@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JarvisSalesInvoice } from './entities/jarvis-sales-invoice.entity';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
+import { attachmentMetadata } from './helpers/jarvis-invoice-attachment.helper';
 export interface SalesInvoiceHistoryQuery { search?: string; from?: string; to?: string; page?: string; }
 @Injectable()
 export class JarvisInvoiceHistoryService {
@@ -22,7 +23,8 @@ export class JarvisInvoiceHistoryService {
       .getOne();
     if (!invoice) throw new NotFoundException(documentKind === JarvisResolutionKind.SUPPORT_DOCUMENT ? 'No se encontró el documento soporte.' : 'No se encontró la factura.');
     const { companyId: _company, company: _relation, ...detail } = invoice;
-    return { ...detail, status: 'SENT' as const };
+    const sourceRequest = detail.sourceRequest ? { ...detail.sourceRequest, attachment: attachmentMetadata(detail.sourceRequest.attachment) } : detail.sourceRequest;
+    return { ...detail, sourceRequest, status: 'SENT' as const };
   }
   async list(companyId: string, filters: SalesInvoiceHistoryQuery = {}, documentKind = JarvisResolutionKind.ELECTRONIC_INVOICE) {
     if (!companyId?.trim()) throw new BadRequestException('La empresa activa es obligatoria.');

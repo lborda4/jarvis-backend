@@ -35,7 +35,20 @@ export class CreateJarvisInvoiceItemDto {
   notes?: string;
 }
 
+export class JarvisInvoicePaymentAllocationDto {
+  methodId: string;
+  methodName: string;
+  nextpymeMethodId: number;
+  negotiation: 'CASH' | 'CREDIT';
+  amount: number;
+}
+
 export class CreateJarvisInvoiceRequestDto {
+  @ApiPropertyOptional({ description: 'Borrador de esta empresa que contiene el adjunto interno.' })
+  attachmentDraftId?: string;
+  attachment?: import('../helpers/jarvis-invoice-attachment.helper').StoredInvoiceAttachment;
+  @ApiPropertyOptional({ type: [JarvisInvoicePaymentAllocationDto], description: 'Distribución interna de pagos. No agrega campos al payload DIAN.' })
+  paymentBreakdown?: JarvisInvoicePaymentAllocationDto[];
   @ApiPropertyOptional({ description: 'Vendedores internos de Jarvis. No se incluyen en el payload DIAN.' })
   sellerIds?: string[];
   sellers?: Array<{ id: string; name: string }>;

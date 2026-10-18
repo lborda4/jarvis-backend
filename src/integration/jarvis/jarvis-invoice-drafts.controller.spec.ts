@@ -38,3 +38,16 @@ it('rejects invalid kinds and oversized forms without writing', async () => {
   await expect(controller.save(user, 'draft-1', { documentKind: 'ELECTRONIC_INVOICE', state: { notes: 'x'.repeat(1024 * 1024) } })).rejects.toBeInstanceOf(BadRequestException);
   expect(query).not.toHaveBeenCalled();
 });
+it('protege el archivo binario al volver a guardar los campos del borrador', async () => {
+  const { controller, query } = setup();
+  await controller.save(user, 'draft-1', { documentKind: 'ELECTRONIC_INVOICE', state: { notes: 'Cambios', attachment: { name: 'cliente.pdf' }, __attachment: { dataBase64: 'no permitido' } } });
+  expect(query.mock.calls[0][0]).toContain("jarvis_invoice_drafts.state->'__attachment'");
+  expect(JSON.parse(query.mock.calls[0][1][3])).toEqual({ notes: 'Cambios' });
+});
+it('devuelve solo los metadatos para reabrir un archivo guardado', async () => {
+  const { controller, query } = setup();
+  const attachment = { name: 'soporte.pdf', mimeType: 'application/pdf', size: 123 };
+  query.mockResolvedValue([{ state: { notes: 'Original' }, attachment }]);
+  expect(await controller.get(user, 'draft-1')).toEqual({ draft: { state: { notes: 'Original', attachment } } });
+  expect(query.mock.calls[0][0]).toContain("- 'dataBase64'");
+});

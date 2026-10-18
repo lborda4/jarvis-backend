@@ -579,7 +579,7 @@ describe('correo NextPyme tras aceptación DIAN', () => {
         base64graphicrepresentation: 'JVBERi0x',
         showacceptrejectbuttons: false,
         html_buttons: '',
-        html_header: expect.stringContaining('JARVIS'),
+        html_header: expect.not.stringContaining('JARVIS'),
         html_body: expect.stringContaining('FVJ1'),
         html_footer: expect.stringContaining('https://jarviscol.com'),
         send_email_cc_list_as_email_cc: true,
@@ -662,6 +662,36 @@ describe('cupo Jarvis al enviar', () => {
 });
 
 describe('vendedores internos de facturas', () => {
+  it('conserva el archivo en el documento emitido sin enviarlo como campo DIAN', async () => {
+    const current = setup();
+    const attachment = { name: 'soporte.pdf', mimeType: 'application/pdf', size: 5, dataBase64: Buffer.from('%PDF-').toString('base64') };
+    current.dataSource.query.mockResolvedValue([{ attachment }]);
+    const draftId = '11111111-1111-4111-8111-111111111111';
+    await current.service.createAndSendInvoice({ ...current.request, attachmentDraftId: draftId }, 'company-1');
+    const payload = current.client.createInvoice.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('attachment');
+    expect(payload).not.toHaveProperty('attachmentDraftId');
+    expect(current.history.record).toHaveBeenCalledWith(expect.objectContaining({ sourceRequest: expect.objectContaining({ attachment }) }));
+    expect(current.history.record.mock.calls[0][0].sourceRequest).not.toHaveProperty('attachmentDraftId');
+  });
+  it('rechaza un adjunto inexistente antes de enviar o numerar', async () => {
+    const current = setup();
+    await expect(current.service.createAndSendInvoice({ ...current.request, attachmentDraftId: '11111111-1111-4111-8111-111111111111' }, 'company-1')).rejects.toThrow('adjunto guardado');
+    expect(current.client.createInvoice).not.toHaveBeenCalled();
+    expect(current.numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+  });
+  it('conserva el desglose mixto sin agregarlo al payload y emite con la negociación a crédito', async () => {
+    const current = setup();
+    const cash = { id: '11111111-1111-4111-8111-111111111111', name: 'Efectivo', nextpymeMethodId: 10, negotiation: 'CASH' as const };
+    const credit = { id: '22222222-2222-4222-8222-222222222222', name: 'Crédito clientes', nextpymeMethodId: 1, negotiation: 'CREDIT' as const };
+    current.dataSource.query.mockResolvedValue([cash, credit]);
+    const paymentBreakdown = [cash, credit].map((method, index) => ({ methodId: method.id, methodName: method.name, nextpymeMethodId: method.nextpymeMethodId, negotiation: method.negotiation, amount: index ? 150000 : 100000 }));
+    await current.service.createAndSendInvoice({ ...current.request, paymentBreakdown, payment: { id: 1, payment_form_id: 2, due_date: '2026-10-16' } }, 'company-1');
+    const body = current.client.createInvoice.mock.calls[0][0];
+    expect(body.payment_form).toMatchObject({ payment_form_id: 2, payment_method_id: 1, payment_due_date: '2026-10-16' });
+    expect(body).not.toHaveProperty('paymentBreakdown');
+    expect(current.history.record).toHaveBeenCalledWith(expect.objectContaining({ sourceRequest: expect.objectContaining({ paymentBreakdown }) }));
+  });
   it('conserva vendedores en el historial y no los agrega al payload DIAN', async () => {
     const seller = { id: '11111111-1111-4111-8111-111111111111', name: 'Laura Perez' };
     const baseline = setup();

@@ -520,12 +520,15 @@ export class NextPymeApiClient {
     const body = testEnvironment ? '' : { IDSoftware: softwareId };
 
     try {
+      const options = {
+        headers: this.buildAuthHeaders(token),
+        timeout: 20000,
+        validateStatus: () => true,
+      };
       const response = await firstValueFrom(
-        this.httpService.post<unknown>(`${baseUrl}/${endpoint}`, body, {
-          headers: this.buildAuthHeaders(token),
-          timeout: 20000,
-          validateStatus: () => true,
-        }),
+        testEnvironment
+          ? this.httpService.get<unknown>(`${baseUrl}/${endpoint}`, options)
+          : this.httpService.post<unknown>(`${baseUrl}/${endpoint}`, body, options),
       );
 
       this.logger.log(

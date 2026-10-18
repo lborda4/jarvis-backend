@@ -46,6 +46,8 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
   const netPayable = Number((beforeRetentions - data.withholdings.reduce((sum, tax) => sum + (tax.amount ?? 0), 0)).toFixed(2));
   const retention = (code: string) => data.withholdings.filter(t => t.dianTaxCode === code).reduce((sum, t) => sum + (t.amount ?? 0), 0);
   const days = data.issueDate && data.dueDate ? Math.max(0, Math.round((Date.parse(data.dueDate) - Date.parse(data.issueDate)) / 86400000)) : null;
+  const allocations = data.paymentBreakdown ?? [];
+  const mixedPayment = allocations.some(payment => payment.negotiation === 'CASH') && allocations.some(payment => payment.negotiation === 'CREDIT');
   const totals: [string, number][] = [['Total bruto', gross], ['Descuentos', gross - base], ['Subtotal', base], ['IVA', data.iva],
     ...(data.taxes ?? []).filter(t => t.type !== 'IVA').map(t => [t.type, t.amount] as [string, number])];
   return <Document title={`${copy.shortTitle} ${data.invoiceNumber}`} author={data.issuer.name || 'Jarvis'}>
@@ -74,8 +76,8 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
         })}
       </View>
       <View style={s.financial}>
-        <View style={s.box}><Text style={s.heading}>Detalles de pago</Text><Text style={s.field}>Forma de negociación: {data.isCreditPayment == null ? '—' : data.isCreditPayment ? 'Crédito' : 'Contado'}</Text>
-          <Text style={s.field}>Forma de pago: {value(data.paymentMethodName)}</Text>{data.isCreditPayment && <Text style={s.field}>Plazo: {days ?? '—'} días después de la emisión</Text>}
+        <View style={s.box}><Text style={s.heading}>Detalles de pago</Text><Text style={s.field}>Forma de negociación: {mixedPayment ? 'Contado y crédito' : data.isCreditPayment == null ? '—' : data.isCreditPayment ? 'Crédito' : 'Contado'}</Text>
+          {allocations.length ? allocations.map((payment, index) => <Text key={index} style={s.field}>{payment.methodName} ({payment.negotiation === 'CREDIT' ? 'Crédito' : 'Contado'}): {money(payment.amount)}</Text>) : <Text style={s.field}>Forma de pago: {value(data.paymentMethodName)}</Text>}{data.isCreditPayment && <Text style={s.field}>Plazo: {days ?? '—'} días después de la emisión</Text>}
           <Text style={[s.name, { marginTop: 16 }]}>Observaciones</Text><Text style={s.small}>{value(data.observations)}</Text></View>
         <View style={s.box} wrap={false}>{totals.map(([label, amount]) => <View key={label} style={s.totalRow}><Text>{label}:</Text><Text>{money(amount)}</Text></View>)}
           <View style={[s.totalRow, s.total]}><Text>Total antes de retenciones:</Text><Text>{money(beforeRetentions)}</Text></View>

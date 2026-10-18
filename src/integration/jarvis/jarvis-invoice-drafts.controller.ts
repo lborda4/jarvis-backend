@@ -31,9 +31,12 @@ export class JarvisInvoiceDraftsController {
 
   @Get(':id')
   async get(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    const [draft] = await this.source.query(`SELECT id, document_kind AS "documentKind", state
+    const [draft] = await this.source.query(`SELECT id, document_kind AS "documentKind", state - '__attachment' AS state,
+      (state->'__attachment') - 'dataBase64' AS attachment
       FROM jarvis_invoice_drafts WHERE id=$1 AND company_id=$2`, [id, getAuthenticatedCompanyId(user)]);
     if (!draft) throw new NotFoundException('Borrador no encontrado.');
+    if (draft.attachment) draft.state = { ...draft.state, attachment: draft.attachment };
+    delete draft.attachment;
     return { draft };
   }
 
@@ -43,11 +46,14 @@ export class JarvisInvoiceDraftsController {
     if (!request?.state || typeof request.state !== 'object' || Array.isArray(request.state)) {
       throw new BadRequestException('El borrador no es valido.');
     }
-    const state = JSON.stringify(request.state);
+    const { __attachment: _internalAttachment, attachment: _metadata, ...fields } = request.state;
+    const state = JSON.stringify(fields);
     if (Buffer.byteLength(state, 'utf8') > 1024 * 1024) throw new BadRequestException('El borrador es demasiado grande.');
     const [draft] = await this.source.query(`INSERT INTO jarvis_invoice_drafts (id,company_id,document_kind,state)
       VALUES ($1,$2,$3,$4::jsonb)
-      ON CONFLICT (id) DO UPDATE SET state=EXCLUDED.state, updated_at=now()
+      ON CONFLICT (id) DO UPDATE SET state=EXCLUDED.state ||
+        CASE WHEN jarvis_invoice_drafts.state ? '__attachment' THEN jsonb_build_object('__attachment',jarvis_invoice_drafts.state->'__attachment') ELSE '{}'::jsonb END,
+        updated_at=now()
       WHERE jarvis_invoice_drafts.company_id=EXCLUDED.company_id
         AND jarvis_invoice_drafts.document_kind=EXCLUDED.document_kind
       RETURNING id`, [id, getAuthenticatedCompanyId(user), kind, state]);

@@ -2,13 +2,14 @@ import { of, throwError } from 'rxjs';
 import { NextPymeApiClient } from './nextpyme-api.client';
 
 describe('NextPyme company authentication', () => {
-  it.each(['local', 'qa', 'development'])('consulta resoluciones de %s con token y cuerpo vacío sin requerir IDSoftware', async environment => {
+  it.each(['local', 'qa', 'development'])('consulta resoluciones de %s por GET con token sin requerir IDSoftware', async environment => {
     const { client, httpService } = buildClient({ 'app.nodeEnv': environment });
-    httpService.post.mockReturnValue(of({ status: 200, data: { resolutions: [] } }));
+    httpService.get.mockReturnValue(of({ status: 200, data: { resolutions: [] } }));
     await client.listResolutions('', 'company-token');
-    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/reports/resolutions', '', expect.objectContaining({
+    expect(httpService.get).toHaveBeenCalledWith('https://nextpyme.example/reports/resolutions', expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer company-token' }),
     }));
+    expect(httpService.post).not.toHaveBeenCalled();
   });
 
   it.each(['pr', 'prod', 'production'])('consulta resoluciones de %s con el token de la empresa', async environment => {
@@ -110,7 +111,7 @@ function buildClient(configOverrides: Record<string, unknown> = {}) {
     ...configOverrides,
   };
 
-  const httpService = { request: jest.fn(), put: jest.fn(), post: jest.fn() };
+  const httpService = { request: jest.fn(), get: jest.fn(), put: jest.fn(), post: jest.fn() };
   const configService = {
     get: jest.fn((key: string) => config[key]),
   };
