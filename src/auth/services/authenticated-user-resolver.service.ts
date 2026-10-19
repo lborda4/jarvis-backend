@@ -6,6 +6,7 @@ import {
   AuthTokenPayload,
 } from '../interfaces/jwt-payload.interface';
 import { resolveActiveCompanyId } from '../helpers/authenticated-company.helper';
+import { isSessionIssuedBeforePasswordChange } from '../helpers/password-reset.helper';
 
 /**
  * Resuelve un AuthTokenPayload (ya verificado/firmado válido) a un
@@ -36,6 +37,8 @@ export class AuthenticatedUserResolverService {
         throw new UnauthorizedException('Usuario inactivo o no encontrado.');
       }
 
+      this.assertSessionCurrent(user.passwordChangedAt, payload.iat);
+
       resolveActiveCompanyId(
         payload.companyId,
         user.role,
@@ -61,6 +64,8 @@ export class AuthenticatedUserResolverService {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
+    this.assertSessionCurrent(userCompany.user.passwordChangedAt, payload.iat);
+
     if (!userCompany.company) {
       throw new UnauthorizedException(
         'La empresa activa del token no está asociada al usuario.',
@@ -72,5 +77,14 @@ export class AuthenticatedUserResolverService {
       email: userCompany.user.email,
       companyId: userCompany.companyId,
     };
+  }
+
+  private assertSessionCurrent(
+    passwordChangedAt: Date | null | undefined,
+    issuedAtSeconds: number | undefined,
+  ): void {
+    if (isSessionIssuedBeforePasswordChange(passwordChangedAt, issuedAtSeconds)) {
+      throw new UnauthorizedException('La sesión expiró. Vuelve a iniciar sesión.');
+    }
   }
 }
