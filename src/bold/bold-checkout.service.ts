@@ -74,8 +74,8 @@ export class BoldCheckoutService {
     };
     console.log('[Bold] ANTES POST /payments/app-checkout', JSON.stringify(payload, null, 2));
     try {
-      //const response = await this.client.createCheckout(key, payload);
-      console.log('[Bold] DESPUÉS POST /payments/app-checkout')//, JSON.stringify(response, null, 2));
+      // const response = await this.client.createCheckout(key, payload);
+      // console.log('[Bold] Respuesta POST /payments/app-checkout:', JSON.stringify(response, null, 2));
       return { reference, payload };
     } catch (error) {
       console.log(

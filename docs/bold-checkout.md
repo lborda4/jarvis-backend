@@ -11,6 +11,6 @@ El nombre debe coincidir con el guardado en el panel. Una caja inexistente o un 
 
 El cobro usa el correo del vendedor fijo de esta primera integración. La llave de identidad se toma de la integración Bold de la empresa asociada a la caja, no de la llave global.
 
-El backend consulta los terminales de esa cuenta, obtiene el modelo del serial asociado y arma el body de `/payments/app-checkout` con `total_amount` en COP, `taxes: []`, `tip_amount: 0`, `payment_method: "POS"` y una referencia UUID. El POST a Bold está comentado: solo se imprime el body.
+El backend consulta los terminales de esa cuenta, obtiene el modelo del serial asociado y arma el body de `/payments/app-checkout` con `total_amount` en COP, `taxes: []`, `tip_amount: 0`, `payment_method: "POS"` y una referencia UUID. El POST a Bold permanece comentado: solo se imprime el JSON preparado y se devuelven `reference` y `payload`.
 
-Una respuesta exitosa indica que la solicitud fue enviada, no que el cliente ya pagó. No se implementa aquí la confirmación por webhook. No hay reintentos automáticos: si falla la conexión, verificar el datáfono antes de repetir el cobro.
+Una respuesta exitosa indica que se prepararon los datos; el cobro no se envia mientras el POST permanezca comentado. No se implementa aquí la confirmación por webhook. No hay reintentos automáticos: si falla la conexión, verificar el datáfono antes de repetir el cobro.

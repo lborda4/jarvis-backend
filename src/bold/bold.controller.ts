@@ -133,7 +133,7 @@ export class BoldController {
       const result = await this.boldCheckoutService.createFromExtension(body);
       return {
         success: true,
-        message: 'Solicitud de cobro enviada a Bold.',
+        message: 'Solicitud preparada. El envio a Bold esta desactivado.',
         ...result,
       };
     } catch (error) {
