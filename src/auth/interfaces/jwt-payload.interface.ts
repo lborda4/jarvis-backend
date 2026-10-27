@@ -6,6 +6,7 @@ export interface AuthTokenPayload {
   /** Vacío o ausente solo para admin sin empresa asociada. */
   companyId?: string | null;
   type: JwtTokenType;
+  iat?: number;
 }
 
 export interface AuthenticatedUser {

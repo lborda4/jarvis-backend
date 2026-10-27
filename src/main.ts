@@ -8,6 +8,7 @@ import { SocketIoAdapter } from './realtime/socket-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
   const configService = app.get(ConfigService<AppConfiguration, true>);
 

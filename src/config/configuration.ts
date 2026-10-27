@@ -103,6 +103,12 @@ export interface BoldConfig {
   baseUrl: string;
 }
 
+export interface PasswordResetMailConfig {
+  apiKey?: string;
+  from?: string;
+  appPublicUrl?: string;
+}
+
 export interface AppConfiguration {
   app: AppConfig;
   database: DatabaseConfig;
@@ -114,6 +120,7 @@ export interface AppConfiguration {
   bold: BoldConfig;
   purchaseInvoiceImport: PurchaseInvoiceImportConfig;
   siigoPurchaseHistoryAutoSync: SiigoPurchaseHistoryAutoSyncConfig;
+  passwordResetMail: PasswordResetMailConfig;
 }
 
 function parseBoolean(
@@ -265,5 +272,10 @@ export default (): AppConfiguration => ({
       process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_START_STAGGER_MS,
       15_000,
     ),
+  },
+  passwordResetMail: {
+    apiKey: trimOptional(process.env.RESEND_API_KEY),
+    from: trimOptional(process.env.RESEND_FROM),
+    appPublicUrl: trimOptional(process.env.APP_PUBLIC_URL),
   },
 });

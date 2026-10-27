@@ -40,6 +40,9 @@ export class User {
   })
   privacyPolicyVersion: string | null;
 
+  @Column({ name: 'password_changed_at', type: 'timestamp', nullable: true })
+  passwordChangedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -58,6 +58,19 @@ export class SwitchCompanyRequestDto {
   companyId: string;
 }
 
+export class ForgotPasswordRequestDto {
+  email: string;
+}
+
+export class ResetPasswordRequestDto {
+  token: string;
+  password: string;
+}
+
+export class PasswordResetMessageDto {
+  message: string;
+}
+
 export class RefreshTokenResponseDto {
   accessToken: string;
   refreshToken: string;
