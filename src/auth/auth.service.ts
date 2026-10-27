@@ -47,6 +47,7 @@ import {
   applyPrivacyConsent,
   assertPrivacyPolicyAccepted,
 } from './helpers/privacy-policy.helper';
+import { isSessionIssuedBeforePasswordChange } from './helpers/password-reset.helper';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -266,6 +267,12 @@ export class AuthService {
 
     if (!user?.active) {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
+    }
+
+    if (
+      isSessionIssuedBeforePasswordChange(user.passwordChangedAt, payload.iat)
+    ) {
+      throw new UnauthorizedException('La sesión expiró. Vuelve a iniciar sesión.');
     }
 
     const companyId = resolveActiveCompanyId(

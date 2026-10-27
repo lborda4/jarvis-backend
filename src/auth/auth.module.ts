@@ -13,6 +13,8 @@ import { UserCompaniesRepository } from './repositories/user-companies.repositor
 import { UsersRepository } from './repositories/users.repository';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { AuthenticatedUserResolverService } from './services/authenticated-user-resolver.service';
+import { PasswordResetService } from './services/password-reset.service';
+import { ResendMailService } from './services/resend-mail.service';
 import { WsAuthService } from './services/ws-auth.service';
 import { AppConfiguration } from '../config/configuration';
 import { RutParserService } from '../admin/rut-parser.service';
@@ -33,6 +35,8 @@ import { PlanModule } from '../plan/plan.module';
   controllers: [AuthController],
   providers: [
     AuthService,
+    PasswordResetService,
+    ResendMailService,
     UsersRepository,
     UserCompaniesRepository,
     RutParserService,

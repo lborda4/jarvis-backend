@@ -77,6 +77,29 @@ export function validateEnvironmentConfiguration(
   assertValidImportSessionTtl(
     readEnvString(config, 'IMPORT_SESSION_TTL_SECONDS'),
   );
+  assertValidAppPublicUrl(readEnvString(config, 'APP_PUBLIC_URL'));
 
   return config;
+}
+
+function assertValidAppPublicUrl(value: string | undefined): void {
+  if (!value) {
+    return;
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('APP_PUBLIC_URL debe ser una URL http o https.');
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('APP_PUBLIC_URL debe ser una URL http o https.');
+  }
+
+  if (url.username || url.password) {
+    throw new Error('APP_PUBLIC_URL no debe incluir credenciales.');
+  }
 }
