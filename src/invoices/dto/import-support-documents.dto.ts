@@ -20,6 +20,9 @@ export class ExtractSupportDocumentsResponseDto {
 }
 
 export class ImportSupportDocumentsRequestDto {
+  @ApiPropertyOptional({ enum: ['SIIGO', 'JARVIS'] })
+  provider?: string;
+
   @ApiPropertyOptional({
     description:
       'ID de la empresa receptora. Si no se envía, se usa el NIT receptor del Excel o la primera empresa configurada.',

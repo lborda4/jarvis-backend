@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import {
   BadGatewayException,
   BadRequestException,
@@ -117,6 +118,7 @@ export class SiigoSupplierCreationService {
     const electronicDocument = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
 
     const profileName = request?.name?.trim();
@@ -167,6 +169,7 @@ export class SiigoSupplierCreationService {
     const refreshedDocument = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
     const supplier = resolveSupplierDocumentFromPayload(
       refreshedDocument.payload,
@@ -301,6 +304,7 @@ export class SiigoSupplierCreationService {
     const pendingRows =
       await this.electronicDocumentsRepository.findPendingSupplierCandidates(
         companyId,
+        IntegrationProvider.SIIGO,
       );
     const company = await this.companiesRepository.findById(companyId);
     const companyToken = company?.nextPymeToken?.trim() || undefined;
@@ -509,6 +513,7 @@ export class SiigoSupplierCreationService {
     const currentDocument = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
 
     if (currentDocument.status !== ElectronicDocumentStatus.PURCHASE_CREATED) {
@@ -558,6 +563,7 @@ export class SiigoSupplierCreationService {
         companyId,
         normalizedDocumentNumber,
         resolvedDocumentId,
+        IntegrationProvider.SIIGO,
       );
 
     await Promise.all(

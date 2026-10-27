@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import {
   BadGatewayException,
   BadRequestException,
@@ -102,6 +103,9 @@ export class SiigoValidationService {
       );
 
       if (!siigoSupplier) {
+        this.logger.warn(
+          `[companyId=${companyId}] [documentId=${documentId}] SIIGO no devolvió tercero para identification=${nit}, branch_office=${branchOffice}.`,
+        );
         // El llamador puede pedir NO marcar SUPPLIER_NOT_FOUND todavía (ej.
         // preparación en segundo plano, que va a intentar crear el tercero
         // automático a continuación) — evita que la fila parpadee a "Crear

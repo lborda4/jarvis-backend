@@ -11,9 +11,11 @@ import {
   ImportRowStatusFilter,
 } from '../helpers/import-status-filter.helper';
 import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
+import { IntegrationProvider } from '../../integration/enums/integration-provider.enum';
 import { readAiCost } from '../helpers/electronic-document-ai-cost.helper';
 
 export interface FindElectronicDocumentsFilters {
+  provider?: IntegrationProvider;
   documentIds?: string[];
   electronicDocumentType?: ElectronicDocumentType;
   status?: string;
@@ -56,7 +58,7 @@ export class ElectronicDocumentsRepository {
       | 'status'
       | 'supplierExistsInSiigo'
       | 'payload'
-    >,
+    > & Partial<Pick<ElectronicDocument, 'provider'>>,
   ): ElectronicDocument {
     return this.repository.create(data);
   }
@@ -69,6 +71,12 @@ export class ElectronicDocumentsRepository {
         where: { id: document.id, companyId: document.companyId },
         lock: { mode: 'pessimistic_write' },
       });
+      // A payload saved by another worker must not undo a legacy assignment.
+      if (current?.provider && !document.provider) {
+        document.provider = current.provider;
+        document.status = current.status;
+        document.supplierExistsInSiigo = current.supplierExistsInSiigo;
+      }
       // GET /generation puede terminar mientras el contador o la IA guardan
       // una copia anterior del payload. El costo vigente siempre se conserva.
       const cost = readAiCost(current?.payload?.aiSuggestion);
@@ -114,6 +122,7 @@ export class ElectronicDocumentsRepository {
       SELECT d.id, d.company_id AS "companyId"
       FROM electronic_documents d
       WHERE d.company_id = $1
+        AND d.provider = 'SIIGO'
         AND d.electronic_document_type = 'PURCHASE_INVOICE'
         AND d.status NOT IN ('PURCHASE_CREATED', 'COMPLETED')
         AND d.already_in_siigo = false
@@ -138,6 +147,17 @@ export class ElectronicDocumentsRepository {
     `,
       [companyId, limit],
     );
+  }
+
+  async assignProviderIfUnset(id: string, companyId: string, provider: IntegrationProvider): Promise<void> {
+    await this.repository.createQueryBuilder().update(ElectronicDocument)
+      .set({
+        provider,
+        supplierExistsInSiigo: () => "CASE WHEN status IN ('PURCHASE_CREATED', 'COMPLETED') THEN supplier_exists_in_siigo ELSE NULL END",
+        status: () => "CASE WHEN status IN ('PURCHASE_CREATED', 'COMPLETED') THEN status ELSE 'PENDING' END",
+      })
+      .where('id = :id AND company_id = :companyId AND provider IS NULL', { id, companyId })
+      .execute();
   }
 
   async deleteById(id: string): Promise<void> {
@@ -183,6 +203,10 @@ export class ElectronicDocumentsRepository {
           electronicDocumentType: filters.electronicDocumentType,
         },
       );
+    }
+
+    if (filters.provider) {
+      query.andWhere('(document.provider = :provider OR document.provider IS NULL)', { provider: filters.provider });
     }
 
     if (filters.status?.trim()) {
@@ -286,10 +310,15 @@ export class ElectronicDocumentsRepository {
   async findFilterOptions(
     companyId: string,
     electronicDocumentType?: ElectronicDocumentType,
+    provider?: IntegrationProvider,
   ): Promise<ElectronicDocumentFilterOptions> {
     const baseQuery = this.repository
       .createQueryBuilder('document')
       .where('document.companyId = :companyId', { companyId });
+
+    if (provider) {
+      baseQuery.andWhere('(document.provider = :provider OR document.provider IS NULL)', { provider });
+    }
 
     if (electronicDocumentType) {
       baseQuery.andWhere(
@@ -380,7 +409,7 @@ export class ElectronicDocumentsRepository {
    * JarvisDocumentPreparationService / SiigoSupplierCreationService) apenas
    * se cree el tercero.
    */
-  async findPendingSupplierCandidates(companyId: string): Promise<
+  async findPendingSupplierCandidates(companyId: string, provider?: IntegrationProvider): Promise<
     Array<{
       documentId: string;
       documentNumberThird: string;
@@ -399,6 +428,7 @@ export class ElectronicDocumentsRepository {
       .addSelect('document.documentTypeThird', 'documentTypeThird')
       .addSelect("document.payload->'supplier'->>'name'", 'supplierName')
       .where('document.companyId = :companyId', { companyId })
+      .andWhere('(document.provider = :provider OR document.provider IS NULL)', { provider: provider ?? IntegrationProvider.SIIGO })
       .andWhere('document.documentNumberThird IS NOT NULL')
       .andWhere("document.documentNumberThird <> ''")
       .andWhere(
@@ -433,6 +463,7 @@ export class ElectronicDocumentsRepository {
     documentNumberThird: string,
     status: ElectronicDocumentStatus,
     excludeId?: string,
+    provider?: IntegrationProvider,
   ): Promise<ElectronicDocument[]> {
     const query = this.repository
       .createQueryBuilder('document')
@@ -441,6 +472,7 @@ export class ElectronicDocumentsRepository {
         documentNumberThird,
       })
       .andWhere('document.status = :status', { status });
+    if (provider) query.andWhere('document.provider = :provider', { provider });
     // Creating a supplier from the catalog has no source document to exclude.
     if (excludeId?.trim()) query.andWhere('document.id != :excludeId', { excludeId: excludeId.trim() });
     return query.getMany();
@@ -453,13 +485,14 @@ export class ElectronicDocumentsRepository {
   async findByCompanyAndCufes(
     companyId: string,
     cufes: string[],
+    provider?: IntegrationProvider,
   ): Promise<Map<string, string>> {
     if (cufes.length === 0) {
       return new Map();
     }
 
     const rows = await this.repository.find({
-      where: { companyId, cufe: In(cufes) },
+      where: { companyId, cufe: In(cufes), ...(provider ? { provider } : {}) },
       select: { id: true, cufe: true },
     });
 

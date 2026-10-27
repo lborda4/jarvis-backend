@@ -266,6 +266,7 @@ export class JarvisSupportDocumentSendService {
       const document = await this.electronicDocumentService.requireById(
         documentId,
         companyId,
+        IntegrationProvider.JARVIS,
       );
 
       return {
@@ -319,6 +320,7 @@ export class JarvisSupportDocumentSendService {
     const electronicDocument = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.JARVIS,
     );
 
     if (
@@ -435,6 +437,7 @@ export class JarvisSupportDocumentSendService {
             await this.electronicDocumentService.requireById(
               documentId,
               companyId,
+              IntegrationProvider.JARVIS,
             );
 
           if (

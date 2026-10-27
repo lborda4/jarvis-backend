@@ -68,6 +68,7 @@ export class BoldWebhookService {
     }
 
     const notification = this.parseNotification(input.body, rawBody);
+    this.logger.log(`Webhook Bold ${environment} JSON completo:\n${JSON.stringify(notification, null, 2)}`);
     const paymentId = notification.data?.payment_id?.trim() || null;
     const reference = notification.data?.metadata?.reference?.trim() || null;
     const type = notification.type?.trim() || 'UNKNOWN';

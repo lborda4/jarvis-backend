@@ -105,6 +105,7 @@ import { ElectronicDocumentListResponseDto } from './dto/electronic-document-lis
 import { ElectronicDocumentFilterOptionsDto } from './dto/electronic-document-filter-options.dto';
 import { ElectronicDocumentCompanyOptionDto } from './dto/electronic-document-company-option.dto';
 import { ElectronicDocument } from './entities/electronic-document.entity';
+import { parseDocumentProvider } from '../integration/helpers/document-provider.helper';
 import { ElectronicDocumentStatus } from './enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from './enums/electronic-document-type.enum';
 import { mapDianResultToElectronicDocumentPayload } from './mappers/dian-to-electronic-document-payload.mapper';
@@ -232,6 +233,7 @@ export class ElectronicDocumentService {
   async requireById(
     documentId: string,
     companyId?: string,
+    expectedProvider?: IntegrationProvider,
   ): Promise<ElectronicDocument> {
     const trimmedId = documentId?.trim();
 
@@ -239,7 +241,7 @@ export class ElectronicDocumentService {
       throw new BadRequestException('El campo documentId es obligatorio.');
     }
 
-    const document =
+    let document =
       await this.electronicDocumentsRepository.findById(trimmedId);
 
     if (!document) {
@@ -254,6 +256,15 @@ export class ElectronicDocumentService {
       );
     }
 
+    if (expectedProvider && !document.provider) {
+      await this.electronicDocumentsRepository.assignProviderIfUnset(document.id, document.companyId, expectedProvider);
+      const assigned = await this.electronicDocumentsRepository.findById(trimmedId);
+      if (!assigned) throw new BadRequestException('El documento ya no existe.');
+      document = assigned;
+    }
+    if (expectedProvider && document.provider && document.provider !== expectedProvider) {
+      throw new BadRequestException(`El documento pertenece a ${document.provider}, no a ${expectedProvider}.`);
+    }
     return document;
   }
 
@@ -451,6 +462,7 @@ export class ElectronicDocumentService {
     companyId: string,
     documentNumberThird: string,
     excludeId?: string,
+    provider?: IntegrationProvider,
   ): Promise<ElectronicDocument[]> {
     if (!documentNumberThird.trim()) {
       return Promise.resolve([]);
@@ -461,6 +473,7 @@ export class ElectronicDocumentService {
       documentNumberThird.trim(),
       ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
       excludeId,
+      provider,
     );
   }
 
@@ -656,6 +669,7 @@ export class ElectronicDocumentService {
     parsedInvoice: DianInvoiceResult,
     electronicDocumentType: ElectronicDocumentType,
     authenticatedCompanyId: string,
+    requestedProvider?: IntegrationProvider,
   ): Promise<ElectronicDocument> {
     const payload = mapDianResultToElectronicDocumentPayload(parsedInvoice);
     const company = await this.companiesRepository.findById(
@@ -687,7 +701,9 @@ export class ElectronicDocumentService {
       payload.supplier.documentNumber,
     );
 
+    const provider = await this.resolveDocumentProvider(company.id, requestedProvider);
     const electronicDocument = this.electronicDocumentsRepository.create({
+      provider,
       companyId: company.id,
       cufe: payload.invoice.cufe || null,
       documentNumberThird: documentNumberThird || null,
@@ -711,12 +727,13 @@ export class ElectronicDocumentService {
   async buildSupplierNameLookupForGroups(
     groups: GroupedSupportDocument[],
     companyId: string,
+    requestedProvider?: IntegrationProvider,
   ): Promise<Map<string, string>> {
     const company = await this.resolveCompanyForSupportDocuments(
       groups,
       companyId,
     );
-    const provider = await this.resolveDocumentProvider(company.id);
+    const provider = await this.resolveDocumentProvider(company.id, requestedProvider);
 
     return this.resolveSupplierNamesByNit(company.id, provider);
   }
@@ -742,6 +759,7 @@ export class ElectronicDocumentService {
   async createFromSupportDocumentGroups(
     groups: GroupedSupportDocument[],
     companyId: string,
+    requestedProvider?: IntegrationProvider,
   ): Promise<{
     documentsCreated: number;
     itemsTotal: number;
@@ -759,7 +777,7 @@ export class ElectronicDocumentService {
       groups,
       companyId,
     );
-    const provider = await this.resolveDocumentProvider(company.id);
+    const provider = await this.resolveDocumentProvider(company.id, requestedProvider);
 
     if (provider === IntegrationProvider.SIIGO && groups.some((group) => group.rows.some((row) => row.account?.trim()))) {
       const integration = await getSiigoIntegration(this.integrationsRepository, company.id);
@@ -809,6 +827,7 @@ export class ElectronicDocumentService {
 
       return this.electronicDocumentsRepository.create({
         companyId: company.id,
+        provider,
         cufe: payload.invoice.cufe || null,
         documentNumberThird:
           this.normalizeDocument(payload.supplier.documentNumber) || null,
@@ -864,6 +883,7 @@ export class ElectronicDocumentService {
       payload: ElectronicDocumentPayload;
     }>,
     companyId: string,
+    requestedProvider?: IntegrationProvider,
   ): Promise<{
     documentsCreated: number;
     documentsReused: number;
@@ -908,7 +928,7 @@ export class ElectronicDocumentService {
       );
     }
 
-    const provider = await this.resolveDocumentProvider(company.id);
+    const provider = await this.resolveDocumentProvider(company.id, requestedProvider);
 
     // IDEMPOTENCIA: si una fila ya tiene un ElectronicDocument creado para
     // su CUFE en esta empresa (ej. el worker creó el documento pero murió
@@ -922,6 +942,7 @@ export class ElectronicDocumentService {
       await this.electronicDocumentsRepository.findByCompanyAndCufes(
         company.id,
         cufesInBatch,
+        provider,
       );
 
     const reusedRows = rows.filter((row) =>
@@ -1014,6 +1035,7 @@ export class ElectronicDocumentService {
 
             const document = this.electronicDocumentsRepository.create({
               companyId: company.id,
+              provider,
               cufe: payload.invoice.cufe || null,
               documentNumberThird:
                 this.normalizeDocument(payload.supplier.documentNumber) || null,
@@ -1197,10 +1219,10 @@ export class ElectronicDocumentService {
    * crearla en SIIGO) arriesgándose a duplicarla.
    */
   async resolveAlreadyInSiigoMatch(
-    document: { companyId: string; payload: ElectronicDocumentPayload },
+    document: { companyId: string; payload: ElectronicDocumentPayload; provider?: IntegrationProvider | null },
     companyId: string,
   ): Promise<HistorialFacturaProviderInvoiceMatch | null> {
-    const provider = await this.resolveDocumentProvider(companyId);
+    const provider = document.provider ?? await this.resolveDocumentProvider(companyId);
 
     if (provider !== IntegrationProvider.SIIGO) {
       // El historial de compras solo se sincroniza para SIIGO — Jarvis no
@@ -1218,17 +1240,22 @@ export class ElectronicDocumentService {
 
   async resolveDocumentProvider(
     companyId: string,
+    requestedProvider?: IntegrationProvider,
   ): Promise<IntegrationProvider> {
-    const jarvis = await this.integrationsRepository.findByCompanyAndProvider(
-      companyId,
-      IntegrationProvider.JARVIS,
-    );
-
-    if (jarvis?.active) {
-      return IntegrationProvider.JARVIS;
+    const providers = [IntegrationProvider.SIIGO, IntegrationProvider.JARVIS];
+    const integrations = await Promise.all(providers.map((provider) =>
+      this.integrationsRepository.findByCompanyAndProvider(companyId, provider)));
+    if (requestedProvider) {
+      if (!integrations.some((integration, index) => providers[index] === requestedProvider && integration?.active)) {
+        throw new BadRequestException('La integración seleccionada no está activa para esta empresa.');
+      }
+      return requestedProvider;
     }
-
-    return IntegrationProvider.SIIGO;
+    const active = providers.filter((_provider, index) => integrations[index]?.active);
+    if (active.length > 1) {
+      throw new BadRequestException('Indique provider (SIIGO o JARVIS) para esta empresa con ambas integraciones activas.');
+    }
+    return active[0] ?? IntegrationProvider.SIIGO;
   }
 
   private async resolveSupplierNamesByNit(
@@ -1361,7 +1388,9 @@ export class ElectronicDocumentService {
       throw new BadRequestException('Envíe entre 1 y 100 IDs de documento válidos.');
     }
 
+    const provider = await this.resolveDocumentProvider(companyId, parseDocumentProvider(query.provider));
     const baseFilters = {
+      provider,
       documentIds,
       electronicDocumentType,
       status: query.status,
@@ -1417,8 +1446,7 @@ export class ElectronicDocumentService {
         candidates.items,
       );
       isSiigoCompany =
-        (await this.resolveDocumentProvider(companyId)) ===
-        IntegrationProvider.SIIGO;
+        provider === IntegrationProvider.SIIGO;
 
       const wantsReview = importStatuses.includes(
         IMPORT_ROW_STATUS_FILTER.REQUIERE_REVISION,
@@ -1457,14 +1485,7 @@ export class ElectronicDocumentService {
       items = result.items;
       total = result.total;
       supplierPreferences = await this.buildSupplierPreferencesLookup(items);
-      // Se resuelve UNA vez para toda la página, no por documento: es una
-      // propiedad de la integración de la empresa, no de cada documento. El
-      // filtro por TIPO de documento (Factura de compra vs. Documento
-      // soporte) lo hace el mapper por su cuenta con el campo real de cada
-      // documento, no con este flag — así que acá basta con el proveedor.
-      isSiigoCompany =
-        (await this.resolveDocumentProvider(companyId)) ===
-        IntegrationProvider.SIIGO;
+      isSiigoCompany = provider === IntegrationProvider.SIIGO;
     }
 
     return {
@@ -1493,20 +1514,24 @@ export class ElectronicDocumentService {
   async getFilterOptions(
     companyId: string,
     electronicDocumentType?: string,
+    requestedProvider?: string,
   ): Promise<ElectronicDocumentFilterOptionsDto> {
     const parsedType = parseOptionalElectronicDocumentTypeFilter(
       electronicDocumentType,
     );
 
+    const provider = await this.resolveDocumentProvider(companyId, parseDocumentProvider(requestedProvider));
     const options = await this.electronicDocumentsRepository.findFilterOptions(
       companyId,
       parsedType,
+      provider,
     );
 
     return this.refinePurchaseInvoiceFilterStatuses(
       companyId,
       parsedType,
       options,
+      provider,
     );
   }
 
@@ -1520,6 +1545,7 @@ export class ElectronicDocumentService {
     companyId: string,
     electronicDocumentType: ElectronicDocumentType | undefined,
     options: ElectronicDocumentFilterOptionsDto,
+    provider: IntegrationProvider,
   ): Promise<ElectronicDocumentFilterOptionsDto> {
     if (
       electronicDocumentType !== ElectronicDocumentType.PURCHASE_INVOICE ||
@@ -1529,8 +1555,7 @@ export class ElectronicDocumentService {
     }
 
     const isSiigoCompany =
-      (await this.resolveDocumentProvider(companyId)) ===
-      IntegrationProvider.SIIGO;
+      provider === IntegrationProvider.SIIGO;
 
     if (!isSiigoCompany) {
       return options;
@@ -1539,6 +1564,7 @@ export class ElectronicDocumentService {
     const candidates = await this.electronicDocumentsRepository.findAll({
       companyId,
       electronicDocumentType: ElectronicDocumentType.PURCHASE_INVOICE,
+      provider,
       importStatuses: [IMPORT_ROW_STATUS_FILTER.PENDIENTE],
       page: 1,
       limit: PURCHASE_INVOICE_REVIEW_NARROWING_FETCH_LIMIT,
@@ -1665,7 +1691,10 @@ export class ElectronicDocumentService {
 
     for (const companyId of companyIds) {
       try {
-        const provider = await this.resolveDocumentProvider(companyId);
+        const provider = documents.some((document) => document.companyId === companyId && document.provider === IntegrationProvider.SIIGO)
+          ? IntegrationProvider.SIIGO
+          : documents.some((document) => document.companyId === companyId && document.provider === IntegrationProvider.JARVIS)
+            ? IntegrationProvider.JARVIS : await this.resolveDocumentProvider(companyId);
 
         if (provider !== IntegrationProvider.SIIGO) {
           continue;
@@ -1790,7 +1819,8 @@ export class ElectronicDocumentService {
     // entrada de cada Map (por document.id), así que procesarlos en
     // paralelo es seguro — no hay estado compartido entre documentos.
     await mapWithConcurrency(documents, 8, async (document) => {
-      const integrationId = integrationIdByCompanyId.get(document.companyId);
+      const integrationId = document.provider === IntegrationProvider.JARVIS
+        ? undefined : integrationIdByCompanyId.get(document.companyId);
       const taxesCatalog = taxesCatalogByCompanyId.get(document.companyId);
       const documentConsumptionRate = resolveDocumentConsumptionTaxRate(
         document.payload,

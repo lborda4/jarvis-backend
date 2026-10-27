@@ -93,6 +93,7 @@ export function mapElectronicDocumentToListItem(
 
   return {
     id: document.id,
+    provider: document.provider,
     companyId: document.companyId,
     companyName: document.company?.name ?? '—',
     cufe: document.cufe,

@@ -69,10 +69,12 @@ export class ElectronicDocumentController {
   getFilterOptions(
     @CurrentUser() user: AuthenticatedUser,
     @Query('electronicDocumentType') electronicDocumentType?: ElectronicDocumentType,
+    @Query('provider') provider?: string,
   ): Promise<ElectronicDocumentFilterOptionsDto> {
     return this.electronicDocumentService.getFilterOptions(
       getAuthenticatedCompanyId(user),
       electronicDocumentType,
+      provider,
     );
   }
 

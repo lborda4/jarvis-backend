@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
@@ -132,6 +133,7 @@ export class SiigoDocumentResumeService {
     originalError: unknown,
   ): Promise<ResumeElectronicDocumentResponseDto> {
     try {
+      await this.electronicDocumentService.requireById(documentId, companyId, IntegrationProvider.SIIGO);
       await this.electronicDocumentService.updateStatus(
         documentId,
         ElectronicDocumentStatus.FAILED,
@@ -165,11 +167,8 @@ export class SiigoDocumentResumeService {
     const document = await this.electronicDocumentService.requireById(
       trimmedId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
-
-    if (document.status === ElectronicDocumentStatus.SUPPLIER_NOT_FOUND) {
-      return this.buildResponse('SUPPLIER_REQUIRED', document.id, companyId);
-    }
 
     if (
       (document.status === ElectronicDocumentStatus.ACCOUNT_REQUIRED ||
@@ -260,16 +259,8 @@ export class SiigoDocumentResumeService {
       const refreshed = await this.electronicDocumentService.requireById(
         trimmedId,
         companyId,
+        IntegrationProvider.SIIGO,
       );
-
-      if (refreshed.status === ElectronicDocumentStatus.SUPPLIER_NOT_FOUND) {
-        return this.buildResponse(
-          'SUPPLIER_REQUIRED',
-          document.id,
-          companyId,
-          message,
-        );
-      }
 
       if (
         refreshed.supplierExistsInSiigo === true &&
@@ -302,6 +293,7 @@ export class SiigoDocumentResumeService {
     const document = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
 
     return {

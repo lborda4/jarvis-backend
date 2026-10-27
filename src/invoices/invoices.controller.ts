@@ -10,6 +10,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { parseDocumentProvider } from '../integration/helpers/document-provider.helper';
 import type { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { getAuthenticatedCompanyId } from '../auth/helpers/authenticated-company.helper';
@@ -78,10 +79,12 @@ export class InvoicesController {
   validateSupportDocuments(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File,
+    @Body() body: ImportSupportDocumentsRequestDto,
   ): Promise<SupportDocumentValidationReportDto> {
     return this.invoicesService.validateSupportDocumentsExcel(
       file,
       getAuthenticatedCompanyId(user),
+      parseDocumentProvider(body?.provider),
     );
   }
 
@@ -112,10 +115,12 @@ export class InvoicesController {
   importPurchaseInvoices(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File,
+    @Body() body: ImportSupportDocumentsRequestDto,
   ): Promise<StartPurchaseInvoiceImportResponseDto> {
     return this.invoicesService.importPurchaseInvoicesFromExcel(
       file,
       getAuthenticatedCompanyId(user),
+      parseDocumentProvider(body?.provider),
     );
   }
 

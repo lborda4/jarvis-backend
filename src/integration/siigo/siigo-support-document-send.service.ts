@@ -89,6 +89,7 @@ export class SiigoSupportDocumentSendService {
     const electronicDocument = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
 
     if (
@@ -328,6 +329,7 @@ export class SiigoSupportDocumentSendService {
     const electronicDocument = await this.electronicDocumentService.requireById(
       trimmedDocumentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
 
     if (

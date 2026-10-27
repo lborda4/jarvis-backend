@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { CreateSiigoDocumentResponseDto } from './dto/create-siigo-document.dto';
@@ -21,7 +22,7 @@ export class SiigoDocumentCreationService {
     }
 
     const electronicDocument =
-      await this.electronicDocumentService.requireById(trimmedId, companyId);
+      await this.electronicDocumentService.requireById(trimmedId, companyId, IntegrationProvider.SIIGO);
     const handler = this.documentCreationRegistry.resolve(
       electronicDocument.electronicDocumentType,
     );

@@ -17,7 +17,7 @@ function buildService(
 
 describe('SiigoDocumentPreparationService.prepareDocuments', () => {
   it('marca el lote como error si falla la autenticación antes de preparar documentos', async () => {
-    const documents = { updateStatus: jest.fn().mockResolvedValue(undefined) };
+    const documents = { requireById: jest.fn().mockResolvedValue({ provider: 'SIIGO' }), updateStatus: jest.fn().mockResolvedValue(undefined) };
     const service = buildService(documents);
     jest.spyOn(service as any, 'createBatchContext').mockRejectedValue(new Error('SIIGO no disponible'));
     const prepare = jest.spyOn(service, 'prepareSupplierAndAccounts');
@@ -77,7 +77,7 @@ describe('SiigoDocumentPreparationService.prepareDocuments', () => {
   });
 
   it('marca el documento como FAILED cuando su preparación revienta, en vez de dejarlo congelado sin ningún indicio', async () => {
-    const electronicDocumentService = { updateStatus: jest.fn() };
+    const electronicDocumentService = { requireById: jest.fn().mockResolvedValue({ provider: 'SIIGO' }), updateStatus: jest.fn() };
     const service = buildService(electronicDocumentService);
     jest.spyOn(service as any, 'createBatchContext').mockResolvedValue({});
 

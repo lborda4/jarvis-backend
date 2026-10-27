@@ -14,7 +14,7 @@ function setup() {
     getBindedTerminals: jest.fn().mockResolvedValue({ payload: { available_terminals: [{ terminal_serial: 'serial-1', terminal_model: 'N86', status: 'BINDED' }] } }),
     createCheckout: jest.fn().mockResolvedValue({ payload: { accepted: true }, errors: [] }),
   };
-  const service = new BoldCheckoutService(registers as never, integrations as never, client as never);
+  const service = new BoldCheckoutService(registers as never, integrations as never, client as never, { issue: jest.fn().mockReturnValue('status-token') } as never);
   const request = { cashRegisterName: ' Principal ', userEmail: 'seller@example.com', amount: { currency: 'COP', taxes: [], tip_amount: 0, total_amount: 10000 } };
   return { service, registers, integrations, client, request };
 }

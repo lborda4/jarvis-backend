@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { Injectable, Logger } from '@nestjs/common';
 import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
@@ -118,6 +119,7 @@ export class SiigoDocumentPreparationService {
     let document = await this.electronicDocumentService.requireById(
       trimmedId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
 
     // Chequeo de "¿ya existe en SIIGO?" ANTES de validar proveedor/cuenta —
@@ -191,6 +193,9 @@ export class SiigoDocumentPreparationService {
               );
 
         if (!autoCreated) {
+          this.logger.warn(
+            `[companyId=${companyId}] [documentId=${trimmedId}] Proveedor no encontrado en SIIGO (identification=${supplierNit}, branch_office=0); creación no realizada, se marca supplierExistsInSiigo=false.`,
+          );
           await this.electronicDocumentService.updateStatus(
             trimmedId,
             ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,
@@ -212,6 +217,7 @@ export class SiigoDocumentPreparationService {
       document = await this.electronicDocumentService.requireById(
         trimmedId,
         companyId,
+        IntegrationProvider.SIIGO,
       );
     }
 
@@ -342,6 +348,7 @@ export class SiigoDocumentPreparationService {
     companyId: string,
   ): Promise<void> {
     try {
+      await this.electronicDocumentService.requireById(documentId, companyId, IntegrationProvider.SIIGO);
       await this.electronicDocumentService.updateStatus(
         documentId,
         ElectronicDocumentStatus.FAILED,

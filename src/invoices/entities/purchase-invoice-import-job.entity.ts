@@ -8,6 +8,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Company } from '../../company/entities/company.entity';
+import { IntegrationProvider } from '../../integration/enums/integration-provider.enum';
 import { PurchaseInvoiceImportJobStatus } from '../enums/purchase-invoice-import-job-status.enum';
 import { PurchaseInvoiceImportRecord } from '../interfaces/purchase-invoice-import-result.interface';
 import { PurchaseInvoiceValidationReport } from '../helpers/purchase-invoice-import-validation.helper';
@@ -28,6 +29,9 @@ export class PurchaseInvoiceImportJob {
 
   @Column({ name: 'company_id', type: 'uuid' })
   companyId: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  provider: IntegrationProvider | null;
 
   @Column({
     type: 'varchar',

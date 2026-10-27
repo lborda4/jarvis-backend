@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "JARVIS - Siigo POS",
+  "version": "1.1.0",
+  "description": "Integración de Siigo POS con JARVIS y Bold",
+  "permissions": [],
+  "host_permissions": [
+    "https://jarvis-backend-y77r.onrender.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://pos.siigo.com/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

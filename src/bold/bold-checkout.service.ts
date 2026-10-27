@@ -5,8 +5,9 @@ import { IntegrationProvider } from '../integration/enums/integration-provider.e
 import type { BoldCredentials } from '../integration/interfaces/integration-credentials.interface';
 import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash-registers.repository';
 import { BoldHttpClient } from './clients/bold-http.client';
-import { BoldCheckoutPayload } from './dto/bold-checkout.dto';
+import { BoldCheckoutPayload, BoldCheckoutResponse } from './dto/bold-checkout.dto';
 import { parseBoldExtensionPayment } from './helpers/bold-extension-payment.helper';
+import { BoldPaymentStatusService } from './bold-payment-status.service';
 
 /** Vendedor único de esta primera integración Bold. */
 export const BOLD_SELLER_EMAIL = 'acuaticavallesas@gmail.com';
@@ -17,6 +18,7 @@ export class BoldCheckoutService {
     private readonly registers: SiigoBoldCashRegistersRepository,
     private readonly integrations: IntegrationsRepository,
     private readonly client: BoldHttpClient,
+    private readonly paymentStatus: BoldPaymentStatusService,
   ) {}
 
   async createFromExtension(body: unknown) {
@@ -73,10 +75,12 @@ export class BoldCheckoutService {
       user_email: request.userEmail.trim(),
     };
     console.log('[Bold] ANTES POST /payments/app-checkout', JSON.stringify(payload, null, 2));
+    const statusToken = this.paymentStatus.issue(companyId, reference, amount.total_amount);
+    let response: BoldCheckoutResponse | undefined;
     try {
-      // const response = await this.client.createCheckout(key, payload);
+      // response = await this.client.createCheckout(key, payload);
       // console.log('[Bold] Respuesta POST /payments/app-checkout:', JSON.stringify(response, null, 2));
-      return { reference, payload };
+      return { reference, payload, response, statusToken };
     } catch (error) {
       console.log(
         '[Bold] DESPUÉS POST /payments/app-checkout (error)',

@@ -1,3 +1,5 @@
+import { JarvisReportsController } from './jarvis-reports.controller';
+import { JarvisReportsService } from './jarvis-reports.service';
 import { PayrollController } from '../../payroll/payroll.controller';
 import { PayrollService } from '../../payroll/payroll.service';
 import { PayrollGuard } from '../../payroll/payroll.guard';
@@ -47,8 +49,9 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     forwardRef(() => ElectronicDocumentModule),
     TypeOrmModule.forFeature([JarvisRadianEvent, JarvisPaymentMethod, JarvisTercero, JarvisTax, JarvisSalesInvoice]),
   ],
-  controllers: [JarvisController, JarvisSellersController, JarvisInvoiceDraftsController, JarvisInvoiceAttachmentsController, PayrollController],
+  controllers: [JarvisReportsController, JarvisController, JarvisSellersController, JarvisInvoiceDraftsController, JarvisInvoiceAttachmentsController, PayrollController],
   providers: [
+    JarvisReportsService,
     PayrollService,
     PayrollGuard,
     JarvisDashboardService,

@@ -7,6 +7,7 @@ import { BoldCashRegistersService } from './bold-cash-registers.service';
 import { BoldController } from './bold.controller';
 import { BoldPaymentsService } from './bold-payments.service';
 import { BoldCheckoutService } from './bold-checkout.service';
+import { BoldPaymentStatusService } from './bold-payment-status.service';
 import { BoldTerminalsService } from './bold-terminals.service';
 import { BoldWebhookService } from './bold-webhook.service';
 import { BoldHttpClient } from './clients/bold-http.client';
@@ -27,6 +28,7 @@ import { SiigoBoldCashRegistersRepository } from './repositories/siigo-bold-cash
   ],
   controllers: [BoldController],
   providers: [
+    BoldPaymentStatusService,
     BoldCheckoutService,
     BoldPaymentsService,
     BoldTerminalsService,

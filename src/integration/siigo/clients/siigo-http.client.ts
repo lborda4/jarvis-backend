@@ -85,6 +85,9 @@ export class SiigoHttpClient {
     branchOffice = 0,
     partnerId?: string,
   ): Promise<SiigoCustomer | null> {
+    this.logger.debug(
+      `[SIIGO supplier lookup] identification=${identification}, branch_office=${branchOffice}`,
+    );
     const response = await this.request<SiigoCustomersListResponse>({
       method: 'GET',
       url: `${SIIGO_API_BASE_URL}${SIIGO_CUSTOMERS_PATH}`,
@@ -95,7 +98,14 @@ export class SiigoHttpClient {
       },
     });
 
-    return response.results?.[0] ?? null;
+    if (!response || !Array.isArray(response.results)) {
+      throw new Error('SIIGO devolvió una respuesta de terceros sin results válido.');
+    }
+
+    this.logger.debug(
+      `[SIIGO supplier lookup] identification=${identification}, branch_office=${branchOffice}, results=${response.results.length}`,
+    );
+    return response.results[0] ?? null;
   }
 
   async createCustomer(

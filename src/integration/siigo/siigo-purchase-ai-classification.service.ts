@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { BoundedWorkQueue } from '../../common/helpers/bounded-work-queue';
 import { resolveItemAiSuggestion } from '../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
 import { readAiCost } from '../../electronic-document/helpers/electronic-document-ai-cost.helper';
@@ -128,6 +129,7 @@ export class SiigoPurchaseAiClassificationService {
     const document = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
     const supplierNit = normalizeSupplierDocument(
       document.payload.supplier.documentNumber ?? '',
@@ -206,6 +208,7 @@ export class SiigoPurchaseAiClassificationService {
           await this.electronicDocumentService.requireById(
             documentId,
             companyId,
+            IntegrationProvider.SIIGO,
           );
         const { aiSuggestion: _legacySuggestion, ...payload } =
           documentAfterTypeClassification.payload;
@@ -260,6 +263,7 @@ export class SiigoPurchaseAiClassificationService {
     const freshDocument = await this.electronicDocumentService.requireById(
       documentId,
       companyId,
+      IntegrationProvider.SIIGO,
     );
 
     await this.electronicDocumentService.updatePayload(

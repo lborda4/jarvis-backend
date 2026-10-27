@@ -12,6 +12,29 @@ function buildHttpServiceMock(responses: Array<{ status: number; data: unknown }
 }
 
 describe('SiigoHttpClient', () => {
+  it('consulta el NIT y sucursal sin filtrar por tipo de tercero', async () => {
+    const customer = { id: 'existing', identification: '860501359' };
+    const httpService = buildHttpServiceMock([
+      { status: 200, data: { results: [customer] } },
+    ]);
+    const client = new SiigoHttpClient(httpService as any);
+
+    await expect(client.findCustomerByIdentificationAndBranch('token', '860501359', 0, 'partner')).resolves.toEqual(customer);
+    expect(httpService.request).toHaveBeenCalledWith(expect.objectContaining({
+      params: { identification: '860501359', branch_office: 0 },
+    }));
+  });
+
+  it.each([null, {}, { results: null }, { results: {} }])(
+    'rechaza una respuesta inválida (%j) en lugar de reportar proveedor inexistente',
+    async (data) => {
+      const httpService = buildHttpServiceMock([{ status: 200, data }]);
+      const client = new SiigoHttpClient(httpService as any);
+
+      await expect(client.findCustomerByIdentificationAndBranch('token', '860501359')).rejects.toThrow(/results/);
+    },
+  );
+
   beforeEach(() => {
     jest.useFakeTimers();
   });

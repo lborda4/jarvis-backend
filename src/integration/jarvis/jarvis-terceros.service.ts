@@ -272,6 +272,7 @@ export class JarvisTercerosService {
     const pendingRows =
       await this.electronicDocumentsRepository.findPendingSupplierCandidates(
         trimmedCompanyId,
+        IntegrationProvider.JARVIS,
       );
     const companyToken = await this.resolveCompanyNextPymeToken(
       trimmedCompanyId,

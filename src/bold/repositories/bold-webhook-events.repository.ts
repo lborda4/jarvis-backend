@@ -18,6 +18,13 @@ export class BoldWebhookEventsRepository {
     private readonly repository: Repository<BoldWebhookEvent>,
   ) {}
 
+  findProductionByReference(companyId: string, reference: string): Promise<BoldWebhookEvent[]> {
+    return this.repository.find({
+      where: { companyId, reference, environment: 'production' },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async insertIfNew(
     data: Pick<
       BoldWebhookEvent,

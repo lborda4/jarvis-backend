@@ -302,6 +302,7 @@ export class PurchaseInvoiceImportWorkerService
         await this.electronicDocumentService.createFromPurchaseInvoiceRows(
           rowsWithPayload,
           job.companyId,
+          job.provider ?? undefined,
         );
       siigoJarvisDurationMs = Date.now() - siigoJarvisStartedAt;
 
@@ -394,9 +395,13 @@ export class PurchaseInvoiceImportWorkerService
 
       if (documentIdsPendingProcessing.length > 0) {
         const provider =
-          await this.electronicDocumentService.resolveDocumentProvider(
+          job.provider ?? await this.electronicDocumentService.resolveDocumentProvider(
             job.companyId,
           );
+
+        this.logger.log(
+          `[job=${job.id}] [companyId=${job.companyId}] Validación de proveedores: provider=${provider}, documents=${documentIdsPendingProcessing.length}.`,
+        );
 
         if (provider === IntegrationProvider.JARVIS) {
           this.jarvisDocumentPreparationService.prepareDocumentsInBackground(
@@ -415,7 +420,7 @@ export class PurchaseInvoiceImportWorkerService
       ].filter((id) => !documentIdsAlreadyInSiigo.includes(id));
       if (
         aiDocumentIds.length &&
-        (await this.electronicDocumentService.resolveDocumentProvider(
+        (job.provider ?? await this.electronicDocumentService.resolveDocumentProvider(
           job.companyId,
         )) === IntegrationProvider.SIIGO
       ) {

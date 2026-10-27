@@ -15,7 +15,7 @@ export class PurchaseInvoiceImportJobsRepository {
     data: Pick<
       PurchaseInvoiceImportJob,
       'companyId' | 'fileName' | 'totalRows' | 'status'
-    >,
+    > & Partial<Pick<PurchaseInvoiceImportJob, 'provider'>>,
   ): PurchaseInvoiceImportJob {
     return this.repository.create(data);
   }

@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../../integration/enums/integration-provider.enum';
 import { SuggestedAccount } from '../../integration/helpers/supplier-accounts-catalog.helper';
 import {
   SupplierCostCenterPreference,
@@ -12,6 +13,7 @@ import {
 } from '../../integration/helpers/supplier-preference.helper';
 
 export class ElectronicDocumentListItemDto {
+  provider?: IntegrationProvider | null;
   id: string;
   companyId: string;
   companyName: string;

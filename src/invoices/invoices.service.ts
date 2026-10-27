@@ -19,6 +19,7 @@ import {
 import { parseElectronicDocumentType } from '../electronic-document/helpers/electronic-document-type.helper';
 import { ElectronicDocumentService } from '../electronic-document/electronic-document.service';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
+import { parseDocumentProvider } from '../integration/helpers/document-provider.helper';
 import { JarvisDocumentPreparationService } from '../integration/jarvis/jarvis-document-preparation.service';
 import { SiigoDocumentPreparationService } from '../integration/siigo/siigo-document-preparation.service';
 import { SiigoPurchaseAiClassificationService } from '../integration/siigo/siigo-purchase-ai-classification.service';
@@ -89,12 +90,17 @@ export class InvoicesService {
   async validateSupportDocumentsExcel(
     file: Express.Multer.File | undefined,
     companyId: string,
+    requestedProvider?: IntegrationProvider,
   ): Promise<SupportDocumentValidationReportDto> {
     if (!file) {
       throw new MissingFileException();
     }
 
     const groups = parseSupportDocumentExcel(file.buffer);
+    const provider = await this.electronicDocumentService.resolveDocumentProvider(companyId, requestedProvider);
+    if (provider === IntegrationProvider.JARVIS) {
+      return validateSupportDocumentExcelRows(groups);
+    }
     const costCenters = await this.siigoCostCentersCatalogService
       .listCostCenters(companyId)
       .catch((error) => {
@@ -134,6 +140,7 @@ export class InvoicesService {
       await this.electronicDocumentService.buildSupplierNameLookupForGroups(
         groups,
         companyId ?? '',
+          parseDocumentProvider(request?.provider),
       );
     const records = groups.map((group) =>
       mapGroupedSupportDocumentToPreview(
@@ -200,6 +207,7 @@ export class InvoicesService {
       await this.electronicDocumentService.createFromSupportDocumentGroups(
         groups,
         companyId ?? '',
+        parseDocumentProvider(request?.provider),
       );
 
     const records = groups.map((group, index) =>
@@ -277,6 +285,7 @@ export class InvoicesService {
   async importPurchaseInvoicesFromExcel(
     file?: Express.Multer.File,
     companyId?: string,
+    requestedProvider?: IntegrationProvider,
   ): Promise<StartPurchaseInvoiceImportResponseDto> {
     if (!file) {
       throw new MissingFileException();
@@ -292,10 +301,12 @@ export class InvoicesService {
       `Facturas de compra DIAN: filasLeídas=${processedRows}, facturasRecibidas=${rows.length}`,
     );
 
+    const provider = await this.electronicDocumentService.resolveDocumentProvider(companyId ?? '', requestedProvider);
     const job = await this.purchaseInvoiceImportJobsRepository.save(
       this.purchaseInvoiceImportJobsRepository.create({
         companyId: companyId ?? '',
         fileName: file.originalname ?? null,
+        provider,
         totalRows: rows.length,
         status: PurchaseInvoiceImportJobStatus.PENDING,
       }),
@@ -457,6 +468,7 @@ export class InvoicesService {
           parsedData,
           electronicDocumentType,
           companyId ?? '',
+          parseDocumentProvider(body?.provider),
         );
       const session = await this.importSessionService.createSession(
         parsedData,
@@ -473,14 +485,12 @@ export class InvoicesService {
 
       const resolvedCompanyId = companyId?.trim();
       if (resolvedCompanyId) {
-        this.siigoDocumentPreparationService.prepareDocumentsInBackground(
-          [electronicDocument.id],
-          resolvedCompanyId,
-        );
-        this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground(
-          [electronicDocument.id],
-          resolvedCompanyId,
-        );
+        if (electronicDocument.provider === IntegrationProvider.JARVIS) {
+          this.jarvisDocumentPreparationService.prepareDocumentsInBackground([electronicDocument.id], resolvedCompanyId);
+        } else {
+          this.siigoDocumentPreparationService.prepareDocumentsInBackground([electronicDocument.id], resolvedCompanyId);
+          this.siigoPurchaseAiClassificationService.classifyDocumentsInBackground([electronicDocument.id], resolvedCompanyId);
+        }
       }
 
       return {

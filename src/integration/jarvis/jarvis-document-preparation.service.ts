@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { Injectable, Logger } from '@nestjs/common';
 import { ResumeElectronicDocumentResponseDto } from '../../electronic-document/dto/resume-electronic-document.dto';
 import { mapElectronicDocumentToListItem } from '../../electronic-document/mappers/electronic-document-list-item.mapper';
@@ -51,6 +52,7 @@ export class JarvisDocumentPreparationService {
     const document = await this.electronicDocumentService.requireById(
       result.documentId,
       companyId,
+      IntegrationProvider.JARVIS,
     );
 
     return {
@@ -70,6 +72,7 @@ export class JarvisDocumentPreparationService {
     const document = await this.electronicDocumentService.requireById(
       trimmedId,
       companyId,
+      IntegrationProvider.JARVIS,
     );
 
     if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
@@ -97,6 +100,9 @@ export class JarvisDocumentPreparationService {
       : null;
 
     if (!tercero) {
+      this.logger.warn(
+        `[companyId=${companyId}] [documentId=${trimmedId}] Proveedor no encontrado en catálogo local JARVIS (documentType=${documentType}, documentNumber=${documentNumber}); se marca supplierExistsInSiigo=false sin consultar SIIGO.`,
+      );
       await this.electronicDocumentService.updateStatus(
         trimmedId,
         ElectronicDocumentStatus.SUPPLIER_NOT_FOUND,

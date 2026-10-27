@@ -37,7 +37,7 @@ export interface SupportDocumentValidationReport {
  */
 export function validateSupportDocumentExcelRows(
   groups: GroupedSupportDocument[],
-  costCenters: SiigoCostCenterCatalogItemDto[],
+  costCenters?: SiigoCostCenterCatalogItemDto[],
   accounts?: Array<{ code: string; name: string }>,
 ): SupportDocumentValidationReport {
   const errors: SupportDocumentValidationRowError[] = [];
@@ -71,7 +71,7 @@ export function validateSupportDocumentExcelRows(
     // Vacío SÍ pasa — el centro de costos es opcional. Solo se rechaza un
     // valor que no matchea NADA del catálogo real (typo, o un centro de
     // costos que ya no existe en SIIGO).
-    if (costCenterText) {
+    if (costCenterText && costCenters) {
       const matched = resolveSiigoCostCenter(costCenterText, costCenters);
 
       if (!matched) {

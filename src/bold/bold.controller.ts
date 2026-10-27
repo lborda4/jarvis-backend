@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Header,
   HttpCode,
   HttpException,
   HttpStatus,
@@ -30,6 +31,7 @@ import {
 import { BoldPaymentMethodsResponseDto } from './dto/bold-payment-methods.dto';
 import { BoldBindedTerminalsResponseDto } from './dto/bold-terminals.dto';
 import { BoldCheckoutService } from './bold-checkout.service';
+import { BoldPaymentStatusService } from './bold-payment-status.service';
 
 @Controller('bold')
 export class BoldController {
@@ -41,11 +43,19 @@ export class BoldController {
     private readonly boldCashRegistersService: BoldCashRegistersService,
     private readonly boldCheckoutService: BoldCheckoutService,
     private readonly boldWebhookService: BoldWebhookService,
+    private readonly paymentStatus: BoldPaymentStatusService,
   ) {}
 
   @Get('payments/payment-methods')
   getPaymentMethods(): Promise<BoldPaymentMethodsResponseDto> {
     return this.boldPaymentsService.getPaymentMethods();
+  }
+
+  @Public()
+  @Get('payments/status')
+  @Header('Cache-Control', 'no-store')
+  getPaymentStatus(@Query('token') token: string) {
+    return this.paymentStatus.getStatus(token);
   }
 
   /** Consulta Bold con la llave guardada de la empresa. */

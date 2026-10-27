@@ -53,6 +53,55 @@ function buildService(status: ElectronicDocumentStatus) {
 }
 
 describe('SiigoDocumentResumeService.resume', () => {
+  it('un fallo al volver a consultar no se presenta como proveedor inexistente', async () => {
+    const { service, electronicDocumentService, siigoDocumentPreparationService } = buildService(ElectronicDocumentStatus.SUPPLIER_NOT_FOUND);
+    electronicDocumentService.requireById.mockResolvedValue({
+      ...(buildDocumentStub(ElectronicDocumentStatus.SUPPLIER_NOT_FOUND) as any),
+      supplierExistsInSiigo: false,
+    } as never);
+    siigoDocumentPreparationService.prepareSupplierAndAccounts.mockRejectedValue(new Error('SIIGO no responde'));
+
+    const response = await service.resume('doc-1', 'company-1');
+
+    expect(response.nextStep).toBe('FAILED');
+    expect(response.message).toBe('SIIGO no responde');
+    expect(electronicDocumentService.updateStatus).toHaveBeenCalledWith('doc-1', ElectronicDocumentStatus.FAILED, 'company-1');
+  });
+
+  it('vuelve a validar un proveedor antes marcado como faltante y permite continuar si ya existe', async () => {
+    const { service, electronicDocumentService, siigoDocumentPreparationService, siigoDocumentCreationService } = buildService(ElectronicDocumentStatus.SUPPLIER_NOT_FOUND);
+    const resolved = buildDocumentStub(ElectronicDocumentStatus.ACCOUNT_REQUIRED);
+    electronicDocumentService.requireById
+      .mockResolvedValueOnce({
+        ...(buildDocumentStub(ElectronicDocumentStatus.SUPPLIER_NOT_FOUND) as any),
+        supplierExistsInSiigo: false,
+      } as never)
+      .mockResolvedValue(resolved);
+    siigoDocumentPreparationService.prepareSupplierAndAccounts.mockResolvedValue({
+      documentId: 'doc-1', nextStep: 'ACCOUNT_REQUIRED',
+    });
+
+    const response = await service.resume('doc-1', 'company-1');
+
+    expect(siigoDocumentPreparationService.prepareSupplierAndAccounts).toHaveBeenCalledWith('doc-1', 'company-1', undefined);
+    expect(response.nextStep).toBe('ACCOUNT_REQUIRED');
+    expect(response.document.supplierExistsInSiigo).toBe(true);
+    expect(siigoDocumentCreationService.createInSiigo).not.toHaveBeenCalled();
+  });
+
+  it('mantiene el paso de proveedor requerido si la nueva validación confirma que sigue faltando', async () => {
+    const { service, siigoDocumentPreparationService, siigoDocumentCreationService } = buildService(ElectronicDocumentStatus.SUPPLIER_NOT_FOUND);
+    siigoDocumentPreparationService.prepareSupplierAndAccounts.mockResolvedValue({
+      documentId: 'doc-1', nextStep: 'SUPPLIER_REQUIRED',
+    });
+
+    const response = await service.resume('doc-1', 'company-1');
+
+    expect(siigoDocumentPreparationService.prepareSupplierAndAccounts).toHaveBeenCalledTimes(1);
+    expect(response.nextStep).toBe('SUPPLIER_REQUIRED');
+    expect(siigoDocumentCreationService.createInSiigo).not.toHaveBeenCalled();
+  });
+
   it('una cuenta sugerida no oculta el fallo cuando el proveedor sigue sin verificar', async () => {
     const { service, electronicDocumentService, siigoDocumentPreparationService } = buildService(ElectronicDocumentStatus.ACCOUNT_REQUIRED);
     electronicDocumentService.requireById.mockResolvedValue({

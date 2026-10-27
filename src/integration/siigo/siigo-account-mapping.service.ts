@@ -1,3 +1,4 @@
+import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ElectronicDocumentStatus } from '../../electronic-document/enums/electronic-document-status.enum';
 import {
@@ -80,7 +81,7 @@ export class SiigoAccountMappingService {
     const documentId = this.requireDocumentId(request.documentId);
     const electronicDocument = await this.electronicDocumentService.requireById(
       documentId,
-      companyId,
+      companyId, IntegrationProvider.SIIGO
     );
     const supplier = resolveSupplierDocumentFromPayload(
       electronicDocument.payload,
@@ -250,7 +251,7 @@ export class SiigoAccountMappingService {
     const accountDescription = request.accountDescription.trim();
     const electronicDocument = await this.electronicDocumentService.requireById(
       documentId,
-      companyId,
+      companyId, IntegrationProvider.SIIGO
     );
 
     await this.persistSupplierPreferencesForDocument(

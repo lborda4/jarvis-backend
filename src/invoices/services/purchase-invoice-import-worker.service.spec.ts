@@ -3,6 +3,40 @@ import { PurchaseInvoiceImportJobStatus } from '../enums/purchase-invoice-import
 import { PurchaseInvoiceImportRowStatus } from '../enums/purchase-invoice-import-row-status.enum';
 import type { DianSalesInvoiceRow } from '../helpers/sales-invoice-excel.helper';
 
+describe('destino persistido del importador', () => {
+  it.each(['SIIGO', 'JARVIS'])('conserva %s aunque la empresa tenga otra integración activa', async (provider) => {
+    const context = buildService({
+      jobRowsRepository: {
+        countOutstandingByJob: jest.fn().mockResolvedValue(1),
+        claimPendingBatch: jest.fn().mockResolvedValue([buildJobRow()]),
+      },
+      nextPymeApiClient: {
+        getInvoiceByCufe: jest.fn().mockResolvedValue({
+          outcome: 'found', attempts: 1, retryDelayMs: 0,
+          data: { seller: { identification_number: '900123456' }, legal_monetary_totals: { payable_amount: '100000' }, invoice_lines: [] },
+        }),
+      },
+      electronicDocumentService: {
+        resolveDocumentProvider: jest.fn().mockResolvedValue(provider === 'SIIGO' ? 'JARVIS' : 'SIIGO'),
+        createFromPurchaseInvoiceRows: jest.fn().mockResolvedValue({
+          documentsCreated: 1, documentsReused: 0, itemsTotal: 1, documentsSkippedByPlanLimit: 0,
+          rows: [{ cufe: 'cufe-1', documentId: 'doc-1', skippedByPlanLimit: false }],
+        }),
+      },
+    });
+
+    await (context.service as any).processOneBatchForJob(buildJob({ provider }));
+
+    expect(context.electronicDocumentService.createFromPurchaseInvoiceRows).toHaveBeenCalledWith(expect.any(Array), 'company-1', provider);
+    expect(context.electronicDocumentService.resolveDocumentProvider).not.toHaveBeenCalled();
+    const selected = provider === 'SIIGO' ? context.siigoDocumentPreparationService : context.jarvisDocumentPreparationService;
+    const other = provider === 'SIIGO' ? context.jarvisDocumentPreparationService : context.siigoDocumentPreparationService;
+    expect(selected.prepareDocumentsInBackground).toHaveBeenCalledWith(['doc-1'], 'company-1');
+    expect(other.prepareDocumentsInBackground).not.toHaveBeenCalled();
+    expect(context.siigoPurchaseAiClassificationService.classifyDocumentsInBackground).toHaveBeenCalledTimes(provider === 'SIIGO' ? 1 : 0);
+  });
+});
+
 function buildRawRow(
   overrides: Partial<DianSalesInvoiceRow> = {},
 ): DianSalesInvoiceRow {
@@ -148,6 +182,7 @@ function buildService(
     nextPymeApiClient,
     siigoDocumentPreparationService,
     siigoPurchaseAiClassificationService,
+    jarvisDocumentPreparationService,
     postgresNotifyService,
   };
 }

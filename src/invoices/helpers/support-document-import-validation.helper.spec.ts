@@ -24,6 +24,12 @@ function buildGroup(
 }
 
 describe('validateSupportDocumentExcelRows', () => {
+  it('Jarvis valida la identidad sin exigir centros de costo del catálogo de Siigo', () => {
+    expect(validateSupportDocumentExcelRows([buildGroup({ costCenter: 'Centro propio de Jarvis' })]).invalidGroups).toBe(0);
+    expect(validateSupportDocumentExcelRows([buildGroup({ supplierDocumentType: 'INVALIDO' })]).invalidGroups).toBe(1);
+    expect(validateSupportDocumentExcelRows([buildGroup({ costCenter: 'Centro propio de Jarvis' })], []).invalidGroups).toBe(1);
+  });
+
   it('un grupo válido (tipo de documento real, sin centro de costos) no reporta errores', () => {
     const report = validateSupportDocumentExcelRows(
       [buildGroup()],

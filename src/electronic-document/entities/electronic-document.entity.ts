@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Company } from '../../company/entities/company.entity';
+import { IntegrationProvider } from '../../integration/enums/integration-provider.enum';
 import { ElectronicDocumentStatus } from '../enums/electronic-document-status.enum';
 import { ElectronicDocumentType } from '../enums/electronic-document-type.enum';
 import type { ElectronicDocumentDraft } from '../interfaces/electronic-document-draft.interface';
@@ -20,6 +21,9 @@ export class ElectronicDocument {
 
   @Column({ name: 'company_id', type: 'uuid' })
   companyId: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  provider: IntegrationProvider | null;
 
   @Column({ type: 'varchar', nullable: true })
   cufe: string | null;
