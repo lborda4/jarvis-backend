@@ -502,3 +502,20 @@ it('toma la empresa del usuario autenticado y no de parámetros enviados por el 
     ),
   ).toThrow();
 });
+
+it('aplica la busqueda de ventas antes de paginar y parametriza el texto', async () => {
+  const { service, source } = setup();
+  const search = "FV1' OR 1=1";
+  const result = await service.query('company', { ...query, report: 'sales', view: 'detail', search });
+  expect(result.filters.search).toBe(search);
+  const [sql, params] = source.query.mock.calls[0];
+  expect(sql).toContain("concat_ws(' ', i.customer_identification, i.customer_name, i.prefix || i.number)");
+  expect(sql).not.toContain(search);
+  expect(params).toContain(search);
+  expect(sql).toContain(`lower($${params.indexOf(search) + 1})`);
+});
+
+it('valida y recorta la busqueda general del reporte', () => {
+  expect(filters({ search: '  FV1  ' }).search).toBe('FV1');
+  expect(() => filters({ search: 'x'.repeat(201) })).toThrow();
+});

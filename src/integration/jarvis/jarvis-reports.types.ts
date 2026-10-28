@@ -14,6 +14,7 @@ export interface ReportQuery {
   view?: string;
   from?: string;
   to?: string;
+  search?: string;
   customer?: string;
   seller?: string;
   product?: string;
@@ -27,6 +28,7 @@ export interface ReportFilters {
   view: ReportView;
   from: string;
   to: string;
+  search?: string;
   customer: string;
   seller: string;
   product: string;

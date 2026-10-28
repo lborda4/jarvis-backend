@@ -229,19 +229,23 @@ export class AdminService {
 
   async assignNextPymePackage(companyId: string, request: { documents: number }) {
     if (!Number.isSafeInteger(request.documents) || request.documents < 1) throw new BadRequestException('Indica una cantidad entera de documentos mayor que cero.');
+    const company = await this.companiesRepository.findById(companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    return this.assignNextPymePackageForNit(company.nit, request.documents);
+  }
+
+  private async assignNextPymePackageForNit(companyNit: string, documents: number) {
     const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date(Date.now())).replace(',', '');
     const jarvisCompany = await this.companiesRepository.findByNit('902086460');
     const jarvisToken = jarvisCompany?.nextPymeToken?.trim();
     if (!jarvisToken) throw new BadRequestException('Configura el token NextPyme de JARVIS COLOMBIA S.A.S. para recargar documentos.');
-    const company = await this.companiesRepository.findById(companyId);
-    if (!company) throw new NotFoundException('Empresa no encontrada.');
-    const nit = String(company.nit ?? '').split('-')[0].replace(/\D/g, '');
+    const nit = String(companyNit ?? '').split('-')[0].replace(/\D/g, '');
     const identification = Number(nit);
     if (!nit || !Number.isSafeInteger(identification) || identification <= 0) throw new BadRequestException('El NIT de la empresa no es válido.');
     return { data: await this.nextPymeApiClient.assignDocumentPackage({
       user_identification_number: identification,
       absolut_start_plan_date: date,
-      absolut_documents: request.documents,
+      absolut_documents: documents,
     }, jarvisToken) };
   }
 
@@ -457,6 +461,13 @@ export class AdminService {
             companyId: createdCompany.id,
           }),
         );
+      }
+
+      // El documento de reserva mantiene disponibles los servicios de NextPyme
+      // cuando se agota el cupo comercial; nunca se suma al plan de Jarvis.
+      // Si la asignación falla, la transacción revierte el alta para poder reintentar.
+      if (jarvisPlan?.documentLimit != null) {
+        await this.assignNextPymePackageForNit(request.nit, jarvisPlan.documentLimit + 1);
       }
 
       return companiesRepository.findOne({

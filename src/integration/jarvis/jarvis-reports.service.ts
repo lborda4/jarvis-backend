@@ -89,6 +89,7 @@ export function validateReportQuery(query: ReportQuery): ReportFilters {
     to,
     kind,
     currency,
+    ...(text('search') ? { search: text('search') } : {}),
     customer: text('customer'),
     seller: text('seller'),
     product: text('product'),
@@ -129,6 +130,12 @@ export class JarvisReportsService {
     if (filters.currency) {
       params.push(filters.currency);
       conditions.push(`i.currency=$${params.length}`);
+    }
+    if (filters.search) {
+      params.push(filters.search);
+      conditions.push(
+        `strpos(lower(concat_ws(' ', i.customer_identification, i.customer_name, i.prefix || i.number)), lower($${params.length})) > 0`,
+      );
     }
     if (filters.customer) {
       params.push(filters.customer);
