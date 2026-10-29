@@ -19,6 +19,15 @@ import { PayrollService } from './payroll.service';
 @UseGuards(PayrollGuard)
 export class PayrollController {
   constructor(private readonly service: PayrollService) {}
+  @Get('payment-methods') paymentMethods(@CurrentUser() user: AuthenticatedUser) {
+    return this.service.paymentMethods(getAuthenticatedCompanyId(user));
+  }
+  @Post('payment-methods') createPaymentMethod(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() request: { name?: unknown; base?: unknown },
+  ) {
+    return this.service.createPaymentMethod(getAuthenticatedCompanyId(user), user.userId, request);
+  }
   @Get('catalogs') catalogs(@CurrentUser() u: AuthenticatedUser) {
     return this.service.workerCatalogs(getAuthenticatedCompanyId(u));
   }

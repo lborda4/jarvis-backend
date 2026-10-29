@@ -1,3 +1,4 @@
+import { payrollPaymentColumns, payrollPaymentPresets, payrollPaymentMaster, type PayrollPaymentMethod } from './payroll-payment-methods';
 import {
   BadRequestException,
   ConflictException,
@@ -47,6 +48,53 @@ export class PayrollService {
       [randomUUID(), company, actor, action, id ?? null],
     );
   }
+  async paymentMethods(company: string): Promise<{ items: PayrollPaymentMethod[]; total: number }> {
+    if (!company?.trim()) throw new BadRequestException('La empresa activa es obligatoria.');
+    const read = () => this.db.query<PayrollPaymentMethod[]>(
+      `SELECT ${payrollPaymentColumns} FROM jarvis_payroll_payment_methods WHERE company_id=$1 ORDER BY CASE system_key WHEN 'cash' THEN 0 WHEN 'transfer' THEN 1 ELSE 2 END, lower(name), id`,
+      [company],
+    );
+    let items = await read();
+    const missing = payrollPaymentPresets.filter(preset => !items.some(item => item.systemKey === preset.systemKey));
+    if (missing.length) {
+      const catalog = await this.catalogs.getPaymentMethods(company);
+      // Resolve both before writing; a catalog failure must not invent provider IDs.
+      const defaults = missing.map(preset => ({ preset, master: payrollPaymentMaster(catalog, preset) }));
+      for (const { preset, master } of defaults) {
+        await this.db.query(
+          `INSERT INTO jarvis_payroll_payment_methods(id,company_id,name,system_key,nextpyme_method_id,nextpyme_method_name) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+          [randomUUID(), company, preset.name, preset.systemKey, master.id, master.name],
+        );
+      }
+      items = await read();
+    }
+    return { items, total: items.length };
+  }
+
+  async createPaymentMethod(company: string, actor: string, request: { name?: unknown; base?: unknown }) {
+    const name = typeof request?.name === 'string' ? request.name.trim() : '';
+    if (!name || name.length > 120) throw new BadRequestException('El nombre debe tener entre 1 y 120 caracteres.');
+    if (request?.base !== 'cash' && request?.base !== 'transfer') throw new BadRequestException('Selecciona Efectivo o Transferencia bancaria.');
+    const { items } = await this.paymentMethods(company);
+    if (items.some(item => item.name.trim().toLowerCase() === name.toLowerCase())) throw new ConflictException('Ya existe una forma de pago con ese nombre.');
+    const base = items.find(item => item.systemKey === request.base);
+    if (!base) throw new ServiceUnavailableException('El medio de pago no está disponible.');
+    try {
+      return await this.db.transaction(async manager => {
+        const [paymentMethod] = await manager.query<PayrollPaymentMethod[]>(
+          `INSERT INTO jarvis_payroll_payment_methods(id,company_id,name,system_key,nextpyme_method_id,nextpyme_method_name) VALUES($1,$2,$3,NULL,$4,$5) RETURNING ${payrollPaymentColumns}`,
+          [randomUUID(), company, name, base.nextpymeMethodId, base.nextpymeMethodName],
+        );
+        await this.audit(manager, company, actor, 'PAYMENT_METHOD_CREATED', paymentMethod.id);
+        return { paymentMethod };
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') throw new ConflictException('Ya existe una forma de pago con ese nombre.');
+      throw error;
+    }
+  }
+
+
   workerCatalogs(company: string) {
     return this.catalogs.getPayrollWorkerCatalogs(company);
   }
