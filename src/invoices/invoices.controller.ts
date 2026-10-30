@@ -124,6 +124,11 @@ export class InvoicesController {
     );
   }
 
+  @Post('purchase-invoices/import-cufe')
+  importPurchaseInvoiceByCufe(@CurrentUser() user: AuthenticatedUser, @Body() body: { cufe?: unknown }): Promise<StartPurchaseInvoiceImportResponseDto> {
+    return this.invoicesService.importPurchaseInvoiceByCufe(body?.cufe, getAuthenticatedCompanyId(user));
+  }
+
   @Get('purchase-invoices/import-jobs/:jobId/status')
   getPurchaseInvoiceImportJobStatus(
     @CurrentUser() user: AuthenticatedUser,

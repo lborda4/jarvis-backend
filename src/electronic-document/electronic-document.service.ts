@@ -377,6 +377,20 @@ export class ElectronicDocumentService {
     }
   }
 
+  async runExclusiveForPurchaseUpdate<T>(documentId: string, companyId: string, siigoId: string, fn: () => Promise<T>): Promise<T> {
+    if (this.documentCreationInFlight.has(documentId)) throw new ServiceUnavailableException('Hay otro envío de este documento en curso.');
+    const work = withPostgresAdvisoryLock(this.dataSource, `document-creation:${documentId}`, async () => {
+      const document = await this.requireById(documentId, companyId, IntegrationProvider.SIIGO);
+      if (document.electronicDocumentType !== ElectronicDocumentType.PURCHASE_INVOICE ||
+          document.status !== ElectronicDocumentStatus.PURCHASE_CREATED || document.alreadyInSiigo || document.siigoPurchaseId !== siigoId) {
+        throw new BadRequestException('La factura de compra enviada cambió. Actualiza el listado antes de editar.');
+      }
+      return fn();
+    });
+    this.documentCreationInFlight.set(documentId, work);
+    try { return await work; } finally { this.documentCreationInFlight.delete(documentId); }
+  }
+
   private async runClaimedDocumentCreation<T>(
     documentId: string,
     companyId: string | undefined,
@@ -553,10 +567,11 @@ export class ElectronicDocumentService {
     documentId: string,
     companyId: string,
     request: SaveElectronicDocumentDraftRequestDto,
+    confirmedPurchaseUpdate = false,
   ): Promise<SaveElectronicDocumentDraftResponseDto> {
     const document = await this.requireById(documentId, companyId);
 
-    if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED) {
+    if (document.status === ElectronicDocumentStatus.PURCHASE_CREATED && !(confirmedPurchaseUpdate && !document.alreadyInSiigo && document.electronicDocumentType === ElectronicDocumentType.PURCHASE_INVOICE)) {
       throw new BadRequestException(
         'No se puede editar un documento que ya se envió a SIIGO.',
       );

@@ -12,6 +12,7 @@ import type { ElectronicDocumentPayload } from '../../electronic-document/interf
 import * as XLSX from 'xlsx';
 
 export interface DianSalesInvoiceRow {
+  importSource?: 'CUFE';
   cufe: string;
   documentType: string;
   folio: string;

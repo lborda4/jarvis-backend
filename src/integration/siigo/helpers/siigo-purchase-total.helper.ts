@@ -1,3 +1,4 @@
+import { isImpoconsumoTaxType } from './siigo-item-tax-suggestion.helper';
 import { SiigoPurchaseItemDto } from '../dto/siigo-purchase-request.dto';
 import { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
 import { normalizeSiigoTaxType } from './siigo-support-document-retention.helper';
@@ -274,7 +275,12 @@ export function calculateSiigoDocumentRetentionTotal(
   for (const item of items) {
     const breakdown = calculateSiigoLineBreakdown(item, options, roundAmount);
     subtotal = roundAmount(subtotal + breakdown.baseValue);
-    taxTotal = roundAmount(taxTotal + breakdown.taxTotal);
+    const consumption = (item.taxes ?? []).reduce((sum, ref) => {
+      const tax = taxesById.get(ref.id);
+      return tax && isImpoconsumoTaxType(tax.type)
+        ? roundAmount(sum + roundAmount(breakdown.baseValue * tax.percentage / 100)) : sum;
+    }, 0);
+    taxTotal = roundAmount(taxTotal + Math.max(0, breakdown.taxTotal - consumption));
   }
 
   let retentionTotal = 0;

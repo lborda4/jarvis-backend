@@ -27,6 +27,7 @@ export class SiigoPurchaseRequestDto {
   tax_included?: boolean;
   document: { id: number };
   number?: number;
+  currency?: { code: string; exchange_rate?: number };
   date: string;
   supplier: {
     identification: string;

@@ -99,7 +99,9 @@ export class SiigoHttpClient {
     });
 
     if (!response || !Array.isArray(response.results)) {
-      throw new Error('SIIGO devolvió una respuesta de terceros sin results válido.');
+      throw new Error(
+        'SIIGO devolvió una respuesta de terceros sin results válido.',
+      );
     }
 
     this.logger.debug(
@@ -129,6 +131,40 @@ export class SiigoHttpClient {
     return this.request<SiigoPurchaseResponse>({
       method: 'POST',
       url: `${SIIGO_API_BASE_URL}${SIIGO_PURCHASES_PATH}`,
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+      data: payload,
+    });
+  }
+
+  async getPurchase(
+    accessToken: string,
+    id: string,
+    partnerId?: string,
+  ): Promise<SiigoPurchaseResponse> {
+    return this.request<SiigoPurchaseResponse>({
+      method: 'GET',
+      url:
+        SIIGO_API_BASE_URL +
+        SIIGO_PURCHASES_PATH +
+        '/' +
+        encodeURIComponent(id),
+      headers: this.buildAuthHeaders(accessToken, partnerId),
+    });
+  }
+
+  async updatePurchase(
+    accessToken: string,
+    id: string,
+    payload: SiigoPurchaseRequestDto,
+    partnerId?: string,
+  ): Promise<SiigoPurchaseResponse> {
+    return this.request<SiigoPurchaseResponse>({
+      method: 'PUT',
+      url:
+        SIIGO_API_BASE_URL +
+        SIIGO_PURCHASES_PATH +
+        '/' +
+        encodeURIComponent(id),
       headers: this.buildAuthHeaders(accessToken, partnerId),
       data: payload,
     });
@@ -193,7 +229,9 @@ export class SiigoHttpClient {
     type: string,
     partnerId?: string,
   ): Promise<SiigoDocumentType[]> {
-    const response = await this.request<SiigoDocumentType[] | { results?: SiigoDocumentType[] }>({
+    const response = await this.request<
+      SiigoDocumentType[] | { results?: SiigoDocumentType[] }
+    >({
       method: 'GET',
       url: `${SIIGO_API_BASE_URL}${SIIGO_DOCUMENT_TYPES_PATH}`,
       headers: this.buildAuthHeaders(accessToken, partnerId),

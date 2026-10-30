@@ -1,3 +1,5 @@
+import { isPayrollEmployeeActive } from './payroll-employee-status';
+import { payrollEmploymentDays } from './payroll-employment';
 import { payrollPaymentColumns, payrollPaymentPresets, payrollPaymentMaster, type PayrollPaymentMethod } from './payroll-payment-methods';
 import {
   BadRequestException,
@@ -121,7 +123,7 @@ export class PayrollService {
       employees: employees.map((e: any) => ({
         ...e.data,
         id: e.id,
-        active: e.active,
+        active: isPayrollEmployeeActive(e.data.retirementDate),
       })),
       positions,
       parameters,
@@ -222,8 +224,8 @@ export class PayrollService {
             id,
             company,
             data.identification,
-            JSON.stringify(data),
-            data.active !== false,
+            JSON.stringify({ ...data, active: isPayrollEmployeeActive(data.retirementDate) }),
+            isPayrollEmployeeActive(data.retirementDate),
           ],
         );
         if (!saved) throw new NotFoundException();
@@ -256,7 +258,21 @@ export class PayrollService {
       return saved;
     });
   }
-  async saveParameters(company: string, actor: string, data: any) {
+  async deletePosition(company: string, actor: string, id: string) {
+    return this.db.transaction(async (manager) => {
+      // Preserve the name and ID for employees and historical payroll records.
+      const [position] = await manager.query(
+        'UPDATE jarvis_payroll_positions SET active=false WHERE company_id=$1 AND id=$2 RETURNING id',
+        [company, id],
+      );
+      if (!position) throw new NotFoundException('El cargo no existe.');
+      await this.audit(manager, company, actor, 'POSITION_DELETED', id);
+      return { deleted: true };
+    });
+  }
+  async saveParameters(company: string, actor: string, data: any, replaceCurrent = false) {
+    // Los cambios de configuración rigen desde hoy; los documentos conservan su snapshot.
+    if (replaceCurrent) data = { ...data, validFrom: new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota' }).format(new Date()) };
     if (!validDate(data?.validFrom))
       throw new BadRequestException('Fecha de vigencia inválida.');
     for (const field of ['monthlyDays', 'monthlyHours', 'weeklyHours'])
@@ -313,12 +329,12 @@ export class PayrollService {
     const id = randomUUID();
     return this.db
       .transaction(async (m) => {
-        await m.query(
-          'INSERT INTO jarvis_payroll_parameters(id,company_id,valid_from,data) VALUES($1,$2,$3,$4)',
+        const [saved] = await m.query(
+          `INSERT INTO jarvis_payroll_parameters(id,company_id,valid_from,data) VALUES($1,$2,$3,$4) ${replaceCurrent ? 'ON CONFLICT(company_id,valid_from) DO UPDATE SET data=EXCLUDED.data' : ''} RETURNING id`,
           [id, company, data.validFrom, JSON.stringify(data)],
         );
-        await this.audit(m, company, actor, 'PARAMETERS_CREATED', id);
-        return { id };
+        await this.audit(m, company, actor, replaceCurrent ? 'PARAMETERS_SAVED' : 'PARAMETERS_CREATED', saved.id);
+        return { id: saved.id };
       })
       .catch((e) => {
         if (e.code === '23505')
@@ -372,9 +388,33 @@ export class PayrollService {
   }
   async list(company: string, period?: string) {
     return this.db.query(
-      `SELECT id, employee_id AS "employeeId", original_id AS "originalId", state, employee_snapshot AS employee, status, number, prefix, cune, accrued, deductions, net, updated_at AS "updatedAt" FROM jarvis_payroll_documents WHERE company_id=$1 AND ($2::text IS NULL OR state->>'period'=$2) ORDER BY state->>'startDate' DESC,created_at DESC LIMIT 1000`,
+      `SELECT id, employee_id AS "employeeId", original_id AS "originalId", state, employee_snapshot AS employee, status, number, prefix, cune, accrued, deductions, net, updated_at AS "updatedAt", (status='DRAFT' AND sent_at IS NULL AND number IS NULL AND cune IS NULL AND NOT EXISTS (SELECT 1 FROM jarvis_payroll_transmissions t WHERE t.company_id=$1 AND t.document_id=jarvis_payroll_documents.id)) AS "canDelete" FROM jarvis_payroll_documents WHERE company_id=$1 AND ($2::text IS NULL OR state->>'period'=$2) ORDER BY state->>'startDate' DESC,created_at DESC LIMIT 1000`,
       [company, period || null],
     );
+  }
+  async deleteDocument(company: string, actor: string, id: string) {
+    return this.db.transaction(async (manager) => {
+      // Serialize with send/save so deletion cannot race an outgoing document.
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `payroll:${company}`,
+      ]);
+      const [document] = await manager.query(
+        'SELECT * FROM jarvis_payroll_documents WHERE company_id=$1 AND id=$2 FOR UPDATE',
+        [company, id],
+      );
+      if (!document) throw new NotFoundException('La nómina no existe.');
+      if (document.status !== 'DRAFT' || document.sent_at || document.number != null || document.cune) {
+        throw new ConflictException('Solo puedes eliminar borradores que nunca se hayan enviado.');
+      }
+      const [transmission] = await manager.query(
+        'SELECT id FROM jarvis_payroll_transmissions WHERE company_id=$1 AND document_id=$2 LIMIT 1',
+        [company, id],
+      );
+      if (transmission) throw new ConflictException('Esta nómina tiene historial de envío y no se puede eliminar.');
+      await manager.query('DELETE FROM jarvis_payroll_documents WHERE company_id=$1 AND id=$2', [company, id]);
+      await this.audit(manager, company, actor, 'DOCUMENT_DELETED', id);
+      return { deleted: true };
+    });
   }
   async get(company: string, id: string) {
     const [document] = await this.db.query(
@@ -440,7 +480,7 @@ export class PayrollService {
       );
       if (
         employees.length !== request.employeeIds.length ||
-        employees.some((e: any) => !e.active)
+        employees.some((e: any) => !isPayrollEmployeeActive(e.data.retirementDate))
       )
         throw new BadRequestException(
           'Selecciona únicamente empleados activos de esta empresa.',
@@ -462,7 +502,7 @@ export class PayrollService {
         throw new BadRequestException(
           'Activa el concepto de salario básico en los parámetros del período.',
         );
-      const workedDays =
+      const periodWorkedDays =
         request.periodicity === 'MONTHLY'
           ? String(parameter.data.monthlyDays)
           : prorate(String(parameter.data.monthlyDays), '1', '2');
@@ -471,6 +511,11 @@ export class PayrollService {
       }).format(new Date());
       const documentIds: string[] = [];
       for (const employee of employees) {
+        const employment = payrollEmploymentDays({ startDate, endDate }, employee.data);
+        if (employment.days <= 0) throw new BadRequestException('El empleado no tiene días de vinculación en este período.');
+        const workedDays = employment.days === employment.periodDays
+          ? periodWorkedDays
+          : prorate(periodWorkedDays, String(employment.days), String(employment.periodDays));
         const documentId = randomUUID();
         const amount = prorate(
           String(employee.data.salary),
@@ -573,7 +618,7 @@ export class PayrollService {
         existing?.employee_id === state.employeeId
           ? existing.employee_snapshot
           : employee
-            ? { ...employee.data, active: employee.active }
+            ? { ...employee.data, active: isPayrollEmployeeActive(employee.data.retirementDate) }
             : null;
       const errors = validatePayroll(state, worker);
       if (errors.length) throw new BadRequestException(errors.join(' '));
@@ -654,7 +699,7 @@ export class PayrollService {
   async validate(company: string, id: string) {
     const d = await this.get(company, id);
     const { settings } = await this.bootstrap(company);
-    const errors = validatePayroll(d.state, d.employee_snapshot, true);
+    const errors = validatePayroll(d.state, { ...d.employee_snapshot, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
     if (!settings.enabled)
       errors.push('Habilita la transmisión en configuración de nómina.');
     return { errors, valid: errors.length === 0 };
@@ -704,12 +749,12 @@ export class PayrollService {
             'Sincroniza el ambiente de nómina con NextPyme antes de enviar.',
           );
         const [currentEmployee] = await m.query(
-          'SELECT active FROM jarvis_payroll_employees WHERE company_id=$1 AND id=$2',
+          'SELECT data,active FROM jarvis_payroll_employees WHERE company_id=$1 AND id=$2',
           [company, d.employee_id],
         );
-        if (!currentEmployee?.active)
+        if (!currentEmployee || !isPayrollEmployeeActive(currentEmployee.data?.retirementDate))
           throw new BadRequestException('El empleado está inactivo.');
-        const errors = validatePayroll(d.state, d.employee_snapshot, true);
+        const errors = validatePayroll(d.state, { ...d.employee_snapshot, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
         if (errors.length) throw new BadRequestException(errors.join(' '));
         const number = d.number ?? Number(s.next_number);
         if (!Number.isSafeInteger(Number(number)))
@@ -732,7 +777,7 @@ export class PayrollService {
         }
         const payload = buildPayrollPayload(
           d.state,
-          d.employee_snapshot,
+          { ...d.employee_snapshot, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) },
           Number(number),
           d.prefix ?? s.settings.prefix,
           predecessor,

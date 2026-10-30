@@ -1,3 +1,4 @@
+import { SaveElectronicDocumentDraftRequestDto } from '../../../electronic-document/dto/save-electronic-document-draft.dto';
 import { ElectronicDocumentResponseDto } from '../../../electronic-document/dto/electronic-document-response.dto';
 import {
   CreateSiigoSupportDocumentItemDto,
@@ -38,4 +39,8 @@ export class CreateSiigoPurchaseSendResponseDto {
     providerInvoiceNumber?: string;
   };
   document: ElectronicDocumentResponseDto;
+}
+
+export class UpdateSiigoPurchaseRequestDto extends CreateSiigoPurchaseSendRequestDto {
+  draft?: SaveElectronicDocumentDraftRequestDto;
 }

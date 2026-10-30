@@ -120,3 +120,22 @@ describe('creación conjunta de nómina', () => {
     ).rejects.toThrow('Empleado inválido');
   });
 });
+
+describe('ingresos parciales en nómina', () => {
+  it('liquida quince días a quien ingresa el 16 sin cambiar el período mensual', async () => {
+    const employees = [{ id: employeeIds[0], active: true, data: { salary: '2000000', admittanceDate: '2026-10-16' } }];
+    const { service, save } = build([], employees);
+    await service.createPeriod('company', 'actor', groupId, { ...request, periodicity: 'MONTHLY', employeeIds: [employeeIds[0]] });
+    expect(save.mock.calls[0][3]).toMatchObject({ startDate: '2026-10-01', endDate: '2026-10-31', workedDays: '15.00', lines: [{ quantity: '15.00', amount: '1000000.00' }] });
+  });
+  it('liquida únicamente seis días al ingresar el 10 en la primera quincena', async () => {
+    const { service, save } = build([], [{ id: employeeIds[0], active: true, data: { salary: '2000000', admittanceDate: '2026-10-10' } }]);
+    await service.createPeriod('company', 'actor', groupId, { ...request, employeeIds: [employeeIds[0]] });
+    expect(save.mock.calls[0][3]).toMatchObject({ workedDays: '6.00', lines: [{ quantity: '6.00', amount: '400000.00' }] });
+  });
+  it('rechaza empleados cuyo ingreso ocurre después del período', async () => {
+    const { service, save } = build([], [{ id: employeeIds[0], active: true, data: { salary: '2000000', admittanceDate: '2026-11-01' } }]);
+    await expect(service.createPeriod('company', 'actor', groupId, { ...request, employeeIds: [employeeIds[0]] })).rejects.toThrow('días de vinculación');
+    expect(save).not.toHaveBeenCalled();
+  });
+});

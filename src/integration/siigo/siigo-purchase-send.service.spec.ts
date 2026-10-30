@@ -41,7 +41,8 @@ describe('Envío de compra: los precios del formulario son base sin IVA', () => 
     expect(payload.items.map((item: any) => item.price)).toEqual(prices);
     expect(payload.items[5].taxes ?? []).toEqual([]);
     expect(payload.items[0].taxes).toEqual([{ id: 19 }]);
-    expect(payload.payments[0].value).toBe(378880);
+    // Base 332436.96 + IVA por línea 46443.02; conservar centavos, no redondear a pesos.
+    expect(payload.payments[0].value).toBe(378879.98);
     expect(request).toEqual(before);
   });
 });

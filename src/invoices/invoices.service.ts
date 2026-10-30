@@ -1,3 +1,4 @@
+import { emptyCufeImportRow, normalizePurchaseInvoiceCufe } from './helpers/purchase-invoice-cufe.helper';
 import {
   BadRequestException,
   ConflictException,
@@ -371,6 +372,18 @@ export class InvoicesService {
     );
 
     return { jobId: job.id, totalRows: rows.length };
+  }
+
+  async importPurchaseInvoiceByCufe(value: unknown, companyId: string): Promise<StartPurchaseInvoiceImportResponseDto> {
+    const cufe = normalizePurchaseInvoiceCufe(value);
+    const provider = await this.electronicDocumentService.resolveDocumentProvider(companyId, IntegrationProvider.SIIGO);
+    const job = await this.purchaseInvoiceImportJobsRepository.save(this.purchaseInvoiceImportJobsRepository.create({
+      companyId, provider, fileName: 'Factura por CUFE', totalRows: 1, status: PurchaseInvoiceImportJobStatus.PENDING,
+    }));
+    await this.purchaseInvoiceImportJobRowsRepository.saveMany([
+      this.purchaseInvoiceImportJobRowsRepository.create({ jobId: job.id, rowIndex: 1, cufe, issuerNit: '', issuerName: '', rawRow: emptyCufeImportRow(cufe) }),
+    ]);
+    return { jobId: job.id, totalRows: 1 };
   }
 
   async getPurchaseInvoiceImportJobStatus(

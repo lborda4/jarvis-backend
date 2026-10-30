@@ -176,6 +176,7 @@ function buildService(
 
   return {
     service,
+    companiesRepository,
     jobsRepository,
     jobRowsRepository,
     electronicDocumentService,
@@ -450,6 +451,34 @@ describe('idle import worker without queued Excel jobs', () => {
     } finally {
       service.onApplicationShutdown();
       jest.useRealTimers();
+    }
+  });
+});
+
+describe('CUFE usa el mismo pipeline de preparación del Excel',()=>{
+  it.each([false,true])('valida la empresa antes de preparar; receptor ajeno=%s',async foreign=>{
+    const cufe='a'.repeat(96);
+    const raw=buildRawRow({cufe,importSource:'CUFE',issuerNit:'',issuerName:''}); const row=buildJobRow({cufe,rawRow:raw});
+    const context=buildService({
+      jobRowsRepository:{countOutstandingByJob:jest.fn().mockResolvedValue(1),claimPendingBatch:jest.fn().mockResolvedValue([row])},
+      nextPymeApiClient:{getInvoiceByCufe:jest.fn().mockResolvedValue({outcome:'found',attempts:1,retryDelayMs:0,data:{
+        type_document_id:1,date:'2026-10-29',prefix:'FC',number:'10',seller:{identification_number:'900123456',name:'Proveedor'},
+        customer:{identification_number:foreign?'999999999':'800123456'},legal_monetary_totals:{line_extension_amount:100000,payable_amount:108000},
+        tax_totals:[{tax_code:'04',tax_amount:8000,percent:8}],invoice_lines:[{description:'Compra',invoiced_quantity:1,price_amount:100000,line_extension_amount:100000,tax_totals:[{tax_code:'04',tax_amount:8000,percent:8}]}],
+      }})},
+      electronicDocumentService:{createFromPurchaseInvoiceRows:jest.fn().mockResolvedValue({documentsCreated:1,documentsReused:0,itemsTotal:1,documentsSkippedByPlanLimit:0,rows:[{cufe,documentId:'doc',skippedByPlanLimit:false}]})},
+    });
+    context.companiesRepository.findById.mockResolvedValue({nit:'800123456',nextPymeToken:'token'} as never);
+    await (context.service as any).processOneBatchForJob(buildJob({provider:'SIIGO'}));
+    if(foreign){
+      expect(context.electronicDocumentService.createFromPurchaseInvoiceRows).not.toHaveBeenCalled();
+      expect(context.siigoDocumentPreparationService.prepareDocumentsInBackground).not.toHaveBeenCalled();
+      expect(row.errorMessage).toContain('empresa activa');
+    }else{
+      expect(context.electronicDocumentService.createFromPurchaseInvoiceRows).toHaveBeenCalledWith([expect.objectContaining({issuerNit:'900123456',issuerName:'Proveedor',payload:expect.objectContaining({taxes:[{type:'INC',amount:8000}]})})],'company-1','SIIGO');
+      expect(context.siigoDocumentPreparationService.prepareDocumentsInBackground).toHaveBeenCalledWith(['doc'],'company-1');
+      expect(context.siigoPurchaseAiClassificationService.classifyDocumentsInBackground).toHaveBeenCalledTimes(1);
+      expect(row.issuerName).toBe('Proveedor');
     }
   });
 });

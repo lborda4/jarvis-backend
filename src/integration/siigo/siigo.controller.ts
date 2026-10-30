@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Put,
+  BadRequestException,
   Query,
   UploadedFile,
   UseInterceptors,
@@ -94,6 +95,7 @@ import {
 } from './dto/save-siigo-credentials.dto';
 import { SiigoCredentialsStatusResponseDto } from './dto/siigo-credentials-status.dto';
 import {
+  UpdateSiigoPurchaseRequestDto,
   CreateSiigoPurchaseSendRequestDto,
   CreateSiigoPurchaseSendResponseDto,
 } from './dto/create-siigo-purchase-send.dto';
@@ -485,6 +487,23 @@ export class SiigoController {
     @Body() request: CreateSiigoPurchaseSendRequestDto,
   ): Promise<CreateSiigoPurchaseSendResponseDto> {
     return this.siigoPurchaseSendService.sendPurchase(
+      request,
+      getAuthenticatedCompanyId(user),
+    );
+  }
+
+  @Put('purchases/:documentId')
+  @ApiOperation({
+    summary: 'Actualizar una factura de compra existente en SIIGO',
+  })
+  updatePurchase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('documentId') documentId: string,
+    @Body() request: UpdateSiigoPurchaseRequestDto,
+  ): Promise<CreateSiigoPurchaseSendResponseDto> {
+    if (request.documentId !== documentId)
+      throw new BadRequestException('El documento no coincide con la ruta.');
+    return this.siigoPurchaseSendService.updatePurchase(
       request,
       getAuthenticatedCompanyId(user),
     );

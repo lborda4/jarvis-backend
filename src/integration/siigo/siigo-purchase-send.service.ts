@@ -1,3 +1,4 @@
+import { assertPurchaseConsumptionTax } from './helpers/siigo-purchase-consumption.helper';
 import {
   BadGatewayException,
   BadRequestException,
@@ -13,6 +14,7 @@ import { mapElectronicDocumentToResponse } from '../../electronic-document/mappe
 import { ElectronicDocumentService } from '../../electronic-document/electronic-document.service';
 import { CreateSiigoSupportDocumentRequestDto } from './dto/create-siigo-support-document.dto';
 import {
+  UpdateSiigoPurchaseRequestDto,
   CreateSiigoPurchaseSendRequestDto,
   CreateSiigoPurchaseSendResponseDto,
 } from './dto/create-siigo-purchase-send.dto';
@@ -22,9 +24,7 @@ import {
   extractSiigoCalculatedTotalFromApiError,
   isSiigoInvalidTotalPaymentsApiError,
 } from './helpers/siigo-error.helper';
-import {
-  applySiigoCorrectedPaymentsTotal,
-} from './helpers/siigo-purchase-total.helper';
+import { applySiigoCorrectedPaymentsTotal } from './helpers/siigo-purchase-total.helper';
 import { SIIGO_DOCUMENT_SEND_RETRY_OPTIONS } from './constants/siigo.constants';
 import { SiigoPurchaseRequestDto } from './dto/siigo-purchase-request.dto';
 import { SiigoPurchaseResponse } from './interfaces/siigo-api.interface';
@@ -68,7 +68,10 @@ export class SiigoPurchaseSendService {
     private readonly historialFacturasRepository: HistorialFacturasRepository,
   ) {}
 
-  async sendPurchase(request: CreateSiigoPurchaseSendRequestDto, companyId: string): Promise<CreateSiigoPurchaseSendResponseDto> {
+  async sendPurchase(
+    request: CreateSiigoPurchaseSendRequestDto,
+    companyId: string,
+  ): Promise<CreateSiigoPurchaseSendResponseDto> {
     await this.planSubscriptionService.withSiigoQuotaLock(companyId, () =>
       this.planSubscriptionService.assertCanCreateDocuments({
         companyId,
@@ -80,16 +83,47 @@ export class SiigoPurchaseSendService {
     return this.sendPurchaseWithQuota(request, companyId);
   }
 
+  async updatePurchase(
+    request: UpdateSiigoPurchaseRequestDto,
+    companyId: string,
+  ): Promise<CreateSiigoPurchaseSendResponseDto> {
+    const document = await this.electronicDocumentService.requireById(
+      request.documentId.trim(),
+      companyId,
+      IntegrationProvider.SIIGO,
+    );
+    if (
+      document.electronicDocumentType !==
+        ElectronicDocumentType.PURCHASE_INVOICE ||
+      document.status !== ElectronicDocumentStatus.PURCHASE_CREATED ||
+      !document.siigoPurchaseId ||
+      document.alreadyInSiigo
+    ) {
+      throw new BadRequestException(
+        'Solo se pueden actualizar facturas de compra enviadas desde JARVIS a SIIGO.',
+      );
+    }
+    const siigoId = document.siigoPurchaseId;
+    return this.electronicDocumentService.runExclusiveForPurchaseUpdate(
+      document.id,
+      companyId,
+      siigoId,
+      () => this.sendPurchaseWithQuota(request, companyId, siigoId),
+    );
+  }
+
   private async sendPurchaseWithQuota(
     request: CreateSiigoPurchaseSendRequestDto,
     companyId: string,
+    updatingSiigoId?: string,
   ): Promise<CreateSiigoPurchaseSendResponseDto> {
-    await this.planSubscriptionService.assertCanCreateDocuments({
-      companyId,
-      provider: IntegrationProvider.SIIGO,
-      documentType: ElectronicDocumentType.PURCHASE_INVOICE,
-      quantity: 1,
-    });
+    if (!updatingSiigoId)
+      await this.planSubscriptionService.assertCanCreateDocuments({
+        companyId,
+        provider: IntegrationProvider.SIIGO,
+        documentType: ElectronicDocumentType.PURCHASE_INVOICE,
+        quantity: 1,
+      });
 
     const documentId = request.documentId.trim();
     const electronicDocument = await this.electronicDocumentService.requireById(
@@ -108,15 +142,38 @@ export class SiigoPurchaseSendService {
     }
 
     if (
-      electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED
+      electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED &&
+      !updatingSiigoId
     ) {
       throw new BadRequestException(
         'La factura de compra ya fue creada en SIIGO para este registro.',
       );
     }
 
-    const purchaseConfig =
-      await this.siigoConfigurationCacheService.getPurchaseConfig(companyId);
+    const existingPurchase = updatingSiigoId
+      ? await this.siigoDocumentSendThrottleService.run(companyId, () =>
+          executeSiigoRequestWithRetries(
+            this.siigoAuthService,
+            companyId,
+            this.logger,
+            'consultar factura de compra',
+            (token, partner) =>
+              this.siigoHttpClient.getPurchase(token, updatingSiigoId, partner),
+          ),
+        )
+      : null;
+    if (
+      existingPurchase &&
+      existingPurchase.supplier.identification !==
+        request.supplier?.identification?.trim()
+    ) {
+      throw new BadRequestException(
+        'No se puede cambiar el proveedor de una factura enviada a SIIGO.',
+      );
+    }
+    const purchaseConfig = existingPurchase
+      ? { documentId: existingPurchase.document.id }
+      : await this.siigoConfigurationCacheService.getPurchaseConfig(companyId);
     const taxesCatalog = await this.siigoTaxesCatalogService.listTaxes(
       {},
       companyId,
@@ -130,6 +187,7 @@ export class SiigoPurchaseSendService {
     assertSendAccountCodesExistInCatalog(request.items, accountsCatalog);
 
     const payload = electronicDocument.payload;
+    assertPurchaseConsumptionTax(payload, request.items, taxesCatalog);
     // El formulario indica explícitamente si envía precios con IVA incluido.
     // Cada línea conserva su impuesto; no inferirlo con el total del documento.
     const siigoPayload = mapCreatePurchaseSendRequestToSiigo(
@@ -155,10 +213,21 @@ export class SiigoPurchaseSendService {
     }
 
     const siigoDocumentTypeId =
-      await this.siigoConfigurationCacheService.getPurchaseDocumentTypeId(
+      existingPurchase?.document.id ??
+      (await this.siigoConfigurationCacheService.getPurchaseDocumentTypeId(
         companyId,
-      );
-    siigoPayload.document.id = siigoDocumentTypeId;
+      ));
+    siigoPayload.document.id =
+      existingPurchase?.document.id ?? siigoDocumentTypeId;
+    if (existingPurchase) {
+      siigoPayload.number = existingPurchase.number;
+      siigoPayload.supplier = {
+        identification: existingPurchase.supplier.identification,
+        branch_office: existingPurchase.supplier.branch_office ?? 0,
+      };
+      if (existingPurchase.currency)
+        siigoPayload.currency = existingPurchase.currency;
+    }
 
     if (request.cost_center !== undefined) {
       siigoPayload.cost_center = request.cost_center;
@@ -175,82 +244,109 @@ export class SiigoPurchaseSendService {
       taxesCatalog,
     );
 
-    if (preferenceSnapshot) {
-      await this.siigoAccountMappingService.persistSupplierPreferenceSnapshot(
+    const persistPreferences = async () => {
+      if (preferenceSnapshot) {
+        await this.siigoAccountMappingService.persistSupplierPreferenceSnapshot(
+          electronicDocument,
+          companyId,
+          preferenceSnapshot,
+        );
+      }
+
+      // Se guarda siempre — la clasificación confirmada al enviar alimenta
+      // tanto la preferencia del proveedor (autocompletar la próxima factura)
+      // como el historial que usa la IA como ejemplo, sin depender de que el
+      // usuario recuerde marcar nada.
+      await persistSupplierPreferencesFromSendRequest(
+        this.siigoAccountMappingService,
+        request,
         electronicDocument,
         companyId,
-        preferenceSnapshot,
+        taxesCatalog,
+        this.logger,
       );
-    }
 
-    // Se guarda siempre — la clasificación confirmada al enviar alimenta
-    // tanto la preferencia del proveedor (autocompletar la próxima factura)
-    // como el historial que usa la IA como ejemplo, sin depender de que el
-    // usuario recuerde marcar nada.
-    await persistSupplierPreferencesFromSendRequest(
-      this.siigoAccountMappingService,
-      request,
-      electronicDocument,
-      companyId,
-      taxesCatalog,
-      this.logger,
-    );
-
-    const integration = await getSiigoIntegration(
-      this.integrationsRepository,
-      companyId,
-    );
-    await persistHistorialFacturaFromSendRequest(
-      this.historialFacturasRepository,
-      request,
-      electronicDocument,
-      companyId,
-      integration.id,
-      taxesCatalog,
-      this.logger,
-    );
+      const integration = await getSiigoIntegration(
+        this.integrationsRepository,
+        companyId,
+      );
+      await persistHistorialFacturaFromSendRequest(
+        this.historialFacturasRepository,
+        request,
+        electronicDocument,
+        companyId,
+        integration.id,
+        taxesCatalog,
+        this.logger,
+      );
+    };
+    if (!updatingSiigoId) await persistPreferences();
 
     try {
-      return await this.electronicDocumentService.runExclusiveForDocumentCreation(
-        documentId,
-        companyId,
-        async () => {
-          const createdPurchase = await this.createPurchaseInSiigo(
+      const performSend = async () => {
+        const createdPurchase = await this.createPurchaseInSiigo(
+          companyId,
+          siigoPayload,
+          false,
+          updatingSiigoId,
+        );
+        if (updatingSiigoId) await persistPreferences();
+        if (
+          updatingSiigoId &&
+          (request as UpdateSiigoPurchaseRequestDto).draft
+        ) {
+          await this.electronicDocumentService.saveDraft(
+            documentId,
             companyId,
-            siigoPayload,
+            (request as UpdateSiigoPurchaseRequestDto).draft!,
+            true,
+          );
+        }
+
+        const updatedDocument =
+          await this.electronicDocumentService.markPurchaseCreated(
+            documentId,
+            updatingSiigoId ?? createdPurchase.id,
+            companyId,
+            createdPurchase.number ?? null,
+            preferenceSnapshot
+              ? {
+                  ...(updatingSiigoId
+                    ? (
+                        await this.electronicDocumentService.requireById(
+                          documentId,
+                          companyId,
+                        )
+                      ).payload
+                    : electronicDocument.payload),
+                  siigoSendConfiguration: preferenceSnapshot,
+                }
+              : undefined,
           );
 
-          const updatedDocument =
-            await this.electronicDocumentService.markPurchaseCreated(
-              documentId,
-              createdPurchase.id,
-              companyId,
-              createdPurchase.number ?? null,
-              preferenceSnapshot
-                ? {
-                    ...electronicDocument.payload,
-                    siigoSendConfiguration: preferenceSnapshot,
-                  }
-                : undefined,
-            );
-
-          return {
-            success: true,
-            purchase: {
-              id: createdPurchase.id,
-              number: createdPurchase.number,
-              name: createdPurchase.name,
-              date: createdPurchase.date,
-              total: createdPurchase.total,
-              providerInvoicePrefix: createdPurchase.provider_invoice?.prefix,
-              providerInvoiceNumber: createdPurchase.provider_invoice?.number,
-            },
-            document: mapElectronicDocumentToResponse(updatedDocument),
-          };
-        },
-      );
+        return {
+          success: true,
+          purchase: {
+            id: createdPurchase.id,
+            number: createdPurchase.number,
+            name: createdPurchase.name,
+            date: createdPurchase.date,
+            total: createdPurchase.total,
+            providerInvoicePrefix: createdPurchase.provider_invoice?.prefix,
+            providerInvoiceNumber: createdPurchase.provider_invoice?.number,
+          },
+          document: mapElectronicDocumentToResponse(updatedDocument),
+        };
+      };
+      return updatingSiigoId
+        ? await performSend()
+        : await this.electronicDocumentService.runExclusiveForDocumentCreation(
+            documentId,
+            companyId,
+            performSend,
+          );
     } catch (error) {
-      if (!(error instanceof ServiceUnavailableException)) {
+      if (!updatingSiigoId && !(error instanceof ServiceUnavailableException)) {
         await this.electronicDocumentService.updateStatus(
           documentId,
           ElectronicDocumentStatus.PURCHASE_FAILED,
@@ -387,6 +483,7 @@ export class SiigoPurchaseSendService {
     companyId: string,
     siigoPayload: SiigoPurchaseRequestDto,
     alreadyRetriedWithCorrectedTotal = false,
+    updatingSiigoId?: string,
   ): Promise<SiigoPurchaseResponse> {
     try {
       return await this.siigoDocumentSendThrottleService.run(companyId, () =>
@@ -396,11 +493,18 @@ export class SiigoPurchaseSendService {
           this.logger,
           'crear factura de compra',
           async (accessToken, partnerId) =>
-            this.siigoHttpClient.createPurchase(
-              accessToken,
-              siigoPayload,
-              partnerId,
-            ),
+            updatingSiigoId
+              ? this.siigoHttpClient.updatePurchase(
+                  accessToken,
+                  updatingSiigoId,
+                  siigoPayload,
+                  partnerId,
+                )
+              : this.siigoHttpClient.createPurchase(
+                  accessToken,
+                  siigoPayload,
+                  partnerId,
+                ),
           SIIGO_DOCUMENT_SEND_RETRY_OPTIONS,
         ),
       );
@@ -430,7 +534,12 @@ export class SiigoPurchaseSendService {
         ),
       };
 
-      return this.createPurchaseInSiigo(companyId, correctedPayload, true);
+      return this.createPurchaseInSiigo(
+        companyId,
+        correctedPayload,
+        true,
+        updatingSiigoId,
+      );
     }
   }
 }
@@ -439,9 +548,7 @@ const GENERIC_ITEM_DESCRIPTION = 'Ítem importado';
 
 function applyPayloadItemDescriptions(
   siigoItems: SiigoPurchaseRequestDto['items'],
-  payloadItems:
-    | Array<{ descripcion?: string | null }>
-    | undefined,
+  payloadItems: Array<{ descripcion?: string | null }> | undefined,
 ): void {
   if (!payloadItems?.length) {
     return;

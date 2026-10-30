@@ -1,3 +1,4 @@
+import { purchaseHasConsumptionTax } from '../helpers/siigo-purchase-consumption.helper';
 import {
   BadGatewayException,
   BadRequestException,
@@ -79,6 +80,8 @@ export class SiigoPurchaseDocumentCreationHandler implements SiigoDocumentCreati
       electronicDocument.payload,
       purchaseConfig,
       {
+        taxesCatalog: purchaseHasConsumptionTax(electronicDocument.payload)
+          ? await this.siigoConfigurationCacheService.getTaxes(undefined, companyId) : undefined,
         defaultTaxRate: this.configService.get('siigo.defaultTaxRate', {
           infer: true,
         }),

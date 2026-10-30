@@ -1,6 +1,7 @@
 ﻿import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -58,6 +59,18 @@ export class PayrollController {
       data,
     );
   }
+  @Delete('positions/:id') deletePosition(
+    @CurrentUser() u: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.deletePosition(getAuthenticatedCompanyId(u), u.userId, id);
+  }
+  @Put('parameters') updateParameters(
+    @CurrentUser() u: AuthenticatedUser,
+    @Body() data: any,
+  ) {
+    return this.service.saveParameters(getAuthenticatedCompanyId(u), u.userId, data, true);
+  }
   @Post('parameters') parameters(
     @CurrentUser() u: AuthenticatedUser,
     @Body() data: any,
@@ -101,6 +114,12 @@ export class PayrollController {
       id,
       request,
     );
+  }
+  @Delete('documents/:id') remove(
+    @CurrentUser() u: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.deleteDocument(getAuthenticatedCompanyId(u), u.userId, id);
   }
   @Get('documents/:id') get(
     @CurrentUser() u: AuthenticatedUser,

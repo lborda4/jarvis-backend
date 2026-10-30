@@ -1,3 +1,4 @@
+import { resolveCufeImportRow } from '../helpers/purchase-invoice-cufe.helper';
 import {
   Injectable,
   Logger,
@@ -220,6 +221,7 @@ export class PurchaseInvoiceImportWorkerService
           return await this.buildPurchaseInvoicePayload(
             jobRow.rawRow as DianSalesInvoiceRow,
             nextPymeToken,
+            job.companyId,
           );
         } finally {
           nextPymeInFlight -= 1;
@@ -258,6 +260,10 @@ export class PurchaseInvoiceImportWorkerService
         jobRow.errorMessage = result.errorReason;
       } else {
         jobRow.status = PurchaseInvoiceImportRowStatus.SUCCESS;
+        if (jobRow.rawRow?.importSource === 'CUFE') {
+          jobRow.issuerNit = jobRow.rawRow.issuerNit;
+          jobRow.issuerName = jobRow.rawRow.issuerName;
+        }
         successfulRows.push({
           row: jobRow.rawRow as DianSalesInvoiceRow,
           payload: result.payload,
@@ -580,6 +586,7 @@ export class PurchaseInvoiceImportWorkerService
   private async buildPurchaseInvoicePayload(
     row: DianSalesInvoiceRow,
     nextPymeToken?: string,
+    companyId?: string,
   ): Promise<
     | {
         failed: false;
@@ -645,6 +652,15 @@ export class PurchaseInvoiceImportWorkerService
       lookup.data,
       row.cufe,
     );
+
+    if (row.importSource === 'CUFE') {
+      try {
+        const company = companyId ? await this.companiesRepository.findById(companyId) : null;
+        Object.assign(row, resolveCufeImportRow(lookup.data, payload, company?.nit));
+      } catch (error) {
+        return { failed: true, errorReason: error instanceof Error ? error.message : 'No se pudo validar la factura consultada.', nextPymeAttempts, nextPymeRetryDelayMs };
+      }
+    }
 
     if (!(payload.totals.total > 0)) {
       this.logger.warn(

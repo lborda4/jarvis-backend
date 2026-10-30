@@ -1,3 +1,7 @@
+import type { SiigoTaxCatalogItemDto } from '../dto/list-siigo-taxes.dto';
+import { resolveSuggestedConsumptionTaxForItem } from '../helpers/siigo-item-tax-suggestion.helper';
+import { purchaseHasConsumptionTax } from '../helpers/siigo-purchase-consumption.helper';
+import { calculateSiigoSupportDocumentPaymentValue, roundMoney } from '../helpers/siigo-purchase-total.helper';
 import { resolveItemAiSuggestion } from '../../../electronic-document/helpers/electronic-document-ai-suggestion.helper';
 import { BadRequestException } from '@nestjs/common';
 import { ElectronicDocumentPayload } from '../../../electronic-document/interfaces/electronic-document-payload.interface';
@@ -9,6 +13,7 @@ import { buildSiigoPurchasePayment } from '../helpers/siigo-purchase-total.helpe
 
 export interface SiigoPurchaseMappingOptions {
   defaultTaxRate?: number;
+  taxesCatalog?: SiigoTaxCatalogItemDto[];
 }
 
 export function mapElectronicDocumentToSiigoPurchase(
@@ -23,10 +28,17 @@ export function mapElectronicDocumentToSiigoPurchase(
   ).identification;
   const providerInvoice = parseProviderInvoiceNumber(payload.invoice.number);
 
+  const consumptionAmount = (payload.taxes ?? []).filter(tax => tax.type === 'INC').reduce((sum, tax) => sum + tax.amount, 0);
+  const documentConsumptionRate = !payload.items.some(item => item.consumptionTaxPercentage != null) && payload.totals.subtotal > 0
+    ? consumptionAmount / payload.totals.subtotal * 100 : undefined;
   const items = payload.items.map((item, index) => {
-    const itemTaxes = (item.ivaPercentage ?? 0) > 0
-      ? [{ id: config.defaultTaxId }]
-      : undefined;
+    const consumptionRate = item.consumptionTaxPercentage ?? documentConsumptionRate;
+    const consumption = (consumptionRate ?? 0) > 0 ? resolveSuggestedConsumptionTaxForItem(consumptionRate, options.taxesCatalog ?? []) : null;
+    if ((consumptionRate ?? 0) > 0 && !consumption) throw new BadRequestException('No se encontró el impoconsumo de la factura en el catálogo SIIGO. Sincroniza los impuestos antes de enviarla.');
+    const itemTaxes = [
+      ...((item.ivaPercentage ?? 0) > 0 ? [{ id: config.defaultTaxId }] : []),
+      ...(consumption ? [{ id: consumption.id }] : []),
+    ];
     const accountCode =
       item.accountMapping?.code?.trim() ||
       resolveItemAiSuggestion(payload, index)?.account?.code?.trim();
@@ -43,7 +55,7 @@ export function mapElectronicDocumentToSiigoPurchase(
       description: item.descripcion?.trim() || 'Ítem importado',
       quantity: item.cantidad > 0 ? item.cantidad : 1,
       price: item.valorUnitario > 0 ? item.valorUnitario : item.total,
-      ...(itemTaxes ? { taxes: itemTaxes } : {}),
+      ...(itemTaxes.length ? { taxes: itemTaxes } : {}),
     };
   });
 
@@ -59,12 +71,16 @@ export function mapElectronicDocumentToSiigoPurchase(
     observations: `CUFE: ${payload.invoice.cufe}`,
     items,
     payments: [
-      buildSiigoPurchasePayment(items, config.paymentTypeId, {
+      ...(purchaseHasConsumptionTax(payload) ? [{
+        id: config.paymentTypeId,
+        value: calculateSiigoSupportDocumentPaymentValue(items, options.taxesCatalog ?? [], { roundAmount: roundMoney }),
+        ...(payload.invoice.dueDate ? { due_date: payload.invoice.dueDate } : {}),
+      }] : [buildSiigoPurchasePayment(items, config.paymentTypeId, {
         subtotal: payload.totals.subtotal,
         taxAmount: payload.totals.iva,
         dueDate: payload.invoice.dueDate,
         envDefaultTaxRate: options.defaultTaxRate,
-      }),
+      }),]),
     ],
   };
 

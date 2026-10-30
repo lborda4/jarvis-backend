@@ -128,6 +128,7 @@ export interface SiigoPurchaseResponsePayment {
 }
 
 export interface SiigoPurchaseResponse {
+  currency?: { code: string; exchange_rate?: number };
   cost_center?: number | { id: number; code?: string; name?: string } | null;
   id: string;
   document: { id: number };

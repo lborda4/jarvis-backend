@@ -185,8 +185,8 @@ export function validatePayroll(
   }
   if (employee && employee.active === false && transmission)
     errors.push('El empleado está inactivo.');
-  if (employee && state.startDate < employee.admittanceDate)
-    errors.push('El período comienza antes del ingreso del empleado.');
+  if (employee && state.endDate < employee.admittanceDate)
+    errors.push('El período termina antes del ingreso del empleado.');
   if (
     transmission &&
     (!employee?.paymentMethodId ||
@@ -198,8 +198,8 @@ export function validatePayroll(
     errors.push(
       'El envío de segundos nombres y apellidos está pendiente de verificar en el esquema completo de NextPyme. Se conservan en el empleado.',
     );
-  if (employee?.retirementDate && state.endDate > employee.retirementDate)
-    errors.push('La nómina termina después del retiro del empleado.');
+  if (employee?.retirementDate && state.startDate > employee.retirementDate)
+    errors.push('El período comienza después del retiro del empleado.');
   return [...new Set(errors)];
 }
 export function buildPayrollPayload(

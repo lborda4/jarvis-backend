@@ -57,7 +57,7 @@ function build(overrides: any = {}) {
           next_number: '1',
         },
       ];
-    if (sql.startsWith('SELECT active FROM')) return [{ active: true }];
+    if (sql.startsWith('SELECT data,active FROM')) return [{ data: worker, active: true }];
     return [];
   });
   const db = {
@@ -252,5 +252,30 @@ describe('nómina: persistencia y transmisión', () => {
       'integración',
     );
     expect(api.payrollRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('estado del empleado según fecha de retiro', () => {
+  it('guarda activo al empleado sin retiro aunque llegue un indicador antiguo en false', async () => {
+    const { service, query } = build();
+    query.mockImplementation(async (sql: string) => sql.includes('INSERT INTO jarvis_payroll_employees') ? [{ id: 'employee-a' }] : []);
+    await service.saveEmployee(company, actor, 'employee-a', { ...worker, contractType: 'INDEFINITE', active: false });
+    const insert = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO jarvis_payroll_employees')) as any;
+    expect(insert[1][4]).toBe(true);
+    expect(JSON.parse(insert[1][3]).active).toBe(true);
+  });
+  it('guarda inactivo al empleado cuando su retiro ya pasó', async () => {
+    const { service, query } = build();
+    query.mockImplementation(async (sql: string) => sql.includes('INSERT INTO jarvis_payroll_employees') ? [{ id: 'employee-a' }] : []);
+    await service.saveEmployee(company, actor, 'employee-a', { ...worker, contractType: 'INDEFINITE', retirementDate: '2026-02-01', active: true });
+    const insert = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO jarvis_payroll_employees')) as any;
+    expect(insert[1][4]).toBe(false);
+    expect(JSON.parse(insert[1][3]).active).toBe(false);
+  });
+  it('corrige la lectura de registros sin retiro que tenían la marca antigua de inactivo', async () => {
+    const { service, query } = build();
+    query.mockImplementation(async (sql: string) => sql.startsWith('SELECT id, data, active FROM jarvis_payroll_employees') ? [{ id: 'employee-a', data: worker, active: false }] : []);
+    const result = await service.bootstrap(company);
+    expect(result.employees[0].active).toBe(true);
   });
 });
