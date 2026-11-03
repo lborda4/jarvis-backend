@@ -1,3 +1,4 @@
+import { extendPayrollNoveltyConcepts } from './payroll-novelty-concepts';
 import { isPayrollEmployeeActive } from './payroll-employee-status';
 import { payrollEmploymentDays } from './payroll-employment';
 import { payrollPaymentColumns, payrollPaymentPresets, payrollPaymentMaster, type PayrollPaymentMethod } from './payroll-payment-methods';
@@ -649,10 +650,18 @@ export class PayrollService {
       }
       const total = totals(state.lines);
       // Once edited, preserve parameters already captured for the document.
-      const snapshot =
+      let snapshot =
         existing?.parameter_snapshot ??
         original?.parameter_snapshot ??
         parameter.data;
+      // Los conceptos nuevos configurados se incorporan al borrador sin cambiar sus bases históricas.
+      if (!state.originalId && state.lines.some((line: any) => !snapshot.concepts?.some((concept: any) => concept.code === line.concept && concept.kind === line.kind))) {
+        const [configured] = await m.query(
+          "SELECT data FROM jarvis_payroll_parameters WHERE company_id=$1 AND valid_from <= (now() AT TIME ZONE 'America/Bogota')::date ORDER BY valid_from DESC LIMIT 1",
+          [company],
+        );
+        snapshot = extendPayrollNoveltyConcepts(snapshot, configured?.data, state.lines);
+      }
       state.lines = state.lines.map((line: any) => {
         const concept = snapshot.concepts?.find(
           (c: any) => c.code === line.concept && c.kind === line.kind,
@@ -670,7 +679,7 @@ export class PayrollService {
       });
       const [saved] = await m.query(
         `INSERT INTO jarvis_payroll_documents(id,company_id,employee_id,original_id,state,employee_snapshot,parameter_snapshot,accrued,deductions,net) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-        ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,employee_id=EXCLUDED.employee_id,employee_snapshot=EXCLUDED.employee_snapshot,accrued=EXCLUDED.accrued,deductions=EXCLUDED.deductions,net=EXCLUDED.net,status='DRAFT',cune=NULL,updated_at=now() WHERE jarvis_payroll_documents.company_id=EXCLUDED.company_id RETURNING id`,
+        ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,employee_id=EXCLUDED.employee_id,employee_snapshot=EXCLUDED.employee_snapshot,parameter_snapshot=EXCLUDED.parameter_snapshot,accrued=EXCLUDED.accrued,deductions=EXCLUDED.deductions,net=EXCLUDED.net,status='DRAFT',cune=NULL,updated_at=now() WHERE jarvis_payroll_documents.company_id=EXCLUDED.company_id RETURNING id`,
         [
           id,
           company,

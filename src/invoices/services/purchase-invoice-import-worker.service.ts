@@ -1,3 +1,5 @@
+import { SiigoPurchaseHistorySyncService } from '../../integration/siigo/siigo-purchase-history-sync.service';
+import { SiigoPurchaseSyncJobStatus } from '../../integration/enums/siigo-purchase-sync-job-status.enum';
 import { resolveCufeImportRow } from '../helpers/purchase-invoice-cufe.helper';
 import {
   Injectable,
@@ -74,6 +76,7 @@ export class PurchaseInvoiceImportWorkerService
     private readonly purchaseInvoiceImportJobRowsRepository: PurchaseInvoiceImportJobRowsRepository,
     private readonly purchaseInvoiceImportStatusService: PurchaseInvoiceImportStatusService,
     private readonly postgresNotifyService: PostgresNotifyService,
+    private readonly siigoPurchaseHistorySyncService: SiigoPurchaseHistorySyncService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -161,6 +164,8 @@ export class PurchaseInvoiceImportWorkerService
         status: PurchaseInvoiceImportJobStatus.RUNNING,
       });
     }
+
+    if (!(await this.isPurchaseHistoryReady(job))) return;
 
     const batchSize = this.configService.get(
       'purchaseInvoiceImport.batchSize',
@@ -458,6 +463,34 @@ export class PurchaseInvoiceImportWorkerService
     );
 
     await this.notifyBatchProgress(job, batch);
+  }
+
+  /** No reclama filas mientras SIIGO sincroniza: otros jobs pueden avanzar
+   * y los reinicios retoman la espera usando los estados persistidos. */
+  private async isPurchaseHistoryReady(job: PurchaseInvoiceImportJob): Promise<boolean> {
+    const provider = job.provider ?? await this.electronicDocumentService.resolveDocumentProvider(job.companyId);
+    if (provider !== IntegrationProvider.SIIGO || job.processedRows > 0) return true;
+    try {
+      const sync = await this.siigoPurchaseHistorySyncService.getLatestStatus(job.companyId);
+      if (sync?.status === SiigoPurchaseSyncJobStatus.RUNNING) return false;
+      const completedForImport = sync?.completedAt != null &&
+        sync.completedAt.getTime() >= job.startedAt.getTime();
+      if (completedForImport && sync?.status === SiigoPurchaseSyncJobStatus.COMPLETED) return true;
+      if (completedForImport && sync?.status === SiigoPurchaseSyncJobStatus.ERROR) {
+        throw new Error(sync.errorMessage || 'La sincronización de compras no se completó.');
+      }
+      await this.siigoPurchaseHistorySyncService.startSync(job.companyId);
+      return false;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Error al consultar SIIGO.';
+      await this.purchaseInvoiceImportJobsRepository.patch(job.id, {
+        status: PurchaseInvoiceImportJobStatus.ERROR,
+        errorMessage: 'No se pudo sincronizar las compras de SIIGO antes de importar. ' + reason + ' Vuelve a importar para reintentar.',
+        completedAt: new Date(),
+      });
+      await this.notifyCompleted(job.id, job.companyId);
+      return false;
+    }
   }
 
   private async finalizeJob(job: PurchaseInvoiceImportJob): Promise<void> {

@@ -39,7 +39,6 @@ import { SiigoDocumentSendThrottleService } from './siigo-document-send-throttle
 import { SiigoCatalogSyncService } from './siigo-catalog-sync.service';
 import { SiigoAiAccountSuggestionService } from './siigo-ai-account-suggestion.service';
 import { SiigoPurchaseHistorySyncService } from './siigo-purchase-history-sync.service';
-import { SiigoPurchaseHistoryAutoSyncService } from './siigo-purchase-history-auto-sync.service';
 import { SiigoPurchaseAiClassificationService } from './siigo-purchase-ai-classification.service';
 import { OpenRouterModule } from '../openrouter/openrouter.module';
 import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balance-history.service';
@@ -97,10 +96,10 @@ import { SiigoThirdPartyBalanceHistoryService } from './siigo-third-party-balanc
     SiigoAiAccountSuggestionService,
     SiigoThirdPartyBalanceHistoryService,
     SiigoPurchaseHistorySyncService,
-    SiigoPurchaseHistoryAutoSyncService,
     SiigoPurchaseAiClassificationService,
   ],
   exports: [
+    SiigoPurchaseHistorySyncService,
     SiigoValidationService,
     SiigoSupplierCreationService,
     SiigoAccountMappingService,

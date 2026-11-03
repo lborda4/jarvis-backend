@@ -42,6 +42,10 @@ import {
   SiigoTestBalanceReportResponse,
 } from '../interfaces/siigo-api.interface';
 
+export class SiigoHttpError extends Error {
+  constructor(public readonly status: number, message: string) { super(message); }
+}
+
 const LOG_BODY_PREVIEW_LIMIT = 2000;
 /** Sin este timeout, una petición que SIIGO deja "colgada" en vez de
  * responder rápido (lo que hace bajo su rate limit en vez de un 429
@@ -150,6 +154,20 @@ export class SiigoHttpClient {
         encodeURIComponent(id),
       headers: this.buildAuthHeaders(accessToken, partnerId),
     });
+  }
+
+  async findPurchase(accessToken: string, id: string, partnerId?: string): Promise<SiigoPurchaseResponse | null> {
+    try {
+      const purchase = await this.getPurchase(accessToken, id, partnerId);
+      if (!purchase || typeof purchase.id !== 'string' || purchase.id.toLowerCase() !== id.toLowerCase()) {
+        throw new Error('SIIGO devolvió una respuesta de compra inválida. Vuelve a consultar.');
+      }
+      return purchase;
+    }
+    catch (error) {
+      if (error instanceof SiigoHttpError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   async updatePurchase(
@@ -440,7 +458,7 @@ export class SiigoHttpClient {
             (requestPreview ? ` | body enviado=${requestPreview}` : ''),
         );
 
-        throw new Error(
+        throw new SiigoHttpError(response.status,
           `SIIGO respondió con estado ${response.status}: ${errorBody}`,
         );
       }

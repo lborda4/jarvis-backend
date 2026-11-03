@@ -492,6 +492,20 @@ export class SiigoController {
     );
   }
 
+  @Post('purchases/:documentId/refresh')
+  @ApiOperation({ summary: 'Consultar si la compra enviada desde JARVIS sigue en SIIGO' })
+  refreshPurchase(@CurrentUser() user: AuthenticatedUser, @Param('documentId') documentId: string) {
+    return this.siigoPurchaseSendService.refreshPurchase(documentId, getAuthenticatedCompanyId(user));
+  }
+
+  @Post('purchases/:documentId/resend')
+  @ApiOperation({ summary: 'Recrear una compra de JARVIS eliminada en SIIGO' })
+  resendPurchase(@CurrentUser() user: AuthenticatedUser, @Param('documentId') documentId: string,
+    @Body() request: UpdateSiigoPurchaseRequestDto): Promise<CreateSiigoPurchaseSendResponseDto> {
+    if (request.documentId !== documentId) throw new BadRequestException('El documento no coincide con la ruta.');
+    return this.siigoPurchaseSendService.resendPurchase(request, getAuthenticatedCompanyId(user));
+  }
+
   @Put('purchases/:documentId')
   @ApiOperation({
     summary: 'Actualizar una factura de compra existente en SIIGO',

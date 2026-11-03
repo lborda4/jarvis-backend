@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Header,
   HttpCode,
   HttpException,
@@ -11,17 +10,13 @@ import {
   Query,
   Param,
   Post,
-  Req,
   UseGuards,
 } from '@nestjs/common';
-import type { RawBodyRequest } from '@nestjs/common';
-import type { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { AdminGuard } from '../admin/guards/admin.guard';
 import { BoldCashRegistersService } from './bold-cash-registers.service';
 import { BoldPaymentsService } from './bold-payments.service';
 import { BoldTerminalsService } from './bold-terminals.service';
-import { BoldWebhookService } from './bold-webhook.service';
 import {
   BoldCashRegisterDto,
   ListBoldCashRegistersResponseDto,
@@ -42,7 +37,6 @@ export class BoldController {
     private readonly boldTerminalsService: BoldTerminalsService,
     private readonly boldCashRegistersService: BoldCashRegistersService,
     private readonly boldCheckoutService: BoldCheckoutService,
-    private readonly boldWebhookService: BoldWebhookService,
     private readonly paymentStatus: BoldPaymentStatusService,
   ) {}
 
@@ -95,42 +89,24 @@ export class BoldController {
   }
 
   /**
-   * Webhook de producción. Registrar en Panel Comercios → Integraciones
-   * → Webhooks. Firma con la llave secreta. Responde 200 enseguida
-   * (Bold espera máximo 2s; si no, reintenta hasta 5 veces).
+   * Webhook pausado: confirma recepción sin validar, registrar ni procesar
+   * el evento. Mantener la ruta evita errores mientras Bold siga enviándolo.
    */
   @Public()
   @Post('webhooks')
   @HttpCode(HttpStatus.OK)
-  receiveWebhook(
-    @Req() request: RawBodyRequest<Request>,
-    @Headers('x-bold-signature') signature: string | undefined,
-    @Body() body: unknown,
-  ) {
-    return this.boldWebhookService.receiveProduction({
-      rawBody: request.rawBody,
-      signature,
-      body,
-    });
+  receiveWebhook() {
+    return { received: true };
   }
 
   /**
-   * Webhook de pruebas de Bold (firma con llave vacía). Registrar en
-   * Panel Comercios → Integraciones → Webhooks → webhooks de prueba.
+   * Webhook de pruebas pausado con la misma confirmación sin procesamiento.
    */
   @Public()
   @Post('webhooks/test')
   @HttpCode(HttpStatus.OK)
-  receiveTestWebhook(
-    @Req() request: RawBodyRequest<Request>,
-    @Headers('x-bold-signature') signature: string | undefined,
-    @Body() body: unknown,
-  ) {
-    return this.boldWebhookService.receiveTest({
-      rawBody: request.rawBody,
-      signature,
-      body,
-    });
+  receiveTestWebhook() {
+    return { received: true };
   }
 
   /** Recepción pública de la extensión para la primera empresa integrada.

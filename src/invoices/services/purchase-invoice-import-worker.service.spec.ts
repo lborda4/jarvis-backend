@@ -1,3 +1,4 @@
+import { SiigoPurchaseSyncJobStatus } from '../../integration/enums/siigo-purchase-sync-job-status.enum';
 import { PurchaseInvoiceImportWorkerService } from './purchase-invoice-import-worker.service';
 import { PurchaseInvoiceImportJobStatus } from '../enums/purchase-invoice-import-job-status.enum';
 import { PurchaseInvoiceImportRowStatus } from '../enums/purchase-invoice-import-row-status.enum';
@@ -108,6 +109,7 @@ function buildService(
     jobsRepository?: Record<string, unknown>;
     electronicDocumentService?: Record<string, unknown>;
     nextPymeApiClient?: Record<string, unknown>;
+    historySync?: Record<string, unknown>;
   } = {},
 ) {
   const jobsRepository = {
@@ -160,6 +162,12 @@ function buildService(
     }),
   };
 
+  const historySync = {
+    getLatestStatus: jest.fn().mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.COMPLETED, completedAt: new Date(Date.now() + 60000) }),
+    startSync: jest.fn().mockResolvedValue({ jobId: 'sync-1' }),
+    ...overrides.historySync,
+  };
+
   const service = new PurchaseInvoiceImportWorkerService(
     configService as any,
     companiesRepository as any,
@@ -172,10 +180,12 @@ function buildService(
     jobRowsRepository as any,
     statusService as any,
     postgresNotifyService as any,
+    historySync as any,
   );
 
   return {
     service,
+    historySync,
     companiesRepository,
     jobsRepository,
     jobRowsRepository,
@@ -480,5 +490,59 @@ describe('CUFE usa el mismo pipeline de preparación del Excel',()=>{
       expect(context.siigoPurchaseAiClassificationService.classifyDocumentsInBackground).toHaveBeenCalledTimes(1);
       expect(row.issuerName).toBe('Proveedor');
     }
+  });
+});
+
+describe('sincronización de SIIGO previa a la importación Excel y CUFE', () => {
+  const queued = () => buildService({ jobRowsRepository: { countOutstandingByJob: jest.fn().mockResolvedValue(1) } });
+  it.each(['facturas.xlsx', 'Factura por CUFE'])('inicia sincronización antes de reclamar filas de %s', async fileName => {
+    const context = queued();
+    context.historySync.getLatestStatus.mockResolvedValue(null);
+    await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO', fileName }));
+    expect(context.historySync.startSync).toHaveBeenCalledWith('company-1');
+    expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
+    expect(context.nextPymeApiClient.getInvoiceByCufe).not.toHaveBeenCalled();
+  });
+  it('espera una sincronización en curso y retoma después de completarse', async () => {
+    const context = queued();
+    const job = buildJob({ provider: 'SIIGO' });
+    context.historySync.getLatestStatus.mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.RUNNING });
+    await (context.service as any).processOneBatchForJob(job);
+    expect(context.historySync.startSync).not.toHaveBeenCalled();
+    expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
+    context.historySync.getLatestStatus.mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.COMPLETED, completedAt: new Date(job.startedAt.getTime() + 1000) });
+    await (context.service as any).processOneBatchForJob(job);
+    expect(context.jobRowsRepository.claimPendingBatch).toHaveBeenCalledTimes(1);
+  });
+  it('no acepta un historial sincronizado antes de comenzar esta importación', async () => {
+    const context = queued();
+    context.historySync.getLatestStatus.mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.COMPLETED, completedAt: new Date(0) });
+    await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO' }));
+    expect(context.historySync.startSync).toHaveBeenCalledTimes(1);
+    expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
+  });
+  it('detiene la importación y notifica si falla el sync', async () => {
+    const context = queued();
+    context.historySync.getLatestStatus.mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.ERROR, completedAt: new Date(Date.now() + 60000), errorMessage: 'SIIGO no disponible' });
+    await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO' }));
+    expect(context.jobsRepository.patch).toHaveBeenCalledWith('job-1', expect.objectContaining({ status: PurchaseInvoiceImportJobStatus.ERROR, errorMessage: expect.stringContaining('SIIGO no disponible') }));
+    expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
+    expect(context.postgresNotifyService.publish).toHaveBeenCalledWith(expect.objectContaining({ event: 'completed' }));
+  });
+  it('no consulta SIIGO para importaciones JARVIS ni vuelve a sincronizar entre lotes', async () => {
+    const context = queued();
+    await (context.service as any).processOneBatchForJob(buildJob({ provider: 'JARVIS' }));
+    await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO', processedRows: 1 }));
+    expect(context.historySync.getLatestStatus).not.toHaveBeenCalled();
+    expect(context.historySync.startSync).not.toHaveBeenCalled();
+    expect(context.jobRowsRepository.claimPendingBatch).toHaveBeenCalledTimes(2);
+  });
+  it('notifica el error si no puede iniciar la sincronización', async () => {
+    const context = queued();
+    context.historySync.getLatestStatus.mockResolvedValue(null);
+    context.historySync.startSync.mockRejectedValue(new Error('Credenciales inválidas'));
+    await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO' }));
+    expect(context.jobsRepository.patch).toHaveBeenCalledWith('job-1', expect.objectContaining({ status: PurchaseInvoiceImportJobStatus.ERROR }));
+    expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
   });
 });

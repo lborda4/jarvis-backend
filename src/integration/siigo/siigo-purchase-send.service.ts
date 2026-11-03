@@ -112,10 +112,47 @@ export class SiigoPurchaseSendService {
     );
   }
 
+  private async requirePortalPurchase(documentId: string, companyId: string) {
+    const document = await this.electronicDocumentService.requireById(documentId.trim(), companyId, IntegrationProvider.SIIGO);
+    if (document.electronicDocumentType !== ElectronicDocumentType.PURCHASE_INVOICE ||
+        document.status !== ElectronicDocumentStatus.PURCHASE_CREATED || !document.siigoPurchaseId || document.alreadyInSiigo) {
+      throw new BadRequestException('Esta acción solo aplica a compras enviadas desde JARVIS a SIIGO.');
+    }
+    return document;
+  }
+
+  private findRemotePurchase(companyId: string, remoteId: string) {
+    return this.siigoDocumentSendThrottleService.run(companyId, () =>
+      executeSiigoRequestWithRetries(this.siigoAuthService, companyId, this.logger,
+        'consultar factura de compra', (token, partner) => this.siigoHttpClient.findPurchase(token, remoteId, partner)));
+  }
+
+  async refreshPurchase(documentId: string, companyId: string) {
+    const document = await this.requirePortalPurchase(documentId, companyId);
+    const purchase = await this.findRemotePurchase(companyId, document.siigoPurchaseId!);
+    return { exists: purchase !== null, siigoPurchaseId: document.siigoPurchaseId };
+  }
+
+  async resendPurchase(request: UpdateSiigoPurchaseRequestDto, companyId: string): Promise<CreateSiigoPurchaseSendResponseDto> {
+    const document = await this.requirePortalPurchase(request.documentId, companyId);
+    const remoteId = document.siigoPurchaseId!;
+    return this.electronicDocumentService.runExclusiveForPurchaseUpdate(document.id, companyId, remoteId, async () => {
+      // Se vuelve a verificar dentro del lock: el estado del navegador no autoriza crear duplicados.
+      if (await this.findRemotePurchase(companyId, remoteId)) {
+        throw new BadRequestException('La factura todavía existe en SIIGO. No se puede reenviar como una compra nueva.');
+      }
+      await this.planSubscriptionService.withSiigoQuotaLock(companyId, () =>
+        this.planSubscriptionService.assertCanCreateDocuments({ companyId, provider: IntegrationProvider.SIIGO,
+          documentType: ElectronicDocumentType.PURCHASE_INVOICE, quantity: 1 }));
+      return this.sendPurchaseWithQuota(request, companyId, undefined, remoteId);
+    });
+  }
+
   private async sendPurchaseWithQuota(
     request: CreateSiigoPurchaseSendRequestDto,
     companyId: string,
     updatingSiigoId?: string,
+    recreatingSiigoId?: string,
   ): Promise<CreateSiigoPurchaseSendResponseDto> {
     if (!updatingSiigoId)
       await this.planSubscriptionService.assertCanCreateDocuments({
@@ -143,7 +180,7 @@ export class SiigoPurchaseSendService {
 
     if (
       electronicDocument.status === ElectronicDocumentStatus.PURCHASE_CREATED &&
-      !updatingSiigoId
+      !updatingSiigoId && !recreatingSiigoId
     ) {
       throw new BadRequestException(
         'La factura de compra ya fue creada en SIIGO para este registro.',
@@ -280,7 +317,7 @@ export class SiigoPurchaseSendService {
         this.logger,
       );
     };
-    if (!updatingSiigoId) await persistPreferences();
+    if (!updatingSiigoId && !recreatingSiigoId) await persistPreferences();
 
     try {
       const performSend = async () => {
@@ -290,9 +327,9 @@ export class SiigoPurchaseSendService {
           false,
           updatingSiigoId,
         );
-        if (updatingSiigoId) await persistPreferences();
+        if (updatingSiigoId || recreatingSiigoId) await persistPreferences();
         if (
-          updatingSiigoId &&
+          (updatingSiigoId || recreatingSiigoId) &&
           (request as UpdateSiigoPurchaseRequestDto).draft
         ) {
           await this.electronicDocumentService.saveDraft(
@@ -338,7 +375,7 @@ export class SiigoPurchaseSendService {
           document: mapElectronicDocumentToResponse(updatedDocument),
         };
       };
-      return updatingSiigoId
+      return updatingSiigoId || recreatingSiigoId
         ? await performSend()
         : await this.electronicDocumentService.runExclusiveForDocumentCreation(
             documentId,
@@ -346,7 +383,7 @@ export class SiigoPurchaseSendService {
             performSend,
           );
     } catch (error) {
-      if (!updatingSiigoId && !(error instanceof ServiceUnavailableException)) {
+      if (!updatingSiigoId && !recreatingSiigoId && !(error instanceof ServiceUnavailableException)) {
         await this.electronicDocumentService.updateStatus(
           documentId,
           ElectronicDocumentStatus.PURCHASE_FAILED,

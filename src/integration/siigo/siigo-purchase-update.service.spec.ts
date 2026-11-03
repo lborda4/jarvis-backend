@@ -52,6 +52,7 @@ describe('Actualizar compras enviadas sin crear otra factura', () => {
     };
     const http = {
       getPurchase: jest.fn(async () => existing),
+      findPurchase: jest.fn<Promise<typeof existing | null>, []>(async () => existing),
       updatePurchase: jest.fn(async () => existing),
       createPurchase: jest.fn(),
     };
@@ -196,4 +197,61 @@ describe('Actualizar compras enviadas sin crear otra factura', () => {
       'SIIGO',
     );
   });
+  it('consulta el ID remoto para recargar sin modificar el registro', async () => {
+    const { service, http, documents } = setup();
+    expect(await service.refreshPurchase('local', 'company')).toEqual({ exists: true, siigoPurchaseId: 'remote' });
+    expect(http.findPurchase).toHaveBeenCalledWith('token', 'remote', 'partner');
+    expect(documents.markPurchaseCreated).not.toHaveBeenCalled();
+  });
+  it('informa ausente únicamente si la consulta confirma que no existe', async () => {
+    const { service, http } = setup();
+    http.findPurchase.mockResolvedValue(null);
+    expect((await service.refreshPurchase('local', 'company')).exists).toBe(false);
+    http.findPurchase.mockRejectedValue(new Error('Conexión fallida'));
+    await expect(service.refreshPurchase('local', 'company')).rejects.toThrow('Conexión fallida');
+  });
+  it('bloquea recarga y reenvío para compras creadas directamente en SIIGO', async () => {
+    const { service, document, http, request } = setup();
+    document.alreadyInSiigo = true;
+    await expect(service.refreshPurchase('local', 'company')).rejects.toThrow('solo aplica');
+    await expect(service.resendPurchase(request, 'company')).rejects.toThrow('solo aplica');
+    expect(http.findPurchase).not.toHaveBeenCalled();
+    expect(http.createPurchase).not.toHaveBeenCalled();
+  });
+  it('vuelve a consultar y rechaza recrear si el ID aún existe', async () => {
+    const { service, request, http, documents } = setup();
+    await expect(service.resendPurchase(request, 'company')).rejects.toThrow('todavía existe');
+    expect(documents.runExclusiveForPurchaseUpdate).toHaveBeenCalled();
+    expect(http.createPurchase).not.toHaveBeenCalled();
+  });
+  it('crea una compra nueva y reemplaza el ID local después de confirmar el éxito', async () => {
+    const { service, request, http, documents, existing, config, plans } = setup();
+    http.findPurchase.mockResolvedValue(null);
+    http.createPurchase.mockResolvedValue({ ...existing, id: 'new-remote', number: 124 });
+    config.getPurchaseConfig.mockResolvedValue({ documentId: 81 });
+    await service.resendPurchase(request, 'company');
+    expect(http.createPurchase).toHaveBeenCalledTimes(1);
+    expect(http.updatePurchase).not.toHaveBeenCalled();
+    expect(documents.markPurchaseCreated).toHaveBeenCalledWith('local', 'new-remote', 'company', 124, undefined);
+    expect(plans.assertCanCreateDocuments).toHaveBeenCalled();
+    expect(documents.runExclusiveForDocumentCreation).not.toHaveBeenCalled();
+    expect(documents.saveDraft).toHaveBeenCalledWith('local', 'company', request.draft, true);
+  });
+  it('conserva el ID original y el estado enviado si falla la creación nueva', async () => {
+    const { service, request, http, documents, config, document } = setup();
+    http.findPurchase.mockResolvedValue(null);
+    config.getPurchaseConfig.mockResolvedValue({ documentId: 81 });
+    http.createPurchase.mockRejectedValue(new BadGatewayException('SIIGO caído'));
+    await expect(service.resendPurchase(request, 'company')).rejects.toThrow('SIIGO caído');
+    expect(document.siigoPurchaseId).toBe('remote');
+    expect(documents.updateStatus).not.toHaveBeenCalled();
+    expect(documents.markPurchaseCreated).not.toHaveBeenCalled();
+  });
+  it('no crea otra compra si la verificación previa falla', async () => {
+    const { service, request, http } = setup();
+    http.findPurchase.mockRejectedValue(new BadGatewayException('503'));
+    await expect(service.resendPurchase(request, 'company')).rejects.toThrow('503');
+    expect(http.createPurchase).not.toHaveBeenCalled();
+  });
+
 });
