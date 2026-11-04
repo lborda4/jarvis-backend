@@ -139,31 +139,6 @@ export class PurchaseInvoiceImportJobRowsRepository {
     });
   }
 
-  /** Barrido global (no por job): filas que quedaron 'processing' porque el
-   * worker que las reclamó murió antes de terminar — vuelven a 'pending'
-   * para que cualquier worker las retome. */
-  async recoverAbandonedRows(timeoutMinutes: number): Promise<number> {
-    const result = await this.repository
-      .createQueryBuilder()
-      .update(PurchaseInvoiceImportJobRow)
-      .set({
-        status: PurchaseInvoiceImportRowStatus.PENDING,
-        processingAt: null,
-      })
-      .where('status = :status', {
-        status: PurchaseInvoiceImportRowStatus.PROCESSING,
-      })
-      .andWhere(
-        'processing_at < now() - make_interval(mins => :timeoutMinutes)',
-        {
-          timeoutMinutes,
-        },
-      )
-      .execute();
-
-    return result.affected ?? 0;
-  }
-
   /** Filas que todavía no llegaron a un estado final ('pending' o
    * 'processing') — mientras sea > 0, el job no puede darse por terminado. */
   countOutstandingByJob(jobId: string): Promise<number> {

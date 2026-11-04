@@ -1,7 +1,6 @@
 import {
   Injectable,
   Logger,
-  OnApplicationBootstrap,
   OnApplicationShutdown,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -12,8 +11,6 @@ import {
   PURCHASE_INVOICE_IMPORT_NOTIFY_CHANNEL,
   PurchaseInvoiceImportNotifyEvent,
 } from './interfaces/purchase-invoice-import-notify-event.interface';
-
-const RECONNECT_DELAY_MS = 3000;
 
 /**
  * Lado "listener" del puente Postgres LISTEN/NOTIFY. API y worker corren en
@@ -31,21 +28,29 @@ const RECONNECT_DELAY_MS = 3000;
  */
 @Injectable()
 export class PurchaseInvoiceImportNotifyListenerService
-  implements OnApplicationBootstrap, OnApplicationShutdown
+  implements OnApplicationShutdown
 {
   private readonly logger = new Logger(
     PurchaseInvoiceImportNotifyListenerService.name,
   );
   private client: Client | null = null;
   private stopped = false;
+  private connecting: Promise<void> | null = null;
 
   constructor(
     private readonly configService: ConfigService<AppConfiguration, true>,
     private readonly gateway: PurchaseInvoiceImportGateway,
-  ) {}
+  ) {
+    this.gateway.beforeSubscribe = () => this.ensureConnected();
+  }
 
-  async onApplicationBootstrap(): Promise<void> {
-    await this.connect();
+  /** Conecta al suscribirse un usuario, nunca por un temporizador. */
+  ensureConnected(): Promise<void> {
+    if (this.client || this.stopped) return Promise.resolve();
+    if (!this.connecting) {
+      this.connecting = this.connect().finally(() => { this.connecting = null; });
+    }
+    return this.connecting;
   }
 
   onApplicationShutdown(): void {
@@ -66,15 +71,23 @@ export class PurchaseInvoiceImportNotifyListenerService
     });
 
     client.on('notification', (message) => this.handleNotification(message));
+    client.on('end', () => {
+      if (this.client === client) this.client = null;
+    });
     client.on('error', (error) => {
       this.logger.warn(
-        `Conexión de LISTEN interrumpida: ${error.message}. Reintentando en ${RECONNECT_DELAY_MS}ms.`,
+        `Conexión de LISTEN interrumpida: ${error.message}. Se reconectará en la próxima suscripción.`,
       );
-      this.scheduleReconnect();
+      if (this.client === client) this.client = null;
+      void client.end().catch(() => undefined);
     });
 
     try {
       await client.connect();
+      if (this.stopped) {
+        await client.end();
+        return;
+      }
       await client.query(`LISTEN ${PURCHASE_INVOICE_IMPORT_NOTIFY_CHANNEL}`);
       this.client = client;
       this.logger.log(
@@ -84,15 +97,10 @@ export class PurchaseInvoiceImportNotifyListenerService
       this.logger.warn(
         `No se pudo conectar para LISTEN: ${
           error instanceof Error ? error.message : String(error)
-        }. Reintentando en ${RECONNECT_DELAY_MS}ms.`,
+        }. Se podrá reintentar en la próxima suscripción.`,
       );
-      this.scheduleReconnect();
+      void client.end().catch(() => undefined);
     }
-  }
-
-  private scheduleReconnect(): void {
-    this.client = null;
-    setTimeout(() => void this.connect(), RECONNECT_DELAY_MS).unref();
   }
 
   private handleNotification(message: { payload?: string }): void {

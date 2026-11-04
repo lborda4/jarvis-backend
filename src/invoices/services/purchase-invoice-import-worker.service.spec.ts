@@ -155,8 +155,6 @@ function buildService(
       const values: Record<string, unknown> = {
         'purchaseInvoiceImport.batchSize': 20,
         'purchaseInvoiceImport.concurrency': 4,
-        'purchaseInvoiceImport.processingTimeoutMinutes': 10,
-        'purchaseInvoiceImport.workerPollIntervalMs': 2000,
       };
       return values[key];
     }),
@@ -164,7 +162,7 @@ function buildService(
 
   const historySync = {
     getLatestStatus: jest.fn().mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.COMPLETED, completedAt: new Date(Date.now() + 60000) }),
-    startSync: jest.fn().mockResolvedValue({ jobId: 'sync-1' }),
+    syncAndWait: jest.fn().mockResolvedValue(undefined),
     ...overrides.historySync,
   };
 
@@ -444,24 +442,34 @@ describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, ví
   });
 });
 
-describe('idle import worker without queued Excel jobs', () => {
-  it('does not read historical documents or call NextPyme/AI while idle', async () => {
+describe('importador sin temporizadores', () => {
+  it('no programa trabajo ni consulta la base estando inactivo', async () => {
     jest.useFakeTimers();
-    const { service, electronicDocumentService, nextPymeApiClient, siigoPurchaseAiClassificationService } = buildService({
-      jobsRepository: { findPendingOrRunning: jest.fn().mockResolvedValue([]) },
-      jobRowsRepository: { recoverAbandonedRows: jest.fn().mockResolvedValue(0) },
-    });
     try {
-      service.onApplicationBootstrap();
-      await jest.advanceTimersByTimeAsync(60000);
-      expect(electronicDocumentService.createFromPurchaseInvoiceRows).not.toHaveBeenCalled();
-      expect(electronicDocumentService.resolveDocumentProvider).not.toHaveBeenCalled();
-      expect(nextPymeApiClient.getInvoiceByCufe).not.toHaveBeenCalled();
-      expect(siigoPurchaseAiClassificationService.classifyDocumentsInBackground).not.toHaveBeenCalled();
-    } finally {
-      service.onApplicationShutdown();
-      jest.useRealTimers();
-    }
+      const context = buildService();
+      await jest.advanceTimersByTimeAsync(600000);
+      expect(jest.getTimerCount()).toBe(0);
+      expect(context.jobsRepository.findById).not.toHaveBeenCalled();
+      expect(context.jobRowsRepository.countOutstandingByJob).not.toHaveBeenCalled();
+    } finally { jest.useRealTimers(); }
+  });
+  it('procesa los lotes del job solicitado y deduplica solicitudes simultaneas', async () => {
+    const context = buildService({ jobsRepository: { findById: jest.fn().mockResolvedValue(buildJob({ provider: 'JARVIS' })) } });
+    const batch = jest.spyOn(context.service as any, 'processOneBatchForJob')
+      .mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const first = context.service.start('job-1');
+    expect(context.service.start('job-1')).toBe(first);
+    await first;
+    expect(batch).toHaveBeenCalledTimes(3);
+    expect(context.jobsRepository.findById).toHaveBeenCalledTimes(3);
+    expect(context.service.isRunning('job-1')).toBe(false);
+  });
+  it('guarda el error sin reprogramar consultas cuando falla un lote', async () => {
+    const context = buildService({ jobsRepository: { findById: jest.fn().mockResolvedValue(buildJob()) } });
+    jest.spyOn(context.service as any, 'processOneBatchForJob').mockRejectedValue(new Error('fallo'));
+    await context.service.start('job-1');
+    expect(context.jobsRepository.patch).toHaveBeenCalledWith('job-1', expect.objectContaining({ status: PurchaseInvoiceImportJobStatus.ERROR }));
+    expect(context.service.isRunning('job-1')).toBe(false);
   });
 });
 
@@ -499,27 +507,31 @@ describe('sincronización de SIIGO previa a la importación Excel y CUFE', () =>
     const context = queued();
     context.historySync.getLatestStatus.mockResolvedValue(null);
     await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO', fileName }));
-    expect(context.historySync.startSync).toHaveBeenCalledWith('company-1');
-    expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
+    expect(context.historySync.syncAndWait).toHaveBeenCalledWith('company-1');
+    expect(context.jobRowsRepository.claimPendingBatch).toHaveBeenCalledTimes(1);
     expect(context.nextPymeApiClient.getInvoiceByCufe).not.toHaveBeenCalled();
   });
-  it('espera una sincronización en curso y retoma después de completarse', async () => {
+  it('espera el sync sin reclamar filas ni consultar repetidamente', async () => {
     const context = queued();
     const job = buildJob({ provider: 'SIIGO' });
     context.historySync.getLatestStatus.mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.RUNNING });
-    await (context.service as any).processOneBatchForJob(job);
-    expect(context.historySync.startSync).not.toHaveBeenCalled();
+    let complete!: () => void;
+    context.historySync.syncAndWait.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+    const processing = (context.service as any).processOneBatchForJob(job);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(context.historySync.syncAndWait).toHaveBeenCalledTimes(1);
     expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
-    context.historySync.getLatestStatus.mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.COMPLETED, completedAt: new Date(job.startedAt.getTime() + 1000) });
-    await (context.service as any).processOneBatchForJob(job);
+    expect(context.historySync.getLatestStatus).toHaveBeenCalledTimes(1);
+    complete();
+    await processing;
     expect(context.jobRowsRepository.claimPendingBatch).toHaveBeenCalledTimes(1);
   });
   it('no acepta un historial sincronizado antes de comenzar esta importación', async () => {
     const context = queued();
     context.historySync.getLatestStatus.mockResolvedValue({ status: SiigoPurchaseSyncJobStatus.COMPLETED, completedAt: new Date(0) });
     await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO' }));
-    expect(context.historySync.startSync).toHaveBeenCalledTimes(1);
-    expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
+    expect(context.historySync.syncAndWait).toHaveBeenCalledTimes(1);
+    expect(context.jobRowsRepository.claimPendingBatch).toHaveBeenCalledTimes(1);
   });
   it('detiene la importación y notifica si falla el sync', async () => {
     const context = queued();
@@ -534,13 +546,13 @@ describe('sincronización de SIIGO previa a la importación Excel y CUFE', () =>
     await (context.service as any).processOneBatchForJob(buildJob({ provider: 'JARVIS' }));
     await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO', processedRows: 1 }));
     expect(context.historySync.getLatestStatus).not.toHaveBeenCalled();
-    expect(context.historySync.startSync).not.toHaveBeenCalled();
+    expect(context.historySync.syncAndWait).not.toHaveBeenCalled();
     expect(context.jobRowsRepository.claimPendingBatch).toHaveBeenCalledTimes(2);
   });
   it('notifica el error si no puede iniciar la sincronización', async () => {
     const context = queued();
     context.historySync.getLatestStatus.mockResolvedValue(null);
-    context.historySync.startSync.mockRejectedValue(new Error('Credenciales inválidas'));
+    context.historySync.syncAndWait.mockRejectedValue(new Error('Credenciales inválidas'));
     await (context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO' }));
     expect(context.jobsRepository.patch).toHaveBeenCalledWith('job-1', expect.objectContaining({ status: PurchaseInvoiceImportJobStatus.ERROR }));
     expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();

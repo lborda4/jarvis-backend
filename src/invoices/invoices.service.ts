@@ -1,3 +1,4 @@
+import { PurchaseInvoiceImportWorkerService } from './services/purchase-invoice-import-worker.service';
 import { emptyCufeImportRow, normalizePurchaseInvoiceCufe } from './helpers/purchase-invoice-cufe.helper';
 import {
   BadRequestException,
@@ -79,6 +80,7 @@ export class InvoicesService {
     private readonly purchaseInvoiceImportStatusService: PurchaseInvoiceImportStatusService,
     private readonly siigoCostCentersCatalogService: SiigoCostCentersCatalogService,
     private readonly siigoAccountsCatalogService: SiigoAccountsCatalogService,
+    private readonly purchaseInvoiceImportWorkerService: PurchaseInvoiceImportWorkerService,
   ) {}
 
   /**
@@ -353,11 +355,7 @@ export class InvoicesService {
       return { jobId: job.id, totalRows: rows.length };
     }
 
-    // TOLERANCIA A FALLOS: se insertan TODAS las filas como "pending",
-    // incluyendo la fila original completa (rawRow) — la tabla misma actúa
-    // de cola (ver PurchaseInvoiceImportWorkerService), sin depender de
-    // encolar nada explícitamente: el worker descubre este job solo en su
-    // próximo tick de polling.
+    // Disparar el procesamiento después de persistir todas las filas.
     await this.purchaseInvoiceImportJobRowsRepository.saveMany(
       rows.map((row, index) =>
         this.purchaseInvoiceImportJobRowsRepository.create({
@@ -371,6 +369,7 @@ export class InvoicesService {
       ),
     );
 
+    void this.purchaseInvoiceImportWorkerService.start(job.id);
     return { jobId: job.id, totalRows: rows.length };
   }
 
@@ -383,6 +382,7 @@ export class InvoicesService {
     await this.purchaseInvoiceImportJobRowsRepository.saveMany([
       this.purchaseInvoiceImportJobRowsRepository.create({ jobId: job.id, rowIndex: 1, cufe, issuerNit: '', issuerName: '', rawRow: emptyCufeImportRow(cufe) }),
     ]);
+    void this.purchaseInvoiceImportWorkerService.start(job.id);
     return { jobId: job.id, totalRows: 1 };
   }
 
@@ -401,7 +401,7 @@ export class InvoicesService {
 
   /**
    * Vuelve a 'pending' solo las filas 'failed' de un job ya terminado
-   * (conservan su rawRow) — el worker las recoge solas en su próximo tick,
+   * (conservan su rawRow) y dispara el procesamiento explícitamente,
    * como si fueran las únicas pendientes, sin tocar las que ya están
    * 'success'.
    */
@@ -438,6 +438,7 @@ export class InvoicesService {
       completedAt: null,
     });
 
+    void this.purchaseInvoiceImportWorkerService.start(jobId);
     return this.purchaseInvoiceImportStatusService.getStatus(jobId, companyId);
   }
 

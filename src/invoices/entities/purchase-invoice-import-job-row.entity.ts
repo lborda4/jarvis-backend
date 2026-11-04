@@ -70,10 +70,7 @@ export class PurchaseInvoiceImportJobRow {
   @Column({ name: 'processed_at', type: 'timestamptz', nullable: true })
   processedAt: Date | null;
 
-  /** Cuándo un worker marcó esta fila 'processing' — si pasa
-   * PURCHASE_INVOICE_PROCESSING_TIMEOUT_MINUTES sin resolverse (worker
-   * caído a mitad de proceso), se considera abandonada y vuelve a
-   * 'pending' (ver recoverAbandonedRows). */
+  /** Momento en que el worker reclamó esta fila, para diagnóstico. */
   @Column({ name: 'processing_at', type: 'timestamptz', nullable: true })
   processingAt: Date | null;
 

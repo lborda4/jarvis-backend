@@ -4,7 +4,6 @@ import { resolveCufeImportRow } from '../helpers/purchase-invoice-cufe.helper';
 import {
   Injectable,
   Logger,
-  OnApplicationBootstrap,
   OnApplicationShutdown,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -32,32 +31,14 @@ import { PurchaseInvoiceImportJobsRepository } from '../repositories/purchase-in
 import { PurchaseInvoiceImportJobRowsRepository } from '../repositories/purchase-invoice-import-job-rows.repository';
 import { PurchaseInvoiceImportStatusService } from './purchase-invoice-import-status.service';
 
-/**
- * Reemplaza el processor de BullMQ: la tabla `purchase_invoice_import_job_rows`
- * ES la cola (ver claimPendingBatch, con FOR UPDATE SKIP LOCKED). Loop de
- * polling propio en vez de un event loop de cola externa — se reprograma a
- * sí mismo con setTimeout después de cada tick, nunca se queda esperando
- * bloqueado ni quema CPU cuando no hay trabajo.
- *
- * Corre dentro del mismo proceso Nest que la API (registrado en
- * InvoicesModule, arranca solo vía OnApplicationBootstrap) — `npm run
- * start`/`start:dev` levanta API + procesamiento en background sin nada
- * aparte. No llama directo al gateway de WebSocket: publica por
- * PostgresNotifyService (Postgres LISTEN/NOTIFY), que
- * PurchaseInvoiceImportNotifyListenerService reenvía al gateway. Esto sigue
- * haciendo falta aun en un solo proceso porque si la app escala a varias
- * instancias (cada una con su propio worker in-process), el lote que
- * procesa la instancia A puede necesitar avisarle a un cliente conectado
- * por WebSocket a la instancia B — SKIP LOCKED en claimPendingBatch
- * garantiza que esas instancias nunca procesen la misma fila dos veces.
- */
+/** Procesa los jobs recibidos desde una solicitud, sin temporizadores. */
 @Injectable()
 export class PurchaseInvoiceImportWorkerService
-  implements OnApplicationBootstrap, OnApplicationShutdown
+  implements OnApplicationShutdown
 {
   private readonly logger = new Logger(PurchaseInvoiceImportWorkerService.name);
   private stopped = false;
-  private timer: NodeJS.Timeout | null = null;
+  private readonly activeJobs = new Map<string, Promise<void>>();
   /** Timestamp del fin del último lote procesado por job — instrumentación
    * temporal para medir el "hueco" entre lotes de un mismo job (ver
    * BATCH METRICS más abajo); no es necesaria para el funcionamiento del
@@ -79,71 +60,57 @@ export class PurchaseInvoiceImportWorkerService
     private readonly siigoPurchaseHistorySyncService: SiigoPurchaseHistorySyncService,
   ) {}
 
-  onApplicationBootstrap(): void {
-    this.scheduleNextTick(0);
-  }
-
   onApplicationShutdown(): void {
     this.stopped = true;
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
   }
 
-  private scheduleNextTick(delayMs: number): void {
-    if (this.stopped) {
-      return;
-    }
-
-    this.timer = setTimeout(() => void this.tick(), delayMs);
-    this.timer.unref();
+  isRunning(jobId: string): boolean {
+    return this.activeJobs.has(jobId);
   }
 
-  private async tick(): Promise<void> {
-    const pollIntervalMs = this.configService.get(
-      'purchaseInvoiceImport.workerPollIntervalMs',
-      { infer: true },
-    );
-
-    try {
-      await this.runOneTick();
-    } catch (error) {
-      this.logger.error(
-        'Error inesperado en el tick del worker de importación de Factura de compra',
-        error instanceof Error ? error.stack : String(error),
-      );
-    } finally {
-      this.scheduleNextTick(pollIntervalMs);
-    }
+  /** Solo se inicia después de que una solicitud persista todas sus filas. */
+  start(jobId: string): Promise<void> {
+    const active = this.activeJobs.get(jobId);
+    if (active) return active;
+    if (this.stopped) return Promise.resolve();
+    const work = Promise.resolve()
+      .then(() => this.processJob(jobId))
+      .catch(async (error: unknown) => {
+        this.logger.error(
+          `Error procesando la importación ${jobId}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+        await this.purchaseInvoiceImportJobsRepository.patch(jobId, {
+          status: PurchaseInvoiceImportJobStatus.ERROR,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          completedAt: new Date(),
+        });
+      })
+      .catch((error: unknown) => {
+        this.logger.error(`No se pudo guardar el error de ${jobId}`, String(error));
+      })
+      .finally(() => {
+        this.activeJobs.delete(jobId);
+        this.lastBatchEndByJobId.delete(jobId);
+      });
+    this.activeJobs.set(jobId, work);
+    return work;
   }
 
-  private async runOneTick(): Promise<void> {
-    const timeoutMinutes = this.configService.get(
-      'purchaseInvoiceImport.processingTimeoutMinutes',
-      { infer: true },
-    );
-    const recovered =
-      await this.purchaseInvoiceImportJobRowsRepository.recoverAbandonedRows(
-        timeoutMinutes,
-      );
-
-    if (recovered > 0) {
-      this.logger.warn(
-        `${recovered} fila(s) abandonada(s) (worker caído a mitad de proceso) recuperada(s) a 'pending'.`,
-      );
-    }
-
-    const jobs =
-      await this.purchaseInvoiceImportJobsRepository.findPendingOrRunning();
-
-    for (const job of jobs) {
-      await this.processOneBatchForJob(job);
+  private async processJob(jobId: string): Promise<void> {
+    while (!this.stopped) {
+      const job = await this.purchaseInvoiceImportJobsRepository.findById(jobId);
+      if (!job || ![
+        PurchaseInvoiceImportJobStatus.PENDING,
+        PurchaseInvoiceImportJobStatus.RUNNING,
+      ].includes(job.status)) return;
+      if (!(await this.processOneBatchForJob(job))) return;
     }
   }
 
   private async processOneBatchForJob(
     job: PurchaseInvoiceImportJob,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const outstanding =
       await this.purchaseInvoiceImportJobRowsRepository.countOutstandingByJob(
         job.id,
@@ -151,7 +118,7 @@ export class PurchaseInvoiceImportWorkerService
 
     if (outstanding === 0) {
       await this.finalizeJob(job);
-      return;
+      return false;
     }
 
     // El cupo del plan ya NO limita ni aborta la importación: solo se
@@ -165,7 +132,7 @@ export class PurchaseInvoiceImportWorkerService
       });
     }
 
-    if (!(await this.isPurchaseHistoryReady(job))) return;
+    if (!(await this.isPurchaseHistoryReady(job))) return false;
 
     const batchSize = this.configService.get(
       'purchaseInvoiceImport.batchSize',
@@ -180,10 +147,8 @@ export class PurchaseInvoiceImportWorkerService
     const claimDurationMs = Date.now() - claimStartedAt;
 
     if (batch.length === 0) {
-      // Nada 'pending' para reclamar ahora mismo (puede haber filas
-      // 'processing' de otro worker en curso) — se reintenta en el
-      // próximo tick, sin gastar nada de NextPyme.
-      return;
+      // Otro worker puede tener las filas reclamadas. No consultar en bucle.
+      return false;
     }
 
     const batchStartedAt = Date.now();
@@ -463,24 +428,23 @@ export class PurchaseInvoiceImportWorkerService
     );
 
     await this.notifyBatchProgress(job, batch);
+    return true;
   }
 
-  /** No reclama filas mientras SIIGO sincroniza: otros jobs pueden avanzar
-   * y los reinicios retoman la espera usando los estados persistidos. */
+  /** Espera la promesa del sync, sin consultas de estado en bucle. */
   private async isPurchaseHistoryReady(job: PurchaseInvoiceImportJob): Promise<boolean> {
     const provider = job.provider ?? await this.electronicDocumentService.resolveDocumentProvider(job.companyId);
     if (provider !== IntegrationProvider.SIIGO || job.processedRows > 0) return true;
     try {
       const sync = await this.siigoPurchaseHistorySyncService.getLatestStatus(job.companyId);
-      if (sync?.status === SiigoPurchaseSyncJobStatus.RUNNING) return false;
       const completedForImport = sync?.completedAt != null &&
         sync.completedAt.getTime() >= job.startedAt.getTime();
       if (completedForImport && sync?.status === SiigoPurchaseSyncJobStatus.COMPLETED) return true;
       if (completedForImport && sync?.status === SiigoPurchaseSyncJobStatus.ERROR) {
         throw new Error(sync.errorMessage || 'La sincronización de compras no se completó.');
       }
-      await this.siigoPurchaseHistorySyncService.startSync(job.companyId);
-      return false;
+      await this.siigoPurchaseHistorySyncService.syncAndWait(job.companyId);
+      return true;
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Error al consultar SIIGO.';
       await this.purchaseInvoiceImportJobsRepository.patch(job.id, {

@@ -3,6 +3,7 @@ import { ImportSessionStore } from './import-session.store';
 import { ImportSessionData } from './interfaces/import-session.interface';
 import { DianInvoiceResult } from '../dian/interfaces/dian-invoice-result.interface';
 import { AppConfiguration } from '../config/configuration';
+import { IMPORT_SESSION_KEY_PREFIX } from './constants/import-session.constants';
 
 function buildConfigService(
   ttlSeconds: number,
@@ -29,7 +30,7 @@ describe('ImportSessionStore (memory fallback)', () => {
     jest.useRealTimers();
   });
 
-  it('evicts expired entries from the in-memory map over time', async () => {
+  it('evicts expired entries on save without scheduling background work', async () => {
     const ttlSeconds = 1;
     const store = new ImportSessionStore(buildConfigService(ttlSeconds));
 
@@ -56,10 +57,15 @@ describe('ImportSessionStore (memory fallback)', () => {
       .memoryStore;
     expect(memoryStore.size).toBe(1);
 
-    // Avanza más allá del TTL y del intervalo de limpieza (min(ttl, 5min)).
+    // El paso del tiempo por sí solo no ejecuta ninguna limpieza.
     jest.advanceTimersByTime(ttlSeconds * 1000 + 1000);
 
-    expect(memoryStore.size).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(memoryStore.size).toBe(1);
+    await store.save({ ...session, rquid: 'next' });
+    expect(memoryStore.size).toBe(1);
+    expect(memoryStore.has(`${IMPORT_SESSION_KEY_PREFIX}abc`)).toBe(false);
+    expect(memoryStore.has(`${IMPORT_SESSION_KEY_PREFIX}next`)).toBe(true);
 
     await store.onModuleDestroy();
   });

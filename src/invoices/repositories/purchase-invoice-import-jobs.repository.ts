@@ -112,16 +112,4 @@ export class PurchaseInvoiceImportJobsRepository {
     );
   }
 
-  /** Jobs con trabajo pendiente de procesar — lo que el worker recorre en
-   * cada tick para decidir a cuáles reclamarles un lote. 'pending' incluye
-   * jobs recién creados que el worker todavía no tocó. */
-  findPendingOrRunning(): Promise<PurchaseInvoiceImportJob[]> {
-    return this.repository.find({
-      where: [
-        { status: PurchaseInvoiceImportJobStatus.PENDING },
-        { status: PurchaseInvoiceImportJobStatus.RUNNING },
-      ],
-      order: { startedAt: 'ASC' },
-    });
-  }
 }

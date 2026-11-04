@@ -37,30 +37,6 @@ export interface PurchaseInvoiceImportConfig {
   /** Reintentos adicionales (además del intento original) para errores
    * clasificados como transitorios al consultar NextPyme. */
   maxRetries: number;
-  /** Minutos que puede pasar una fila en 'processing' antes de
-   * considerarse abandonada (worker caído a mitad de proceso) y volver a
-   * 'pending'. */
-  processingTimeoutMinutes: number;
-  /** Cada cuánto el worker revisa si hay trabajo pendiente cuando no tiene
-   * nada para procesar. */
-  workerPollIntervalMs: number;
-}
-
-export interface SiigoPurchaseHistoryAutoSyncConfig {
-  /** Cada cuánto el proceso en background revisa si alguna empresa tiene el
-   * sync de historial de compras vencido — NO es el intervalo de refresco
-   * por empresa (ver staleAfterHours), solo la frecuencia del chequeo. */
-  checkIntervalMs: number;
-  /** Antigüedad del último sync COMPLETADO a partir de la cual una empresa
-   * se considera vencida y se vuelve a sincronizar sola, sin que nadie la
-   * dispare a mano. Cada corrida vuelve a bajar ~2 años de facturas de
-   * SIIGO (no es incremental), así que este valor es el palanca principal
-   * de ancho de banda saliente en Render (Service-Initiated). */
-  staleAfterHours: number;
-  /** Pausa entre el arranque del resync de una empresa y el de la
-   * siguiente — espacia el inicio (no la duración) para no lanzar varias
-   * sincronizaciones completas de golpe si muchas empresas vencen a la vez. */
-  startStaggerMs: number;
 }
 
 export interface NextPymeConfig {
@@ -119,7 +95,6 @@ export interface AppConfiguration {
   openRouter: OpenRouterConfig;
   bold: BoldConfig;
   purchaseInvoiceImport: PurchaseInvoiceImportConfig;
-  siigoPurchaseHistoryAutoSync: SiigoPurchaseHistoryAutoSyncConfig;
   passwordResetMail: PasswordResetMailConfig;
 }
 
@@ -249,28 +224,6 @@ export default (): AppConfiguration => ({
     maxRetries: parsePositiveInteger(
       process.env.PURCHASE_INVOICE_IMPORT_MAX_RETRIES,
       2,
-    ),
-    processingTimeoutMinutes: parsePositiveInteger(
-      process.env.PURCHASE_INVOICE_PROCESSING_TIMEOUT_MINUTES,
-      10,
-    ),
-    workerPollIntervalMs: parsePositiveInteger(
-      process.env.PURCHASE_INVOICE_WORKER_POLL_INTERVAL_MS,
-      2000,
-    ),
-  },
-  siigoPurchaseHistoryAutoSync: {
-    checkIntervalMs: parsePositiveInteger(
-      process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_CHECK_INTERVAL_MS,
-      24 * 60 * 60 * 1000, // 24h
-    ),
-    staleAfterHours: parsePositiveInteger(
-      process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_STALE_AFTER_HOURS,
-      7 * 24,
-    ),
-    startStaggerMs: parsePositiveInteger(
-      process.env.SIIGO_PURCHASE_HISTORY_AUTO_SYNC_START_STAGGER_MS,
-      15_000,
     ),
   },
   passwordResetMail: {

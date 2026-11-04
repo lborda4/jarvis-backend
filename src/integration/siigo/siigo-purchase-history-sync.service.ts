@@ -109,6 +109,7 @@ function isFieldFixed(bestCount: number, total: number): boolean {
 @Injectable()
 export class SiigoPurchaseHistorySyncService {
   private readonly logger = new Logger(SiigoPurchaseHistorySyncService.name);
+  private readonly runningSyncs = new Map<string, Promise<void>>();
 
   constructor(
     private readonly siigoAuthService: SiigoAuthService,
@@ -153,9 +154,24 @@ export class SiigoPurchaseHistorySyncService {
       }),
     );
 
-    void this.runSync(job.id, companyId, integration.id);
+    const work = this.runSync(job.id, companyId, integration.id);
+    this.runningSyncs.set(job.id, work);
+    void work.finally(() => this.runningSyncs.delete(job.id)).catch((error: unknown) => {
+      this.logger.error('No se pudo guardar el resultado del sync', String(error));
+    });
 
     return { jobId: job.id };
+  }
+
+  /** Espera el trabajo en curso sin polling de Postgres. */
+  async syncAndWait(companyId: string): Promise<void> {
+    const { jobId } = await this.startSync(companyId);
+    const work = this.runningSyncs.get(jobId);
+    if (work) await work;
+    const status = await this.getLatestStatus(companyId);
+    if (status?.id !== jobId || status.status !== SiigoPurchaseSyncJobStatus.COMPLETED) {
+      throw new Error(status?.errorMessage || 'La sincronización sigue en otra instancia o fue interrumpida. Reintenta al finalizar.');
+    }
   }
 
   getLatestStatus(companyId: string): Promise<SiigoPurchaseSyncJob | null> {

@@ -11,15 +11,7 @@ import { InvoicesController } from './invoices.controller';
 import { InvoicesService } from './invoices.service';
 import { PurchaseInvoiceImportWorkerService } from './services/purchase-invoice-import-worker.service';
 
-/**
- * PurchaseInvoiceImportWorkerService corre en el mismo proceso que la API
- * (registrado acá, no en un módulo/proceso aparte) — arranca solo al
- * levantar la app (OnApplicationBootstrap) y queda corriendo su loop de
- * polling en segundo plano, desacoplado de los endpoints HTTP: el
- * controller solo crea el job/filas y responde; el worker las descubre y
- * procesa por su cuenta. `npm run start`/`start:dev` alcanza para levantar
- * API + procesamiento en background — no hace falta un proceso aparte.
- */
+/** La solicitud inicia el procesamiento en segundo plano, sin temporizadores. */
 @Module({
   imports: [
     PurchaseInvoiceImportSharedModule,

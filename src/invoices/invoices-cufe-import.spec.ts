@@ -9,6 +9,7 @@ describe('Crear trabajo de una compra por CUFE', () => {
     };
     const rows = { create: jest.fn((data) => data), saveMany: jest.fn() };
     Object.assign(service, {
+      purchaseInvoiceImportWorkerService: { start: jest.fn().mockResolvedValue(undefined) },
       electronicDocumentService: documents,
       purchaseInvoiceImportJobsRepository: jobs,
       purchaseInvoiceImportJobRowsRepository: rows,
@@ -36,6 +37,7 @@ describe('Crear trabajo de una compra por CUFE', () => {
         status: 'pending',
       }),
     );
+    expect((service as any).purchaseInvoiceImportWorkerService.start).toHaveBeenCalledWith('job');
     expect(rows.saveMany).toHaveBeenCalledWith([
       expect.objectContaining({
         jobId: 'job',

@@ -40,6 +40,7 @@ type AuthenticatedSocket = Socket<
 @WebSocketGateway({ namespace: '/ws/purchase-invoice-imports' })
 export class PurchaseInvoiceImportGateway implements OnGatewayConnection {
   private readonly logger = new Logger(PurchaseInvoiceImportGateway.name);
+  beforeSubscribe?: () => Promise<void>;
 
   @WebSocketServer()
   server: Server;
@@ -81,6 +82,7 @@ export class PurchaseInvoiceImportGateway implements OnGatewayConnection {
       return;
     }
 
+    await this.beforeSubscribe?.();
     await client.join(buildPurchaseInvoiceImportJobRoom(companyId, jobId));
     client.emit('job_snapshot', status);
   }
