@@ -303,24 +303,25 @@ export class NextPymeMasterCatalogService {
     const needle = this.normalizeText(vatRegime);
 
     if (
-      needle.includes('non_vat') ||
+      needle.includes('nonvat') ||
       needle.includes('noresponsable') ||
       needle.includes('49')
     ) {
       const nonResponsible = regimes.find(
         (item) =>
           this.normalizeText(item.code) === '49' ||
-          this.normalizeText(item.name).includes('no responsable'),
+          this.normalizeText(item.name).includes('noresponsable'),
       );
       if (nonResponsible) {
         return nonResponsible.id;
       }
+      throw new ServiceUnavailableException('No se pudo identificar el régimen no responsable de IVA en el catálogo de emisión.');
     }
 
     const responsible = regimes.find(
       (item) =>
         this.normalizeText(item.code) === '48' ||
-        this.normalizeText(item.name).includes('responsable de iva'),
+        (this.normalizeText(item.name).includes('responsabledeiva') && !this.normalizeText(item.name).includes('noresponsable')),
     );
 
     return responsible?.id ?? 1;

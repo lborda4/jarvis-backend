@@ -371,6 +371,33 @@ export class NextPymeApiClient {
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
 
+  /** The issuer belongs to the authenticated company, not to invoice.customer. */
+  async getIssuerTaxConfiguration(companyToken: string): Promise<{
+    identificationNumber: string | null; typeRegimeId: number | null; ciiu: string | null;
+  }> {
+    const token = this.requireToken(companyToken);
+    try {
+      const response = await firstValueFrom(this.httpService.get<{
+        success?: boolean; data?: { identification_number?: unknown; type_regime_id?: unknown; ciiu?: unknown };
+      }>(`${this.getBaseUrl()}/config/company`, {
+        headers: this.buildAuthHeaders(token), timeout: 30000, validateStatus: () => true,
+      }));
+      if (response.status < 200 || response.status >= 300 || response.data?.success === false || !response.data?.data) {
+        throw new BadGatewayException('No se pudieron verificar los datos tributarios del emisor para facturar.');
+      }
+      const data = response.data.data;
+      const regimeId = Number(data.type_regime_id);
+      return {
+        identificationNumber: data.identification_number == null ? null : String(data.identification_number).trim(),
+        typeRegimeId: Number.isSafeInteger(regimeId) && regimeId > 0 ? regimeId : null,
+        ciiu: typeof data.ciiu === 'string' || typeof data.ciiu === 'number' ? String(data.ciiu).trim() || null : null,
+      };
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException('No fue posible verificar los datos tributarios del emisor. Intenta nuevamente.');
+    }
+  }
+
   /** Cambia únicamente el ambiente de la empresa identificada por su token. */
   async configureProductionEnvironment(companyToken: string): Promise<void> {
     const token = companyToken?.trim();

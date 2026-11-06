@@ -4,6 +4,12 @@ import { ElectronicDocumentType } from '../../electronic-document/enums/electron
 import { IntegrationProvider } from '../../integration/enums/integration-provider.enum';
 import { JarvisCredentialsSeedDto } from '../../integration/jarvis/dto/jarvis-credentials-seed.dto';
 import { SubscriptionStatus } from '../../plan/enums/subscription-status.enum';
+import type { JarvisModule } from '../../company/jarvis-modules';
+
+export class UpdateCompanyJarvisModulesDto {
+  @ApiProperty({ enum: ['BILLING', 'PAYROLL'], isArray: true })
+  jarvisModules: JarvisModule[];
+}
 
 export { JarvisCredentialsSeedDto };
 
@@ -80,6 +86,8 @@ export class AdminIntegrationItemDto {
 }
 
 export class AdminCompanyListItemDto {
+  @ApiProperty({ enum: ['BILLING', 'PAYROLL'], isArray: true })
+  jarvisModules: JarvisModule[];
   @ApiPropertyOptional({
     nullable: true,
     description: 'Correo de la primera cuenta activa de usuario vinculada a la empresa.',
@@ -163,6 +171,8 @@ export class AdminCompanyListItemDto {
 }
 
 export class CreateAdminCompanyRequestDto {
+  @ApiPropertyOptional({ enum: ['BILLING', 'PAYROLL'], isArray: true })
+  jarvisModules?: JarvisModule[];
   @ApiPropertyOptional({ maxLength: 120 })
   commercial?: string;
   @ApiPropertyOptional({ enum: ['MONTHLY', 'ANNUAL'], default: 'MONTHLY' })

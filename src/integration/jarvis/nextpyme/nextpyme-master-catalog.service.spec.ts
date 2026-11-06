@@ -1,6 +1,18 @@
 import { NextPymeMasterCatalogService } from './nextpyme-master-catalog.service';
 
 describe('NextPyme company catalogs', () => {
+  it.each(['non_vat_responsible', 'No responsable de IVA', '49'])('resuelve %s como no responsable sin confundirlo con el responsable', async value => {
+    const { service, client } = setup();
+    client.fetchMasterTable.mockResolvedValue([{ id: 1, code: '48', name: 'Responsable de IVA' }, { id: 2, code: '49', name: 'No responsable de IVA' }] as never);
+    expect(await service.resolveRegimeId(value, 'a')).toBe(2);
+    expect(await service.resolveRegimeId('vat_responsible', 'a')).toBe(1);
+  });
+
+  it('no convierte un régimen no responsable en responsable si falta el registro del catálogo', async () => {
+    const { service, client } = setup();
+    client.fetchMasterTable.mockResolvedValue([{ id: 1, code: '48', name: 'Responsable de IVA' }] as never);
+    await expect(service.resolveRegimeId('non_vat_responsible', 'a')).rejects.toThrow('no responsable de IVA');
+  });
   it('in local/QA only requires the company token, even without IDSoftware', async () => {
     const { service, client, integrations } = setup();
     client.usesTestResolutionEndpoint.mockReturnValue(true);

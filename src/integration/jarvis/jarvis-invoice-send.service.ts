@@ -53,6 +53,7 @@ import { NextPymeMasterCatalogService } from './nextpyme/nextpyme-master-catalog
 import { buildJarvisInvoiceChargeTaxTotals } from './helpers/jarvis-invoice-tax.helper';
 import { toNextPymePartyName } from './helpers/nextpyme-party-name.helper';
 import { calculateJarvisRetention } from './helpers/jarvis-tax-calculation.helper';
+import { issuerTaxProfile } from './helpers/jarvis-issuer-tax-profile.helper';
 import { JarvisCredentials } from '../interfaces/integration-credentials.interface';
 
 const DOCUMENT_TYPE_IDENTIFICATION_FALLBACK: Record<string, number> = {
@@ -225,6 +226,9 @@ export class JarvisInvoiceSendService {
       if (!Number.isSafeInteger(taxId) || !allowedTaxIds.has(taxId)) {
         throw new BadRequestException(`El impuesto del ítem ${index + 1} no está disponible en el catálogo de facturación.`);
       }
+      if (isSaleInvoice && credentials.vat_regime === JarvisVatRegime.NON_RESPONSIBLE && taxId === defaultTaxId && taxAmount > 0) {
+        throw new BadRequestException('El emisor está configurado como no responsable de IVA. La factura de venta no puede cobrar IVA.');
+      }
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new BadRequestException(
@@ -253,6 +257,23 @@ export class JarvisInvoiceSendService {
         notes: item.notes?.trim(),
       };
     });
+
+    if (isSaleInvoice && credentials.vat_regime) {
+      const expectedRegimeId = await this.nextPymeMasterCatalogService.resolveRegimeId(credentials.vat_regime, companyId);
+      const issuer = await this.nextPymeApiClient.getIssuerTaxConfiguration(companyToken);
+      const companyNit = company.nit?.split('-')[0].replace(/\D/g, '');
+      const issuerNit = issuer.identificationNumber?.split('-')[0].replace(/\D/g, '');
+      if (companyNit && issuerNit !== companyNit) {
+        throw new BadRequestException('El registro de emisión no corresponde al NIT de la empresa activa.');
+      }
+      if (issuer.typeRegimeId !== expectedRegimeId) {
+        throw new BadRequestException('El régimen de IVA guardado en Jarvis no coincide con el registro del emisor para facturar. El administrador debe sincronizarlo antes de emitir.');
+      }
+      const ciiu = credentials.economic_activity?.match(/^\s*(\d{4})\b/)?.[1];
+      if (ciiu && issuer.ciiu !== ciiu) {
+        throw new BadRequestException('La actividad económica CIIU guardada en Jarvis no coincide con el registro del emisor para facturar. El administrador debe sincronizarla antes de emitir.');
+      }
+    }
 
     const municipalityId =
       tercero.municipalityId ??
@@ -682,7 +703,7 @@ export class JarvisInvoiceSendService {
           try {
             historyId = await this.invoiceHistory.record({
               invoiceXml,
-              sourceRequest: JSON.parse(JSON.stringify({ ...request, attachmentDraftId: undefined, attachment, paymentBreakdown, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
+              sourceRequest: JSON.parse(JSON.stringify({ ...request, recipientCopyEmails: tercero.copyEmails ?? [], issuerTaxProfile: issuerTaxProfile(credentials, 'emission'), attachmentDraftId: undefined, attachment, paymentBreakdown, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
               companyId, documentKind: kind, providerId: createdId, prefix: numbering.prefix, number: String(createdNumber),
               issueDate, customerName: request.customerName?.trim() || tercero.name,
               customerIdentification, currency, total: formatMoney(payable), cufe: createdCufe,
@@ -727,6 +748,7 @@ export class JarvisInvoiceSendService {
             prefix: numbering.prefix,
             number: createdNumber,
             customerEmail: tercero.email,
+            copyEmails: tercero.copyEmails ?? [],
             companyEmail: credentials.email,
             historyId,
             invoiceXml,
@@ -782,6 +804,7 @@ export class JarvisInvoiceSendService {
     prefix: string;
     number: number;
     customerEmail?: string | null;
+    copyEmails?: string[];
     companyEmail?: string | null;
     historyId?: string;
     invoiceXml?: string | null;
@@ -795,12 +818,11 @@ export class JarvisInvoiceSendService {
       );
       return;
     }
-    const customerEmail = usableEmail(input.customerEmail);
+    const copies = (input.copyEmails ?? []).map(usableEmail).filter((email): email is string => Boolean(email));
+    const customerEmail = usableEmail(input.customerEmail) ?? copies[0];
     const companyEmail = usableEmail(input.companyEmail);
-    const ccList =
-      companyEmail && companyEmail !== customerEmail
-        ? [{ email: companyEmail }]
-        : [];
+    const ccList = [...new Set([...copies, ...(companyEmail ? [companyEmail] : [])])]
+      .filter(email => email !== customerEmail).map(email => ({ email }));
     const graphic = await this.invoicePdf.renderGraphicBase64({
       companyId: input.companyId,
       historyId: input.historyId,
@@ -834,7 +856,7 @@ export class JarvisInvoiceSendService {
 }
 
 function usableEmail(value: string | null | undefined): string | undefined {
-  const email = value?.trim();
+  const email = value?.trim().toLowerCase();
   if (
     !email ||
     email === 'sin-email@example.com' ||

@@ -21,6 +21,7 @@ function setup(
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner), query: jest.fn().mockResolvedValue([]) };
   const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: token }) };
   const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportCreditNote: jest.fn().mockResolvedValue({ cuds: 'adjustment-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }), sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
+  const issuerClient = { ...client, getIssuerTaxConfiguration: jest.fn().mockResolvedValue({ identificationNumber: '1012345678', typeRegimeId: 2, ciiu: '4923' }) };
   const catalog = {
     getIvaTaxId: () => 1,
     getDefaultUnitMeasureId: () => 70,
@@ -59,17 +60,64 @@ function setup(
     dataSource as never,
     integrations as never,
     { findByCompanyAndDocument: jest.fn().mockResolvedValue(tercero) } as never,
-    companies as never, client as never, catalog as never, numbering as never, history as never,
+    companies as never, issuerClient as never, catalog as never, numbering as never, history as never,
     siigoNumbering as never, invoicePdf as never, plans as never,
   );
   const request = {
     issueDate: '2026-09-16', customerDocumentType: 'NIT', customerIdentification: '901335977',
     items: [{ description: 'Servicio', quantity: 1, unitValue: 250000, code: '01' }],
   };
-  return { service, request, client, companies, numbering, history, integrations, siigoNumbering, invoicePdf, plans, dataSource };
+  return { service, request, client: issuerClient, catalog, companies, numbering, history, integrations, siigoNumbering, invoicePdf, plans, dataSource };
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
+  it.each([JarvisResolutionKind.ELECTRONIC_INVOICE, JarvisResolutionKind.SUPPORT_DOCUMENT])('incluye las copias del tercero al emitir %s sin duplicar destinatarios', async kind => {
+    const { service, request, client, history, integrations } = setup('company-token', { name: 'Cliente', municipalityId: 149, typeRegimeId: 2, email: 'Cliente@example.com', copyEmails: ['CC@example.com', 'cc@example.com', 'cliente@example.com', 'empresa@example.com'] });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { email: 'EMPRESA@example.com' } });
+    await service.createAndSendInvoice(request, 'company-1', kind);
+    expect(client.sendDocumentEmail).toHaveBeenCalledWith(expect.objectContaining({ alternate_email: 'cliente@example.com', email_cc_list: [{ email: 'cc@example.com' }, { email: 'empresa@example.com' }], send_email_cc_list_as_email_cc: true }), 'company-token');
+    expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ sourceRequest: expect.objectContaining({ recipientCopyEmails: expect.arrayContaining(['CC@example.com']) }) }));
+  });
+  function nonResponsibleIssuer() {
+    const setupResult = setup();
+    setupResult.integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
+      vat_regime: 'non_vat_responsible', economic_activity: '4923', tax_responsibility: 'R-99-PN',
+    } } as never);
+    setupResult.catalog.resolveRegimeId.mockResolvedValue(2);
+    return setupResult;
+  }
+
+  it('rechaza IVA positivo de un no responsable antes de asignar numeración o enviar', async () => {
+    const { service, request, client, numbering } = nonResponsibleIssuer();
+    await expect(service.createAndSendInvoice({ ...request, items: [{ ...request.items[0], taxAmount: 47500 }] }, 'company-1')).rejects.toThrow('no puede cobrar IVA');
+    expect(client.createInvoice).not.toHaveBeenCalled();
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+  });
+
+  it.each([{ typeRegimeId: 1, ciiu: '4923' }, { typeRegimeId: 2, ciiu: null }])('impide emitir con un registro tributario diferente: %j', async remote => {
+    const { service, request, client, numbering } = nonResponsibleIssuer();
+    client.getIssuerTaxConfiguration.mockResolvedValue({ identificationNumber: '1012345678', ...remote } as never);
+    await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toThrow('no coincide');
+    expect(client.createInvoice).not.toHaveBeenCalled();
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+  });
+
+  it('guarda el perfil verificado al emitir y conserva IVA cero en el XML solicitado', async () => {
+    const { service, request, client, history } = nonResponsibleIssuer();
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.getIssuerTaxConfiguration).toHaveBeenCalledWith('company-token');
+    expect(client.createInvoice.mock.calls[0][0].tax_totals[0].tax_amount).toBe('0.00');
+    expect(history.record.mock.calls[0][0].sourceRequest.issuerTaxProfile).toEqual({
+      vatRegime: 'non_vat_responsible', economicActivity: '4923', taxResponsibility: 'R-99-PN', source: 'emission',
+    });
+  });
+
+  it('compara el NIT del emisor sin confundir el dígito de verificación', async () => {
+    const { service, request, companies, client } = nonResponsibleIssuer();
+    companies.findById.mockResolvedValue({ nextPymeToken: 'company-token', nit: '1.012.345.678-9' } as never);
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice).toHaveBeenCalledTimes(1);
+  });
   it.each([0, 95])('omite campos de documento soporte en ventas con impuesto %s', async (taxAmount) => {
     const { service, request, client } = setup();
     await service.createAndSendInvoice({
@@ -482,7 +530,7 @@ describe('invoice source persistence', () => {
     const { service, request, history } = setup();
     await service.createAndSendInvoice(request, 'company-1');
     const saved = history.record.mock.calls[0][0].sourceRequest;
-    expect(saved).toEqual(request);
+    expect(saved).toEqual({ ...request, recipientCopyEmails: [] });
     request.items[0].description = 'Changed';
     expect(saved.items[0].description).toBe('Servicio');
   });

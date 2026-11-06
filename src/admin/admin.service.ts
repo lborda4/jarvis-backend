@@ -17,6 +17,7 @@ import { DataSource } from 'typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { Company } from '../company/entities/company.entity';
+import { DEFAULT_JARVIS_MODULES, validateJarvisModules } from '../company/jarvis-modules';
 import { CompanyPersonType } from '../company/enums/company-person-type.enum';
 import { CompaniesRepository } from '../company/repositories/companies.repository';
 import { Integration } from '../integration/entities/integration.entity';
@@ -334,6 +335,9 @@ export class AdminService {
 
     const includesSiigo = integrations.includes(IntegrationProvider.SIIGO);
     const includesJarvis = integrations.includes(IntegrationProvider.JARVIS);
+    const jarvisModules = includesJarvis
+      ? validateJarvisModules(request.jarvisModules === undefined ? DEFAULT_JARVIS_MODULES : request.jarvisModules)
+      : null;
     const requestedDocumentTypes =
       this.planSubscriptionService.normalizeDocumentTypes(
         request?.includedDocumentTypes,
@@ -391,6 +395,7 @@ export class AdminService {
           cityCode: request?.cityCode?.trim() || null,
           cityName: request?.cityName?.trim() || null,
           nextPymeToken,
+          jarvisModules,
         }),
       );
 
@@ -483,6 +488,17 @@ export class AdminService {
     return {
       company: this.mapCompany(company),
     };
+  }
+
+  async updateJarvisModules(companyId: string, modules: unknown): Promise<CreateAdminCompanyResponseDto> {
+    const jarvisModules = validateJarvisModules(modules);
+    const companies = await this.companiesRepository.findAllWithIntegrations();
+    const company = companies.find(item => item.id === companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    if (!company.integrations.some(item => item.provider === IntegrationProvider.JARVIS))
+      throw new BadRequestException('La empresa no tiene integración Jarvis.');
+    company.jarvisModules = jarvisModules;
+    return { company: this.mapCompany(await this.companiesRepository.save(company)) };
   }
 
   async regenerateInviteCode(
@@ -863,6 +879,7 @@ export class AdminService {
     return {
       id: company.id,
       nit: company.nit,
+      jarvisModules: company.jarvisModules ?? [...DEFAULT_JARVIS_MODULES],
       name: company.name,
       email: [...(company.userCompanies ?? [])]
         .filter((link) => link.user?.active && link.user.role === UserRole.USER && link.user.email?.trim())

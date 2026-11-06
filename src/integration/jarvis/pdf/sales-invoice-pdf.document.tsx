@@ -36,6 +36,10 @@ function Party({ title, party }: { title: string; party: JarvisInvoicePdfParty }
 }
 const widths = ['4%', '13%', '18%', '5%', '11%', '8%', '6%', '7%', '7%', '7%', '14%'];
 export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfData; qr: string }) {
+  const profile = data.issuerTaxProfile;
+  const profileLabel = profile?.source === 'current' ? ' (configuración actual)' : '';
+  const vatRegimeLabel = profile?.vatRegime === 'non_vat_responsible' ? 'No responsable de IVA'
+    : profile?.vatRegime === 'vat_responsible' ? 'Responsable de IVA' : null;
   const copy = jarvisPdfCopy(data.documentKind);
   const related = (data.references ?? []).filter((item) => item.number);
   const lineDiscount = data.items.reduce((sum, item) => sum + (item.discount ?? 0), 0);
@@ -90,7 +94,10 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
         <Image src={qr} style={s.qr} />
         <View style={s.half}><Text style={s.name}>Documento electrónico validado por la DIAN</Text><Text style={s.field}>{copy.uniqueCode}:</Text><Text style={s.small}>{data.cufe.match(/.{1,32}/g)?.join('\n')}</Text><Text style={[s.field, { marginTop: 7 }]}>Fecha y hora de generación:</Text><Text style={s.small}>{data.issueDate} {data.issueTime}</Text></View>
         <View style={s.half}><Text style={s.name}>Información tributaria y resolución de facturación</Text>
-          <Text style={s.small}>Régimen: {value(data.issuer.fiscalRegime)}</Text><Text style={s.small}>Responsabilidad tributaria: {value(data.issuer.taxResponsibility)}</Text><Text style={s.small}>Actividad económica: {value(data.issuer.economicActivity)}</Text>
+          <Text style={s.small}>Responsabilidad fiscal (XML): {value(data.issuer.fiscalRegime)}</Text>
+          <Text style={s.small}>Tributo (XML): {value(data.issuer.taxResponsibility)}</Text>
+          {vatRegimeLabel && <Text style={s.small}>Régimen IVA{profileLabel}: {vatRegimeLabel}</Text>}
+          <Text style={s.small}>Actividad económica{!data.issuer.economicActivity ? profileLabel : ''}: {value(data.issuer.economicActivity || profile?.economicActivity)}</Text>
           <Text style={s.small}>Resolución No. {value(data.authorization?.number)}</Text><Text style={s.small}>Prefijo: {value(data.prefix)}</Text><Text style={s.small}>Desde: {value(data.authorization?.from)}  Hasta: {value(data.authorization?.to)}</Text><Text style={s.small}>Vigencia: {value(data.authorization?.startDate)} a {value(data.authorization?.endDate)}</Text></View>
       </View>
       <Text style={s.footer}>Esta es una representación gráfica de la {copy.footer}.{'\n'}Emitido por Jarvis Colombia</Text>

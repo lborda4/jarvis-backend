@@ -75,6 +75,9 @@ export class JarvisTercero {
   @Column({ type: 'varchar', length: 255, nullable: true })
   email: string | null;
 
+  @Column({ name: 'copy_emails', type: 'jsonb', default: () => "'[]'::jsonb" })
+  copyEmails: string[];
+
   @Column({ type: 'varchar', length: 64, nullable: true })
   phone: string | null;
 

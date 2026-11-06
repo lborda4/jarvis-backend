@@ -4,6 +4,8 @@ import { JarvisEntityType } from '../enums/jarvis-entity-type.enum';
 import { JarvisTaxRegime } from '../enums/jarvis-tax-regime.enum';
 
 export class CreateJarvisTerceroRequestDto {
+  @ApiPropertyOptional({ type: [String], maxItems: 10, description: 'Correos para copia automática de documentos.' })
+  copy_emails?: string[];
   @ApiProperty({
     enum: JarvisDocumentType,
     example: JarvisDocumentType.NIT,
@@ -57,6 +59,8 @@ export class CreateJarvisTerceroRequestDto {
 }
 
 export class JarvisTerceroDto {
+  @ApiProperty({ type: [String] })
+  copy_emails: string[];
   @ApiProperty()
   id: string;
 

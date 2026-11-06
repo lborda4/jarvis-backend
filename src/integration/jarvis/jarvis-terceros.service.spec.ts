@@ -435,6 +435,22 @@ describe('JarvisTercerosService.lookupNit', () => {
 describe('JarvisTercerosService edit and delete', () => {
   const request = { document_type: JarvisDocumentType.CC, document_number: '1016100663', name: 'Nombre actualizado' };
   const target = () => ({ id: 'third-1', companyId: 'company-1', createdAt: new Date(), updatedAt: new Date(), email: 'old@example.com' });
+  it('guarda y devuelve las copias normalizadas al crear un tercero', async () => {
+    const { service, jarvisTercerosRepository } = buildService({ save: jest.fn(async entity => ({ ...entity, id: 'new', createdAt: new Date(), updatedAt: new Date() })) });
+    const result = await service.create({ ...request, email: 'main@example.com', copy_emails: [' CC@example.com ', 'cc@example.com', 'MAIN@example.com'] }, 'company-1');
+    expect(result.tercero.copy_emails).toEqual(['cc@example.com']);
+    expect(jarvisTercerosRepository.save).toHaveBeenCalledWith(expect.objectContaining({ copyEmails: ['cc@example.com'] }));
+  });
+  it('conserva las copias omitidas al editar y permite borrarlas explícitamente', async () => {
+    const { service } = buildService({ findByIdAndCompany: jest.fn().mockResolvedValue({ ...target(), copyEmails: ['cc@example.com'] }) });
+    expect((await service.update('third-1', request, 'company-1')).tercero.copy_emails).toEqual(['cc@example.com']);
+    expect((await service.update('third-1', { ...request, copy_emails: [] }, 'company-1')).tercero.copy_emails).toEqual([]);
+  });
+  it.each([['invalid'], Array.from({ length: 11 }, () => 'cc@example.com')])('rechaza copias inválidas antes de guardar: %j', async (...copy_emails) => {
+    const { service, jarvisTercerosRepository } = buildService({});
+    await expect(service.create({ ...request, copy_emails }, 'company-1')).rejects.toThrow('hasta 10 correos válidos');
+    expect(jarvisTercerosRepository.save).not.toHaveBeenCalled();
+  });
   it('actualiza el tercero existente, conserva su identidad y permite vaciar contacto', async () => {
     const { service, jarvisTercerosRepository } = buildService({
       findByIdAndCompany: jest.fn().mockResolvedValue(target()),

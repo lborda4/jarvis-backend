@@ -1,6 +1,7 @@
 import { UpdateAdminPlanRequestDto } from './dto/admin-plan.dto';
 import { AdminAssignPackageDto } from './dto/admin-package.dto';
 import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
+import { UpdateCompanyJarvisModulesDto } from './dto/admin-company.dto';
 import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
 import { SaveAdminBoldCredentialsDto } from './dto/admin-bold-credentials.dto';
 import {
@@ -52,6 +53,12 @@ import { RutParserService } from './rut-parser.service';
 @Controller('admin')
 @UseGuards(AdminGuard)
 export class AdminController {
+  @Patch('companies/:companyId/jarvis-modules')
+  @ApiOperation({ summary: 'Actualizar módulos de Jarvis de una empresa' })
+  updateJarvisModules(@Param('companyId') companyId: string, @Body() request: UpdateCompanyJarvisModulesDto) {
+    return this.adminService.updateJarvisModules(companyId, request?.jarvisModules);
+  }
+
   @Post('companies/:companyId/integrations/:provider')
   @ApiOperation({ summary: 'Agregar una integracion sin desactivar las existentes' })
   addCompanyIntegration(

@@ -19,6 +19,7 @@ import {
 import { renderJarvisInvoicePdfBase64 } from './pdf/sales-invoice-pdf.renderer';
 import { buildJarvisDocumentEmail } from './helpers/jarvis-document-email.helper';
 import { randomUUID } from 'node:crypto';
+import { issuerTaxProfile, type JarvisIssuerTaxProfile } from './helpers/jarvis-issuer-tax-profile.helper';
 
 function uniqueCodeLabel(kind?: string | null) {
   if (
@@ -82,7 +83,7 @@ export class JarvisInvoicePdfService {
     if (!invoice) throw new NotFoundException('No se encontró el documento.');
     const data = await this.traceEmailStep(trace, 'consultar-datos-pdf', () => this.getData(companyId, id));
     const registered = data.buyer.email?.trim().toLowerCase();
-    const emails = [...new Set([registered, ...extras.map(email => email.trim().toLowerCase())].filter((email): email is string => Boolean(email)))];
+    const emails = [...new Set([registered, ...(data.recipientCopyEmails ?? []), ...extras].filter((email): email is string => Boolean(email)).map(email => email.trim().toLowerCase()))];
     if (!emails.length || emails.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) throw new BadRequestException('Se requiere al menos un correo válido.');
     const company = await this.traceEmailStep(trace, 'consultar-empresa', () => this.companies.findById(companyId));
     if (!company?.nextPymeToken) throw new BadRequestException('La empresa no tiene un token de correo configurado.');
@@ -127,16 +128,20 @@ export class JarvisInvoicePdfService {
     const code = uniqueCodeLabel(invoice.documentKind);
     if (!invoice.cufe) throw new BadGatewayException(`El documento aún no tiene ${code} disponible. No vuelvas a emitirlo; actualiza el listado e intenta visualizarlo después.`);
     const logo = await this.safeLogo(companyId);
-    const withKind = { documentKind: invoice.documentKind, sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
+    const withKind = { documentKind: invoice.documentKind, recipientCopyEmails: invoice.sourceRequest?.recipientCopyEmails ?? [], sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
+    const withMetadata = async (data: JarvisInvoicePdfData) => ({
+      ...data, ...withKind,
+      issuerTaxProfile: invoice.sourceRequest?.issuerTaxProfile ?? await this.currentIssuerTaxProfile(companyId),
+    });
     if (invoice.invoiceXml) {
-      try { return { ...mapInvoiceXmlToPurchaseInvoiceDownload(invoice.invoiceXml, id, invoice.cufe), ...withKind }; } catch { /* An emission envelope can contain an incomplete XML; recover the DIAN copy. */ }
+      try { return withMetadata(mapInvoiceXmlToPurchaseInvoiceDownload(invoice.invoiceXml, id, invoice.cufe)); } catch { /* An emission envelope can contain an incomplete XML; recover the DIAN copy. */ }
     }
     try {
       const company = await this.companies.findById(companyId);
       const xml = await this.nextPyme.getInvoiceXmlByCufe(invoice.cufe, company?.nextPymeToken ?? '');
       const data = mapInvoiceXmlToPurchaseInvoiceDownload(xml, id, invoice.cufe);
       await this.invoices.update({ id, companyId }, { invoiceXml: xml });
-      return { ...data, ...withKind };
+      return withMetadata(data);
     } catch (error) {
       const fallback = await this.fallbackFromIssuedDocument(invoice, companyId);
       if (fallback) {
@@ -145,7 +150,7 @@ export class JarvisInvoicePdfService {
             error instanceof Error ? error.message : String(error)
           }`,
         );
-        return { ...fallback, ...withKind };
+        return withMetadata(fallback);
       }
       throw error;
     }
@@ -187,8 +192,9 @@ export class JarvisInvoicePdfService {
     documentKind?: string | null;
     token?: string;
   }): Promise<JarvisInvoicePdfData | null> {
+    if (input.historyId) return this.getData(input.companyId, input.historyId);
     const logo = await this.safeLogo(input.companyId);
-    const withKind = { documentKind: input.documentKind ?? null, ...logo };
+    const withKind = { issuerTaxProfile: await this.currentIssuerTaxProfile(input.companyId), documentKind: input.documentKind ?? null, ...logo };
     if (input.invoiceXml && input.cufe) {
       try {
         return {
@@ -202,9 +208,6 @@ export class JarvisInvoicePdfService {
       } catch {
         /* Recover XML from NextPyme below. */
       }
-    }
-    if (input.historyId) {
-      return this.getData(input.companyId, input.historyId);
     }
     if (input.cufe && input.token) {
       try {
@@ -237,6 +240,15 @@ export class JarvisInvoicePdfService {
       normalizeJarvisCredentials(integration?.credentials ?? {}),
       company,
     );
+  }
+
+  private async currentIssuerTaxProfile(companyId: string): Promise<JarvisIssuerTaxProfile | undefined> {
+    try {
+      const integration = await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.JARVIS);
+      return integration ? issuerTaxProfile(normalizeJarvisCredentials(integration.credentials), 'current') : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async safeLogo(companyId: string): Promise<{ logoDataUrl: string | null }> {

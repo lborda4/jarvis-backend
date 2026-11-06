@@ -98,6 +98,13 @@ describe('Configuración NextPyme de empresa desde admin', () => {
 });
 
 describe('Tipos de documento al crear empresas', () => {
+  it.each([['BILLING'], ['PAYROLL'], ['BILLING', 'PAYROLL']] as const)('persiste los módulos elegidos de Jarvis: %j', async (...modules) => {
+    const { service, request, companies } = setup();
+    const result = await service.createCompany({ ...request, integrations: [IntegrationProvider.JARVIS], jarvisPlanId: 'jarvis-plan', jarvisModules: [...modules] }, 'admin-1');
+    expect(companies.save).toHaveBeenCalledWith(expect.objectContaining({ jarvisModules: modules }));
+    expect(result.company.jarvisModules).toEqual(modules);
+  });
+
   it('crea una empresa Jarvis sin seleccionar tipos de documento', async () => {
     const { service, request, companies } = setup();
     const result = await service.createCompany({

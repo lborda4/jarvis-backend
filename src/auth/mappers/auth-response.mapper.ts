@@ -1,4 +1,5 @@
 import { Company } from '../../company/entities/company.entity';
+import { DEFAULT_JARVIS_MODULES } from '../../company/jarvis-modules';
 import { User } from '../entities/user.entity';
 import {
   AuthCompanyDto,
@@ -13,6 +14,7 @@ export function mapCompanyToAuthCompanyDto(company: Company): AuthCompanyDto {
     id: company.id,
     name: company.name,
     nit: company.nit,
+    jarvisModules: company.jarvisModules ?? [...DEFAULT_JARVIS_MODULES],
   };
 }
 

@@ -6,7 +6,10 @@ import { Company } from '../../../company/entities/company.entity';
 export class JarvisSalesInvoice {
   @Column({ name: 'invoice_xml', type: 'text', nullable: true, select: false }) invoiceXml: string | null;
   @Column({ name: 'source_request', type: 'jsonb', nullable: true, select: false })
-  sourceRequest: import('../dto/create-jarvis-invoice.dto').CreateJarvisInvoiceRequestDto | null;
+  sourceRequest: (import('../dto/create-jarvis-invoice.dto').CreateJarvisInvoiceRequestDto & {
+    issuerTaxProfile?: import('../helpers/jarvis-issuer-tax-profile.helper').JarvisIssuerTaxProfile;
+    recipientCopyEmails?: string[];
+  }) | null;
   @Column({ name: 'document_kind', type: 'varchar', length: 30, default: 'ELECTRONIC_INVOICE' }) documentKind: string;
   @PrimaryGeneratedColumn('uuid') id: string;
   @Column({ name: 'company_id', type: 'uuid' }) companyId: string;

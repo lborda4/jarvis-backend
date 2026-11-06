@@ -25,6 +25,7 @@ export class AuthUserDto {
 }
 
 export class AuthCompanyDto {
+  jarvisModules: import('../../company/jarvis-modules').JarvisModule[];
   id: string;
   name: string;
   nit: string;

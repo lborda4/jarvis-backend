@@ -13,9 +13,13 @@ import { CompanyPersonType } from '../enums/company-person-type.enum';
 import type { CompanyResponsible } from '../interfaces/company-responsible.interface';
 
 import type { CompanyAiContext } from '../company-ai-context';
+import type { JarvisModule } from '../jarvis-modules';
 
 @Entity('companies')
 export class Company {
+  @Column({ name: 'jarvis_modules', type: 'jsonb', nullable: true })
+  jarvisModules: JarvisModule[] | null;
+
   @PrimaryGeneratedColumn('uuid')
   id: string;
 

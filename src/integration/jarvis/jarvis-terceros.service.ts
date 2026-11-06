@@ -9,6 +9,7 @@ import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { ElectronicDocumentsRepository } from '../../electronic-document/repositories/electronic-documents.repository';
 import { normalizeJarvisDocumentNumber } from './helpers/jarvis-document-number.helper';
+import { normalizeCopyEmails } from './helpers/jarvis-copy-emails.helper';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import {
@@ -238,6 +239,7 @@ export class JarvisTercerosService {
         taxRegime: taxRegime ?? null,
         taxResponsibility,
         email: request.email?.trim() || null,
+        copyEmails: normalizeCopyEmails(request.copy_emails === undefined ? target?.copyEmails ?? [] : request.copy_emails, request.email),
         phone: request.phone?.trim() || null,
         address: request.address?.trim() || null,
         municipalityId,
@@ -510,6 +512,7 @@ export class JarvisTercerosService {
       tax_regime: tercero.taxRegime,
       tax_responsibility: tercero.taxResponsibility,
       email: tercero.email,
+      copy_emails: tercero.copyEmails ?? [],
       phone: tercero.phone,
       address: tercero.address,
       municipality_id: tercero.municipalityId,

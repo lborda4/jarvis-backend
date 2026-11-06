@@ -2,6 +2,23 @@ import { of, throwError } from 'rxjs';
 import { NextPymeApiClient } from './nextpyme-api.client';
 
 describe('NextPyme company authentication', () => {
+  it('consulta únicamente los datos tributarios de la empresa autenticada', async () => {
+    const { client, httpService } = buildClient();
+    httpService.get.mockReturnValue(of({ status: 200, data: { success: true, data: {
+      identification_number: '1012345678', type_regime_id: 2, ciiu: '4923',
+      smtp: { mail_password: 'not-part-of-the-result' },
+    } } }));
+    expect(await client.getIssuerTaxConfiguration(' company-token ')).toEqual({ identificationNumber: '1012345678', typeRegimeId: 2, ciiu: '4923' });
+    expect(httpService.get).toHaveBeenCalledWith('https://nextpyme.example/config/company', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-token' }) }));
+  });
+
+  it('rechaza fallos de consulta tributaria y credenciales ausentes sin filtrar el token', async () => {
+    const { client, httpService } = buildClient();
+    await expect(client.getIssuerTaxConfiguration(' ')).rejects.toThrow('token');
+    expect(httpService.get).not.toHaveBeenCalled();
+    httpService.get.mockReturnValue(of({ status: 200, data: { success: false } }));
+    await expect(client.getIssuerTaxConfiguration('private-token')).rejects.toThrow('verificar los datos tributarios');
+  });
   it('envía nómina por POST al endpoint indicado, con JSON y token de la empresa', async () => {
     const { client, httpService } = buildClient({ 'nextPyme.baseUrl': 'https://api.nextpyme.plus/api/ubl2.1/' });
     httpService.request.mockReturnValue(of({ data: { success: true } }));
