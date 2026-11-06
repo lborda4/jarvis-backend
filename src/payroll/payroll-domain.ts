@@ -35,6 +35,7 @@ export interface PayrollLine {
   formula?: string;
   manual?: boolean;
   mapping?: string;
+  typeLawDeductionsId?: number;
 }
 export interface PayrollInput {
   period: string;
@@ -44,6 +45,14 @@ export interface PayrollInput {
   workedDays: string;
   lines: PayrollLine[];
   noteType?: number;
+  notes?: string;
+  headNote?: string;
+  footNote?: string;
+  workedTime?: string;
+  paymentDates?: string[];
+  payrollPeriodId?: number;
+  epsTypeLawDeductionsId?: number;
+  pensionTypeLawDeductionsId?: number;
 }
 export interface PayrollWorker {
   firstName: string;
@@ -64,6 +73,10 @@ export interface PayrollWorker {
   bankName?: string;
   accountType?: string;
   accountNumber?: string;
+  address?: string;
+  municipalityId?: number;
+  typeContractId?: number;
+  workerCode?: string;
 }
 export const VERIFIED_CONCEPTS = [
   'salary',
@@ -148,15 +161,18 @@ export function validatePayroll(
         if (cents(line.quantity) < 0n) errors.push('Cantidad inválida.');
         if (line.percentage !== undefined && cents(line.percentage) > 10000n)
           errors.push('Porcentaje fuera de rango.');
-        if (
-          transmission &&
-          ['eps', 'pension'].includes(line.mapping ?? line.concept) &&
-          cents(line.amount) > 0n &&
-          cents(line.percentage ?? '0') === 0n
-        )
-          errors.push(
-            'Completa el porcentaje de salud y pensión antes de transmitir.',
-          );
+        const deduction = line.mapping ?? line.concept;
+        if (transmission && ['eps', 'pension'].includes(deduction)) {
+          const id =
+            line.typeLawDeductionsId ??
+            (deduction === 'eps'
+              ? state.epsTypeLawDeductionsId
+              : state.pensionTypeLawDeductionsId);
+          if (!Number.isSafeInteger(id) || id! < 1)
+            errors.push(
+              `Completa el código de deducción legal de ${deduction} en NextPyme.`,
+            );
+        }
         if (
           transmission &&
           ['salary', 'transportation_allowance'].includes(
@@ -194,10 +210,38 @@ export function validatePayroll(
       !employee?.subTypeWorkerId)
   )
     errors.push('Completa los datos de pago y trabajador.');
-  if (transmission && (employee?.secondName || employee?.secondSurname))
-    errors.push(
-      'El envío de segundos nombres y apellidos está pendiente de verificar en el esquema completo de NextPyme. Se conservan en el empleado.',
-    );
+  if (transmission) {
+    if (!employee?.address?.trim())
+      errors.push('Completa la dirección del empleado.');
+    if (
+      !Number.isSafeInteger(employee?.municipalityId) ||
+      employee!.municipalityId! < 1
+    )
+      errors.push('Selecciona el municipio del empleado en NextPyme.');
+    if (
+      !Number.isSafeInteger(employee?.typeContractId) ||
+      employee!.typeContractId! < 1
+    )
+      errors.push('Completa el código de tipo de contrato de NextPyme.');
+    if (
+      !Number.isSafeInteger(state.payrollPeriodId) ||
+      state.payrollPeriodId! < 1
+    )
+      errors.push('Completa el código de período de nómina de NextPyme.');
+    if (
+      !Array.isArray(state.paymentDates) ||
+      !state.paymentDates.length ||
+      state.paymentDates.some((date) => !validDate(date))
+    )
+      errors.push('Completa las fechas de pago de la nómina.');
+    if (state.workedTime !== undefined) {
+      try {
+        cents(state.workedTime);
+      } catch {
+        errors.push('Revisa el tiempo trabajado.');
+      }
+    }
+  }
   if (employee?.retirementDate && state.startDate > employee.retirementDate)
     errors.push('El período comienza después del retiro del empleado.');
   return [...new Set(errors)];
@@ -215,56 +259,73 @@ export function buildPayrollPayload(
 ) {
   const errors = validatePayroll(state, worker, true);
   if (errors.length) throw new Error(errors.join(' '));
-  const accrued: Record<string, { payment: string; worked_days: string }[]> =
-      {},
-    deductions: Record<string, { payment: string; percentage: string }> = {};
-  for (const line of state.lines as PayrollLine[]) {
+  const amounts: Record<string, bigint> = {};
+  const lawIds: Record<string, number | undefined> = {
+    eps: state.epsTypeLawDeductionsId,
+    pension: state.pensionTypeLawDeductionsId,
+  };
+  for (const line of state.lines) {
     const key = line.mapping ?? line.concept;
-    if (line.kind === 'accrued')
-      (accrued[key] ??= []).push({
-        payment: money(cents(line.amount)),
-        worked_days: money(cents(line.quantity)),
-      });
-    else {
-      const previous = deductions[key];
-      if (
-        previous &&
-        previous.percentage !== money(cents(line.percentage ?? '0'))
-      )
+    amounts[key] = (amounts[key] ?? 0n) + cents(line.amount);
+    if (line.typeLawDeductionsId !== undefined) {
+      if (lawIds[key] !== undefined && lawIds[key] !== line.typeLawDeductionsId)
         throw new Error(
-          'Agrupa las deducciones del mismo concepto con el mismo porcentaje.',
+          'No mezcles códigos de deducción legal para el mismo concepto.',
         );
-      deductions[key] = {
-        payment: money(
-          cents(line.amount) + (previous ? cents(previous.payment) : 0n),
-        ),
-        percentage: money(cents(line.percentage ?? '0')),
-      };
+      lawIds[key] = line.typeLawDeductionsId;
     }
+  }
+  const total = totals(state.lines);
+  const deductions: Record<string, string | number> = {
+    deductions_total: total.deductions,
+  };
+  for (const key of ['eps', 'pension']) {
+    if (amounts[key] === undefined) continue;
+    const id = lawIds[key];
+    if (!Number.isSafeInteger(id) || id! < 1)
+      throw new Error(
+        `Completa el código de deducción legal de ${key} en NextPyme.`,
+      );
+    deductions[`${key}_deduction`] = money(amounts[key]);
+    deductions[`${key}_type_law_deductions_id`] = id!;
   }
   return {
     type_document_id: predecessor ? 10 : 9,
-    ...(predecessor
-      ? { type_note: state.noteType, predecessor }
-      : { predecessor: {} }),
-    number,
+    ...(predecessor ? { type_note: state.noteType, predecessor } : {}),
+    consecutive: number,
     prefix,
+    notes: state.notes ?? '',
+    head_note: state.headNote ?? '',
+    foot_note: state.footNote ?? '',
+    novelty: { novelty: false, uuidnov: null },
+    sendmail: false,
+    sendmailtome: false,
+    worker_code: worker.workerCode ?? worker.identification,
+    payroll_period_id: state.payrollPeriodId!,
+    payment_dates: state.paymentDates!.map((payment_date) => ({
+      payment_date,
+    })),
     period: {
-      admittance_date: worker.admittanceDate,
+      admision_date: worker.admittanceDate,
       settlement_start_date: state.startDate,
       settlement_end_date: state.endDate,
-      worked_time: money(cents(state.workedDays)),
+      worked_time: money(cents(state.workedTime ?? state.workedDays)),
       issue_date: state.issueDate,
     },
     worker: {
       type_worker_id: worker.typeWorkerId,
       sub_type_worker_id: worker.subTypeWorkerId,
-      type_document_identification_id: worker.documentTypeId,
+      payroll_type_document_identification_id: worker.documentTypeId,
       identification_number: worker.identification,
       surname: worker.surname,
       first_name: worker.firstName,
+      middle_name: worker.secondName?.trim() || null,
+      second_surname: worker.secondSurname?.trim() || null,
+      address: worker.address!,
+      municipality_id: worker.municipalityId!,
+      type_contract_id: worker.typeContractId!,
       high_risk_pension: !!worker.highRiskPension,
-      integral_salary: !!worker.integralSalary,
+      integral_salarary: !!worker.integralSalary,
       salary: money(cents(worker.salary)),
     },
     payment: {
@@ -277,7 +338,14 @@ export function buildPayrollPayload(
           }
         : {}),
     },
-    accrued,
+    accrued: {
+      salary: money(amounts.salary ?? 0n),
+      worked_days: Number(state.workedDays),
+      accrued_total: total.accrued,
+      ...(amounts.transportation_allowance !== undefined
+        ? { transportation_allowance: money(amounts.transportation_allowance) }
+        : {}),
+    },
     deductions,
   };
 }

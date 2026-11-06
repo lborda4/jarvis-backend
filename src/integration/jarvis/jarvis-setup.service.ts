@@ -1,5 +1,6 @@
 import { BadRequestException, ServiceUnavailableException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
+import { CompanyPersonType } from '../../company/enums/company-person-type.enum';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import {
   JarvisCredentials,
@@ -76,7 +77,17 @@ export class JarvisSetupService {
     companyId: string,
   ): Promise<SaveJarvisCredentialsResponseDto> {
     const trimmedCompanyId = companyId?.trim();
-    const business_name = request.business_name?.trim();
+    const person_type = request.person_type;
+    if (person_type && !Object.values(CompanyPersonType).includes(person_type)) {
+      throw new BadRequestException('Seleccione un tipo de persona válido.');
+    }
+    const naturalPerson = person_type === CompanyPersonType.NATURAL_PERSON;
+    const given_names = naturalPerson ? request.given_names?.trim().replace(/\s+/g, ' ') : undefined;
+    const surnames = naturalPerson ? request.surnames?.trim().replace(/\s+/g, ' ') : undefined;
+    if (naturalPerson && (!given_names || !surnames)) {
+      throw new BadRequestException('Los nombres y apellidos son obligatorios para persona natural.');
+    }
+    const business_name = naturalPerson ? `${given_names} ${surnames}` : request.business_name?.trim();
     const trade_name = request.trade_name?.trim() || undefined;
     const economic_activity = request.economic_activity?.trim();
     const tax_regime = request.tax_regime;
@@ -164,6 +175,9 @@ export class JarvisSetupService {
 
     const credentials: JarvisCredentials = {
       ...existingCredentials,
+      person_type: person_type ?? existingCredentials?.person_type,
+      given_names: person_type ? given_names : existingCredentials?.given_names,
+      surnames: person_type ? surnames : existingCredentials?.surnames,
       business_name,
       trade_name,
       economic_activity,
@@ -830,6 +844,9 @@ export class JarvisSetupService {
     return {
       configured,
       subscription,
+      person_type: credentials.person_type,
+      given_names: credentials.given_names,
+      surnames: credentials.surnames,
       business_name: credentials.business_name || undefined,
       trade_name: credentials.trade_name,
       economic_activity: credentials.economic_activity || undefined,

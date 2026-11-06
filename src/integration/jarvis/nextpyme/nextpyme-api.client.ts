@@ -1509,6 +1509,7 @@ export class NextPymeApiClient {
 
   /** Payroll requests deliberately have no automatic retry: a timeout is ambiguous. */
   async payrollRequest(endpoint: 'payroll' | 'payroll-adjust-note' | 'config/environment', body: unknown, token: string, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
+    token = this.requireToken(token);
     const response = await firstValueFrom(this.httpService.request({
       method, url: `${this.getBaseUrl()}/${endpoint}`, data: body,
       headers: this.buildAuthHeaders(token), timeout: 25_000,

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CompanyPersonType } from '../../../company/enums/company-person-type.enum';
 import { ElectronicDocumentType } from '../../../electronic-document/enums/electronic-document-type.enum';
 import { SubscriptionStatus } from '../../../plan/enums/subscription-status.enum';
 import { JarvisTaxRegime } from '../enums/jarvis-tax-regime.enum';
@@ -66,6 +67,15 @@ export class JarvisSubscriptionStatusDto {
 }
 
 export class JarvisCredentialsStatusResponseDto {
+  @ApiPropertyOptional({ enum: CompanyPersonType })
+  person_type?: CompanyPersonType;
+
+  @ApiPropertyOptional()
+  given_names?: string;
+
+  @ApiPropertyOptional()
+  surnames?: string;
+
   @ApiPropertyOptional()
   debitNoteResolution?: JarvisResolutionDto | null;
 

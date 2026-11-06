@@ -3,6 +3,7 @@ import {
   JarvisCredentials,
   JarvisDianResolution,
 } from '../../interfaces/integration-credentials.interface';
+import { CompanyPersonType } from '../../../company/enums/company-person-type.enum';
 import { JarvisResolutionKind } from '../enums/jarvis-resolution-kind.enum';
 import { JarvisTaxRegime } from '../enums/jarvis-tax-regime.enum';
 import { JarvisTaxResponsibility } from '../enums/jarvis-tax-responsibility.enum';
@@ -134,6 +135,10 @@ export function normalizeJarvisCredentials(
 
   return {
     business_name: readString(raw, 'business_name', 'businessName'),
+    person_type: Object.values(CompanyPersonType).includes(raw.person_type as CompanyPersonType)
+      ? raw.person_type as CompanyPersonType : undefined,
+    given_names: readString(raw, 'given_names', 'givenNames') || undefined,
+    surnames: readString(raw, 'surnames', 'surnames') || undefined,
     trade_name: readString(raw, 'trade_name', 'tradeName') || undefined,
     economic_activity: readString(raw, 'economic_activity', 'economicActivity'),
     tax_regime: JARVIS_TAX_REGIMES.has(taxRegime)

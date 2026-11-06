@@ -1,12 +1,22 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CompanyPersonType } from '../../../company/enums/company-person-type.enum';
 import { JarvisTaxRegime } from '../enums/jarvis-tax-regime.enum';
 import { JarvisTaxResponsibility } from '../enums/jarvis-tax-responsibility.enum';
 import { JarvisVatRegime } from '../enums/jarvis-vat-regime.enum';
 
 export class SaveJarvisCredentialsRequestDto {
+  @ApiPropertyOptional({ enum: CompanyPersonType })
+  person_type?: CompanyPersonType;
+
+  @ApiPropertyOptional()
+  given_names?: string;
+
+  @ApiPropertyOptional()
+  surnames?: string;
+
   @ApiProperty({
     example: 'J2S Soluciones SAS',
-    description: 'Razón social de la empresa.',
+    description: 'Razón social o nombre completo de la persona natural.',
   })
   business_name: string;
 

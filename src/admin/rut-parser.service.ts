@@ -20,7 +20,7 @@ export class RutParserService {
     const parser = new PDFParse({ data: new Uint8Array(file!.buffer) });
 
     try {
-      const result = await parser.getText();
+      const result = await parser.getText({ itemJoiner: '\t' });
       return this.parseText(result.text);
     } catch (error) {
       throw new BadRequestException(
@@ -34,8 +34,8 @@ export class RutParserService {
   }
 
   parseText(text: string): ParsedRutDataDto {
-    const lines = text
-      .split(/\r?\n/)
+    const rawLines = text.split(/\r?\n/).filter((line) => line.trim());
+    const lines = rawLines
       .map((line) => line.replace(/\s+/g, ' ').trim())
       .filter(Boolean);
 
@@ -53,18 +53,30 @@ export class RutParserService {
     const identity = this.extractNit(firstPage);
     const personType = this.extractPersonType(firstPage);
     const name = this.extractCompanyName(firstPage, personType);
+    const nameCells = rawLines[firstPage.indexOf(name)]?.split(/\t+/)
+      .map((cell) => cell.trim()).filter(Boolean) ?? [];
+    // Four populated RUT fields: first/second surname, first/other names.
+    // Without their boundaries, ask for confirmation instead of guessing.
+    const hasNaturalNames = personType === CompanyPersonType.NATURAL_PERSON && nameCells.length === 4;
+    const givenNames = hasNaturalNames ? nameCells.slice(2).join(' ') : null;
+    const surnames = hasNaturalNames ? nameCells.slice(0, 2).join(' ') : null;
     const emailIndex = firstPage.findIndex((line) => EMAIL_PATTERN.test(line));
     const email =
       emailIndex >= 0 ? firstPage[emailIndex].match(EMAIL_PATTERN)?.[0] ?? null : null;
     const address = this.extractAddress(firstPage, emailIndex);
     const phone = this.extractPhone(firstPage, emailIndex);
-    const responsibleName = this.extractResponsibleName(lines);
+    const responsibleName = personType === CompanyPersonType.NATURAL_PERSON
+      ? name || null : this.extractResponsibleName(lines);
     const location = this.extractLocation(firstPage);
     const taxRegime = this.extractTaxRegime(lines);
     const vatRegime = this.extractVatRegime(lines);
     const taxResponsibility = this.extractTaxResponsibility(lines);
     const economicActivity = this.extractEconomicActivity(lines);
     const warnings: string[] = [];
+
+    if (personType === CompanyPersonType.NATURAL_PERSON && !hasNaturalNames) {
+      warnings.push('Complete o confirme los nombres y apellidos de la persona natural.');
+    }
 
     if (!address) warnings.push('No se pudo identificar la dirección.');
     if (!email) warnings.push('No se pudo identificar el correo electrónico.');
@@ -88,7 +100,10 @@ export class RutParserService {
     }
 
     const jarvisCredentials: ParsedRutJarvisCredentialsDto = {
-      business_name: name,
+      person_type: personType,
+      given_names: givenNames,
+      surnames,
+      business_name: givenNames && surnames ? `${givenNames} ${surnames}` : name,
       trade_name: null,
       tax_regime: taxRegime,
       vat_regime: vatRegime,
@@ -160,6 +175,11 @@ export class RutParserService {
           verificationDigit: digitsBeforeSection.slice(-1),
         };
       }
+
+      const previousDigits = lines[index - 1]?.replace(/\s/g, '') ?? '';
+      if (/^\d{9,11}$/.test(previousDigits)) {
+        return { nit: previousDigits.slice(0, -1), verificationDigit: previousDigits.slice(-1) };
+      }
     }
 
     throw new BadRequestException(
@@ -192,6 +212,14 @@ export class RutParserService {
     );
 
     if (personTypeIndex >= 0) {
+      if (personType === CompanyPersonType.NATURAL_PERSON) {
+        const candidates = lines.slice(personTypeIndex + 1, personTypeIndex + 8);
+        const candidate = candidates.find((line) =>
+          /^[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ .'’-]{2,}$/i.test(line) &&
+          !/^(COLOMBIA|Fecha|Impuestos|IDENTIFICACI|UBICACI|CLASIFICACI|C[eé]dula|Pa[ií]s|Departamento|Ciudad)/i.test(line),
+        );
+        return candidate ?? '';
+      }
       const candidate = lines[personTypeIndex + 1];
 
       if (
@@ -214,7 +242,8 @@ export class RutParserService {
     municipality: string | null;
     city: string | null;
   } {
-    const locationLine = lines.find((line) => /^COLOMBIA\b/i.test(line));
+    // Natural-person RUTs also include the document's place of issue first.
+    const locationLine = lines.filter((line) => /^COLOMBIA\b/i.test(line)).at(-1);
 
     if (!locationLine) {
       return {
@@ -225,6 +254,7 @@ export class RutParserService {
       };
     }
 
+    const codedLocation = locationLine.match(/^COLOMBIA\s+1\s*6\s*9\s+(.+?)\s+\d\s*\d\s+(.+?)\s+\d\s*\d\s*\d\s*$/i);
     const withoutCountryAndDigits = locationLine
       .replace(/^COLOMBIA\s+/i, '')
       .replace(/(?:^|\s)\d(?=\s|$)/g, ' ')
@@ -244,7 +274,10 @@ export class RutParserService {
     let department: string;
     let municipality: string;
 
-    if (dcSplit) {
+    if (codedLocation) {
+      department = codedLocation[1].trim();
+      municipality = codedLocation[2].trim();
+    } else if (dcSplit) {
       department = dcSplit[1].trim();
       municipality = dcSplit[2].trim();
     } else {
@@ -281,7 +314,7 @@ export class RutParserService {
     }
 
     if (
-      /r[eé]gimen ordinario|Impuesto de renta.*ordinario|complementario r[eé]gimen ordinario/i.test(
+      /r[eé]gimen ordinar|Impuesto de renta.*ordinario|complementario r[eé]gimen ordinario/i.test(
         text,
       )
     ) {
@@ -358,10 +391,19 @@ export class RutParserService {
           return description ? `${codeMatch[1]} - ${description}` : codeMatch[1];
         }
 
-        if (next && !/^\d+$/.test(next) && next.length > 8) {
+        if (next && !/^\d+$/.test(next) && next.length > 8 && !/^\d+\./.test(next)) {
           return next;
         }
       }
+    }
+
+    // The populated CIIU row follows the contact fields in the DIAN form.
+    const emailIndex = lines.findIndex((line) => EMAIL_PATTERN.test(line));
+    if (emailIndex >= 0) {
+      const activity = lines.slice(emailIndex + 1, emailIndex + 5)
+        .find((line) => /^(?:\d\s*){4}\s+(?:\d\s*){8}/.test(line));
+      const digits = activity?.replace(/\s/g, '');
+      if (digits && /^\d{4}(?:19|20)\d{6}/.test(digits)) return digits.slice(0, 4);
     }
 
     return null;

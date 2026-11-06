@@ -1,6 +1,11 @@
 import { JarvisSetupService } from './jarvis-setup.service';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { SaveJarvisResolutionRequestDto } from './dto/jarvis-resolution.dto';
+import { CompanyPersonType } from '../../company/enums/company-person-type.enum';
+import { JarvisTaxRegime } from './enums/jarvis-tax-regime.enum';
+import { JarvisVatRegime } from './enums/jarvis-vat-regime.enum';
+import { JarvisTaxResponsibility } from './enums/jarvis-tax-responsibility.enum';
+import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
 
 function buildService(overrides: {
   findByCompanyAndProvider?: jest.Mock;
@@ -70,6 +75,42 @@ function buildRequest(
     ...overrides,
   } as SaveJarvisResolutionRequestDto;
 }
+
+describe('JarvisSetupService.saveCredentials — identidad del contribuyente', () => {
+  const request = {
+    business_name: '', person_type: CompanyPersonType.NATURAL_PERSON,
+    given_names: ' JUAN   CAMILO ', surnames: ' PEREZ GOMEZ ', trade_name: 'Mi negocio',
+    tax_regime: JarvisTaxRegime.COMMON, vat_regime: JarvisVatRegime.NON_RESPONSIBLE,
+    tax_responsibility: JarvisTaxResponsibility.NOT_APPLICABLE,
+    economic_activity: '4923', country: 'Colombia', department: 'Cundinamarca',
+    municipality: 'Soacha', city: 'Soacha', email: 'persona@example.com', address: 'Calle 1', phone: '3001234567',
+  };
+
+  it('guarda nombres, apellidos y nombre comercial sin exigir razón social', async () => {
+    const { service, integrationsRepository } = buildService({});
+    expect(await service.saveCredentials(request, 'company-1')).toMatchObject({ business_name: 'JUAN CAMILO PEREZ GOMEZ' });
+    const saved = integrationsRepository.save.mock.calls[0][0].credentials;
+    expect(normalizeJarvisCredentials(saved)).toMatchObject({
+      person_type: CompanyPersonType.NATURAL_PERSON,
+      given_names: 'JUAN CAMILO', surnames: 'PEREZ GOMEZ', trade_name: 'Mi negocio',
+    });
+  });
+
+  it.each(['given_names', 'surnames'])('exige %s para persona natural', async field => {
+    const { service, integrationsRepository } = buildService({});
+    await expect(service.saveCredentials({ ...request, [field]: ' ' }, 'company-1')).rejects.toThrow('Los nombres y apellidos son obligatorios');
+    expect(integrationsRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('conserva el flujo de razón social para persona jurídica y limpia los nombres anteriores', async () => {
+    const { service, integrationsRepository } = buildService({});
+    await service.saveCredentials({ ...request, person_type: CompanyPersonType.LEGAL_ENTITY, business_name: 'Empresa SAS' }, 'company-1');
+    const saved = integrationsRepository.save.mock.calls[0][0].credentials;
+    expect(saved.business_name).toBe('Empresa SAS');
+    expect(saved.given_names).toBeUndefined();
+    expect(saved.surnames).toBeUndefined();
+  });
+});
 
 describe('JarvisSetupService.saveResolution — type_document_id', () => {
   it('usa el typeDocumentId real que trajo el frontend en vez del id fijo por kind (bug real reportado: NextPyme rechazaba la clave técnica porque el id fijo no coincidía con el registrado para esa resolución)', async () => {

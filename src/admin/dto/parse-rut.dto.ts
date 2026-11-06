@@ -10,6 +10,15 @@ export class ParseRutUploadDto {
 }
 
 export class ParsedRutJarvisCredentialsDto {
+  @ApiPropertyOptional({ enum: CompanyPersonType })
+  person_type?: CompanyPersonType;
+
+  @ApiPropertyOptional({ nullable: true })
+  given_names?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  surnames?: string | null;
+
   @ApiPropertyOptional({ example: 'JARVIS COLOMBIA S.A.S', nullable: true })
   business_name: string | null;
 

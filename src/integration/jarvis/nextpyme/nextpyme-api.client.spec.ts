@@ -2,6 +2,26 @@ import { of, throwError } from 'rxjs';
 import { NextPymeApiClient } from './nextpyme-api.client';
 
 describe('NextPyme company authentication', () => {
+  it('envía nómina por POST al endpoint indicado, con JSON y token de la empresa', async () => {
+    const { client, httpService } = buildClient({ 'nextPyme.baseUrl': 'https://api.nextpyme.plus/api/ubl2.1/' });
+    httpService.request.mockReturnValue(of({ data: { success: true } }));
+    const payload = { type_document_id: 9, consecutive: 1, prefix: 'NI' };
+    await client.payrollRequest('payroll', payload, ' company-token ');
+    expect(httpService.request).toHaveBeenCalledWith({
+      method: 'POST', url: 'https://api.nextpyme.plus/api/ubl2.1/payroll', data: payload,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: 'Bearer company-token' },
+      timeout: 25000,
+    });
+  });
+
+  it('no envía nómina sin token ni reintenta un envío con timeout', async () => {
+    const { client, httpService } = buildClient();
+    await expect(client.payrollRequest('payroll', {}, ' ')).rejects.toThrow('token');
+    expect(httpService.request).not.toHaveBeenCalled();
+    httpService.request.mockReturnValue(throwError(() => new Error('timeout')));
+    await expect(client.payrollRequest('payroll', {}, 'token')).rejects.toThrow('timeout');
+    expect(httpService.request).toHaveBeenCalledTimes(1);
+  });
   it.each(['local', 'qa', 'development'])('consulta resoluciones de %s por GET con token sin requerir IDSoftware', async environment => {
     const { client, httpService } = buildClient({ 'app.nodeEnv': environment });
     httpService.get.mockReturnValue(of({ status: 200, data: { resolutions: [] } }));

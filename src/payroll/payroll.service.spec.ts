@@ -8,6 +8,8 @@ const state = {
   endDate: '2026-10-31',
   issueDate: '2026-11-01',
   workedDays: '30',
+  payrollPeriodId: 4,
+  paymentDates: ['2026-10-31'],
   lines: [
     {
       id: 'salary',
@@ -30,6 +32,9 @@ const worker = {
   documentTypeId: 3,
   paymentMethodId: 1,
   active: true,
+  address: 'Calle 1',
+  municipalityId: 439,
+  typeContractId: 1,
 };
 const document = {
   id: 'document-a',
@@ -95,6 +100,19 @@ function build(overrides: any = {}) {
   return { service, db, query, api, plans };
 }
 describe('nómina: persistencia y transmisión', () => {
+  it('envía el cuerpo de nómina a NextPyme con el token de la empresa', async () => {
+    const { service, api, query } = build();
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({
+      type_document_id: 9, consecutive: 1, prefix: 'NE', payroll_period_id: 4,
+      accrued: { salary: '1000.00', worked_days: 30, accrued_total: '1000.00' },
+      deductions: { deductions_total: '0.00' },
+      worker: expect.objectContaining({ municipality_id: 439, type_contract_id: 1 }),
+      payment_dates: [{ payment_date: '2026-10-31' }],
+    }), 'private-token');
+    const saved = query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO jarvis_payroll_transmissions')) as any;
+    expect(JSON.parse(saved[1][3])).toEqual(api.payrollRequest.mock.calls[0][1]);
+  });
   it('una consulta negativa no habilita otro envío de una nómina incierta', async () => {
     const { service, query, api } = build({
       status: 'UNCERTAIN',

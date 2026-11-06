@@ -61,6 +61,9 @@ export interface JarvisDianResolution {
 }
 
 export interface JarvisCredentials {
+  person_type?: import('../../company/enums/company-person-type.enum').CompanyPersonType;
+  given_names?: string;
+  surnames?: string;
   business_name?: string;
   trade_name?: string;
   economic_activity?: string;
