@@ -18,7 +18,7 @@ describe('sales invoice PDF data', () => {
   });
 
   it('conserva el perfil de emisión aunque la configuración actual de la empresa cambie', async () => {
-    const profile = { source: 'emission', vatRegime: 'non_vat_responsible', economicActivity: '4923' };
+    const profile = { source: 'emission', vatRegime: 'non_vat_responsible', economicActivity: '4923', icaRate: 4.14 };
     const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { issuerTaxProfile: profile } });
     const data = await service.getData('company', 'id');
     expect(data.issuerTaxProfile).toEqual(profile);

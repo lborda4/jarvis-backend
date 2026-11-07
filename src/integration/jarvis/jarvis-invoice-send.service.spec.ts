@@ -98,11 +98,18 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     return setupResult;
   }
 
-  it('rechaza IVA positivo de un no responsable antes de asignar numeración o enviar', async () => {
-    const { service, request, client, numbering } = nonResponsibleIssuer();
-    await expect(service.createAndSendInvoice({ ...request, items: [{ ...request.items[0], taxAmount: 47500 }] }, 'company-1')).rejects.toThrow('no puede cobrar IVA');
-    expect(client.createInvoice).not.toHaveBeenCalled();
-    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+  it.each([0, 12500, 47500])('conserva el IVA elegido (%s) aunque el emisor esté configurado como no responsable', async taxAmount => {
+    const { service, request, client, history } = nonResponsibleIssuer();
+    await service.createAndSendInvoice({ ...request, items: [{ ...request.items[0], taxAmount }] }, 'company-1');
+    const body = client.createInvoice.mock.calls[0][0];
+    const expectedTax = [{
+      tax_id: 1, tax_amount: taxAmount.toFixed(2), taxable_amount: '250000.00',
+      percent: (taxAmount / 250000 * 100).toFixed(2),
+    }];
+    expect(body.tax_totals).toEqual(expectedTax);
+    expect(body.invoice_lines[0].tax_totals).toEqual(expectedTax);
+    expect(body.legal_monetary_totals.payable_amount).toBe((250000 + taxAmount).toFixed(2));
+    expect(history.record.mock.calls[0][0].sourceRequest.items[0].taxAmount).toBe(taxAmount);
   });
 
   it.each([{ typeRegimeId: 1, ciiu: '4923' }, { typeRegimeId: 2, ciiu: null }])('impide emitir con un registro tributario diferente: %j', async remote => {
@@ -119,6 +126,7 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     expect(client.getIssuerTaxConfiguration).toHaveBeenCalledWith('company-token');
     expect(client.createInvoice.mock.calls[0][0].tax_totals[0].tax_amount).toBe('0.00');
     expect(history.record.mock.calls[0][0].sourceRequest.issuerTaxProfile).toEqual({
+      icaRate: 0,
       vatRegime: 'non_vat_responsible', economicActivity: '4923', taxResponsibility: 'R-99-PN', source: 'emission',
     });
   });

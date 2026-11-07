@@ -227,9 +227,6 @@ export class JarvisInvoiceSendService {
       if (!Number.isSafeInteger(taxId) || !allowedTaxIds.has(taxId)) {
         throw new BadRequestException(`El impuesto del ítem ${index + 1} no está disponible en el catálogo de facturación.`);
       }
-      if (isSaleInvoice && credentials.vat_regime === JarvisVatRegime.NON_RESPONSIBLE && taxId === defaultTaxId && taxAmount > 0) {
-        throw new BadRequestException('El emisor está configurado como no responsable de IVA. La factura de venta no puede cobrar IVA.');
-      }
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new BadRequestException(

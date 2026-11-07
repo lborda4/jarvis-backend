@@ -22,8 +22,10 @@ const s = StyleSheet.create({
   financial: { flexDirection: 'row', gap: 12, marginTop: 12 }, totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, gap: 8 },
   total: { backgroundColor: '#dffafa', color: '#006675', padding: 7, fontFamily: 'Helvetica-Bold' },
   words: { border: '0.6 solid #d7e1e9', borderRadius: 4, padding: 10, marginTop: 12 },
-  dian: { flexDirection: 'row', gap: 12, marginTop: 12, paddingVertical: 12, borderTop: '0.6 solid #cbd9e6', borderBottom: '0.6 solid #cbd9e6' },
-  qr: { width: 86, height: 86 }, small: { fontSize: 7 }, footer: { textAlign: 'center', fontSize: 7, color: '#7187a1', marginTop: 14 },
+  dian: { flexDirection: 'column', gap: 3, marginTop: 12, paddingVertical: 6, borderTop: '0.6 solid #cbd9e6', borderBottom: '0.6 solid #cbd9e6' },
+  dianRow: { flexDirection: 'row', gap: 12 },
+  uniqueCode: { fontFamily: 'Courier', fontSize: 7 },
+  qr: { width: 86, height: 86 }, small: { fontSize: 7 }, footer: { textAlign: 'center', fontSize: 7, color: '#7187a1', marginTop: 10 },
   pageNumber: { position: 'absolute', bottom: 20, right: 28, fontSize: 7, color: '#7187a1' },
 });
 const money = (value: number) => value.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -37,6 +39,11 @@ function Party({ title, party }: { title: string; party: JarvisInvoicePdfParty }
 const widths = ['4%', '13%', '18%', '5%', '11%', '8%', '6%', '7%', '7%', '7%', '14%'];
 export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfData; qr: string }) {
   const profile = data.issuerTaxProfile;
+  const xmlActivity = data.issuer.economicActivity?.trim();
+  const savedActivity = profile?.economicActivity?.trim();
+  const sameActivity = xmlActivity?.match(/^\d{4}\b/)?.[0] === savedActivity?.match(/^\d{4}\b/)?.[0] && /^\d{4}\b/.test(xmlActivity ?? '');
+  const economicActivity = savedActivity && (!xmlActivity || (sameActivity && savedActivity.length > xmlActivity.length)) ? savedActivity : xmlActivity;
+  const icaRate = profile?.icaRate != null && Number.isFinite(profile.icaRate) && profile.icaRate > 0 ? `${profile.icaRate} ‰` : null;
   const profileLabel = profile?.source === 'current' ? ' (configuración actual)' : '';
   const vatRegimeLabel = profile?.vatRegime === 'non_vat_responsible' ? 'No responsable de IVA'
     : profile?.vatRegime === 'vat_responsible' ? 'Responsable de IVA' : null;
@@ -91,14 +98,17 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
       </View>
       <View style={s.words} wrap={false}><Text style={s.heading}>Valor en letras</Text><Text style={s.small}>{amountInSpanish(netPayable, data.currency).toUpperCase()}</Text></View>
       <View style={s.dian} wrap={false}>
+        <View style={s.dianRow}>
         <Image src={qr} style={s.qr} />
-        <View style={s.half}><Text style={s.name}>Documento electrónico validado por la DIAN</Text><Text style={s.field}>{copy.uniqueCode}:</Text><Text style={s.small}>{data.cufe.match(/.{1,32}/g)?.join('\n')}</Text><Text style={[s.field, { marginTop: 7 }]}>Fecha y hora de generación:</Text><Text style={s.small}>{data.issueDate} {data.issueTime}</Text></View>
+        <View style={s.half}><Text style={s.name}>Documento electrónico validado por la DIAN</Text><Text style={[s.field, { marginTop: 7 }]}>Fecha y hora de generación:</Text><Text style={s.small}>{data.issueDate} {data.issueTime}</Text></View>
         <View style={s.half}><Text style={s.name}>Información tributaria y resolución de facturación</Text>
           <Text style={s.small}>Responsabilidad fiscal (XML): {value(data.issuer.fiscalRegime)}</Text>
           <Text style={s.small}>Tributo (XML): {value(data.issuer.taxResponsibility)}</Text>
           {vatRegimeLabel && <Text style={s.small}>Régimen IVA{profileLabel}: {vatRegimeLabel}</Text>}
-          <Text style={s.small}>Actividad económica{!data.issuer.economicActivity ? profileLabel : ''}: {value(data.issuer.economicActivity || profile?.economicActivity)}</Text>
           <Text style={s.small}>Resolución No. {value(data.authorization?.number)}</Text><Text style={s.small}>Prefijo: {value(data.prefix)}</Text><Text style={s.small}>Desde: {value(data.authorization?.from)}  Hasta: {value(data.authorization?.to)}</Text><Text style={s.small}>Vigencia: {value(data.authorization?.startDate)} a {value(data.authorization?.endDate)}</Text></View>
+      </View>
+        <Text style={s.small}>Actividad económica{!xmlActivity ? profileLabel : ''}: {value(economicActivity)}{icaRate ? ` · Tarifa ICA: ${icaRate}` : ''}</Text>
+        <Text style={s.uniqueCode} hyphenationCallback={keepPdfWordIntact}>{copy.uniqueCode}: {data.cufe}</Text>
       </View>
       <Text style={s.footer}>Esta es una representación gráfica de la {copy.footer}.{'\n'}Emitido por Jarvis Colombia</Text>
       <Text fixed style={s.pageNumber} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
