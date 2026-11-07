@@ -3,7 +3,7 @@ import {
   buildDianCatalogQrUrl,
   buildDianInvoiceQrText,
 } from '../../../electronic-document/helpers/dian-invoice-qr.helper';
-import type { JarvisCredentials } from '../../interfaces/integration-credentials.interface';
+import { issuedItemName } from '../helpers/jarvis-issued-snapshot.helper';
 import type { JarvisSalesInvoice } from '../entities/jarvis-sales-invoice.entity';
 import { JarvisResolutionKind } from '../enums/jarvis-resolution-kind.enum';
 import type { JarvisInvoicePdfData } from './jarvis-invoice-pdf-data';
@@ -38,8 +38,6 @@ function money(value: unknown): number {
  */
 export function mapJarvisIssuedDocumentToPdfData(
   invoice: JarvisSalesInvoice,
-  credentials?: JarvisCredentials | null,
-  company?: { nit: string; name: string } | null,
 ): JarvisInvoicePdfData | null {
   const request = invoice.sourceRequest;
   const items = Array.isArray(request?.items) ? request.items : [];
@@ -47,7 +45,7 @@ export function mapJarvisIssuedDocumentToPdfData(
     return null;
   }
 
-  const mappedItems = items.map((item) => {
+  const mappedItems = items.map((item, index) => {
     const quantity = money(item.quantity);
     const unitValue = money(item.unitValue);
     const discount = money(item.discount);
@@ -56,6 +54,7 @@ export function mapJarvisIssuedDocumentToPdfData(
     const ivaPercentage = line > 0 ? (ivaAmount / line) * 100 : 0;
     return {
       description: item.description?.trim() || 'Ítem',
+      name: issuedItemName(request?.emissionSnapshot, index, item) || null,
       code: item.code?.trim() || null,
       quantity,
       unitValue,
@@ -83,18 +82,7 @@ export function mapJarvisIssuedDocumentToPdfData(
       ? 'Documento relacionado'
       : 'Factura relacionada';
 
-  const issuer = party({
-    name: credentials?.business_name?.trim() || company?.name?.trim() || null,
-    documentType: 'NIT',
-    documentNumber: company?.nit?.trim() || null,
-    tradeName: credentials?.trade_name?.trim() || credentials?.business_name?.trim() || null,
-    address: credentials?.address?.trim() || null,
-    phone: credentials?.phone?.trim() || null,
-    email: credentials?.email?.trim() || null,
-    cityName: credentials?.city?.trim() || credentials?.municipality?.trim() || null,
-    departmentName: credentials?.department?.trim() || null,
-    countryName: credentials?.country?.trim() || null,
-  });
+  const issuer = party(request?.emissionSnapshot?.issuer ?? {});
   const buyer = party({
     name: invoice.customerName?.trim() || request?.customerName?.trim() || null,
     documentType: request?.customerDocumentType?.trim() || null,
@@ -102,6 +90,7 @@ export function mapJarvisIssuedDocumentToPdfData(
       invoice.customerIdentification?.trim() ||
       request?.customerIdentification?.trim() ||
       null,
+    ...request?.emissionSnapshot?.buyer,
   });
 
   return {

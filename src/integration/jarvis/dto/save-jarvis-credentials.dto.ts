@@ -5,6 +5,8 @@ import { JarvisTaxResponsibility } from '../enums/jarvis-tax-responsibility.enum
 import { JarvisVatRegime } from '../enums/jarvis-vat-regime.enum';
 
 export class SaveJarvisCredentialsRequestDto {
+  @ApiPropertyOptional({ example: 7.66, default: 0, minimum: 0, description: 'Tarifa de ICA por mil. Vacío u omitido se guarda en cero.' })
+  ica_rate?: number;
   @ApiPropertyOptional({ enum: CompanyPersonType })
   person_type?: CompanyPersonType;
 

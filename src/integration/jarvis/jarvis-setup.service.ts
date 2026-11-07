@@ -90,6 +90,11 @@ export class JarvisSetupService {
     const business_name = naturalPerson ? `${given_names} ${surnames}` : request.business_name?.trim();
     const trade_name = request.trade_name?.trim() || undefined;
     const economic_activity = request.economic_activity?.trim();
+    const rawIcaRate = request.ica_rate as unknown;
+    const ica_rate = rawIcaRate == null || rawIcaRate === '' ? 0 : Number(rawIcaRate);
+    if ((rawIcaRate != null && typeof rawIcaRate !== 'number' && typeof rawIcaRate !== 'string') || !Number.isFinite(ica_rate) || ica_rate < 0) {
+      throw new BadRequestException('La tarifa de ICA debe ser un número mayor o igual a cero.');
+    }
     const tax_regime = request.tax_regime;
     const vat_regime = request.vat_regime;
     const tax_responsibility = request.tax_responsibility;
@@ -181,6 +186,7 @@ export class JarvisSetupService {
       business_name,
       trade_name,
       economic_activity,
+      ica_rate,
       tax_regime,
       vat_regime,
       tax_responsibility,
@@ -850,6 +856,7 @@ export class JarvisSetupService {
       business_name: credentials.business_name || undefined,
       trade_name: credentials.trade_name,
       economic_activity: credentials.economic_activity || undefined,
+      ica_rate: credentials.ica_rate ?? 0,
       tax_regime: credentials.tax_regime,
       vat_regime: credentials.vat_regime,
       tax_responsibility: credentials.tax_responsibility,

@@ -5,13 +5,14 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
-  it('muestra el CIIU y régimen actuales para documentos antiguos sin alterar los datos del XML', async () => {
+  it('no completa documentos antiguos con el CIIU ni régimen actuales', async () => {
     const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
     integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
       business_name: 'Empresa SAS', vat_regime: 'non_vat_responsible', economic_activity: '4923',
     } } as never);
     const data = await service.getData('company', 'id');
-    expect(data.issuerTaxProfile).toMatchObject({ source: 'current', vatRegime: 'non_vat_responsible', economicActivity: '4923' });
+    expect(data.issuerTaxProfile).toBeUndefined();
+    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
     expect(data.total).toBe(238);
     expect(data.iva).toBe(38);
   });
@@ -46,6 +47,37 @@ describe('sales invoice PDF data', () => {
     const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { sellers } });
     expect((await service.getData('company', 'id')).sellers).toEqual(sellers);
   });
+  it('prioriza los datos fiscales del XML y usa solo nombres de producto guardados al emitir', async () => {
+    const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { emissionSnapshot: {
+      issuer: { name: 'Nombre local diferente' }, buyer: { name: 'Tercero editado' },
+      items: [{ code: '00012', description: 'Producto original', name: 'Nombre al emitir' }],
+    } } });
+    const data = await service.getData('company', 'id');
+    expect(data.issuer.name).toBe('Proveedor XML');
+    expect(data.buyer.name).toBe('Comprador XML');
+    expect(data.items[0].name).toBe('Nombre al emitir');
+    expect(data.items[0].description).toBe('Producto original');
+    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
+  });
+
+  it.each(['ELECTRONIC_INVOICE', 'SUPPORT_DOCUMENT', 'CREDIT_NOTE', 'DEBIT_NOTE', 'SUPPORT_CREDIT_NOTE'])('conserva partes y productos emitidos en %s si el proveedor no entrega XML', async documentKind => {
+    const saved = { issuer: { name: 'Emisor original', documentNumber: '123', address: 'Calle original' },
+      buyer: { name: 'Cliente original', documentNumber: '456', email: 'original@example.com' },
+      items: [{ code: 'P1', description: 'Descripción enviada', name: 'Producto original' }] };
+    const { service, client, companies, integrations } = setup({ id: 'id', cufe: 'issued-code', invoiceXml: null, documentKind, prefix: 'FE', number: '1', issueDate: '2026-11-06', total: '100',
+      sourceRequest: { emissionSnapshot: saved, items: [{ code: 'P1', description: 'Descripción enviada', quantity: 1, unitValue: 100 }] } });
+    client.getInvoiceXmlByCufe.mockRejectedValue(new Error('XML no disponible'));
+    companies.findById.mockResolvedValue({ nextPymeToken: 'new-token', name: 'Empresa nueva', nit: '999' });
+    const first = await service.getData('company', 'id');
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { business_name: 'Otra empresa' } });
+    const second = await service.getData('company', 'id');
+    expect(first.issuer).toMatchObject(saved.issuer);
+    expect(first.buyer).toMatchObject(saved.buyer);
+    expect(first.items[0]).toMatchObject({ name: 'Producto original', description: 'Descripción enviada', unitValue: 100 });
+    expect(second).toEqual(first);
+    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
+  });
+
   function setup(invoice: unknown) {
     const query = { addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn().mockResolvedValue(invoice) };
     const repository = { createQueryBuilder: jest.fn(() => query), update: jest.fn() };
@@ -53,7 +85,7 @@ describe('sales invoice PDF data', () => {
     const client = { getInvoiceXmlByCufe: jest.fn().mockResolvedValue(DOWNLOAD_XML) };
     const logos = { get: jest.fn().mockResolvedValue({ logoDataUrl: null }) };
     const integrations = { findByCompanyAndProvider: jest.fn().mockResolvedValue({ credentials: { business_name: 'Empresa SAS' } }) };
-    return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never, logos as never, integrations as never), repository, query, client, logos, integrations };
+    return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never, logos as never), repository, query, client, logos, integrations, companies };
   }
   it('adds only the owning company logo to the PDF', async () => {
     const { service, logos } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE' });
@@ -119,12 +151,12 @@ describe('sales invoice PDF data', () => {
     expect(data.documentKind).toBe('SUPPORT_CREDIT_NOTE');
     expect(data.dianQrText).toContain('cuds-ajuste');
     expect(data.references?.[0]?.number).toBe('DSJ3');
-    expect(data.issuer.documentNumber).toBe('900123456');
+    expect(data.issuer.documentNumber).toBeNull();
     expect(data.total).toBe(238000);
     expect(data.subtotal).toBe(200000);
     expect(data.iva).toBe(38000);
     expect(repository.update).not.toHaveBeenCalled();
-    expect(integrations.findByCompanyAndProvider).toHaveBeenCalled();
+    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
   });
 
   it('preserves the XML error when an old document has no stored items', async () => {
@@ -163,7 +195,7 @@ describe('reenvío de correo de documentos emitidos', () => {
     const repository = { findOne: jest.fn().mockResolvedValue({ prefix: 'NDS', number: 'NDS5' }) };
     const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'owner-token' }) };
     const client = { sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
-    const service = new JarvisInvoicePdfService(repository as never, companies as never, client as never, {} as never, {} as never);
+    const service = new JarvisInvoicePdfService(repository as never, companies as never, client as never, {} as never);
     jest.spyOn(service, 'getData').mockResolvedValue({ issuer: { name: 'Empresa SAS', documentNumber: '900123456' }, buyer: { email: 'cliente@correo.com', name: 'Cliente' }, invoiceNumber: 'NDS5', issueDate: '2026-10-12', total: 238000, currency: 'COP', documentKind: 'SUPPORT_CREDIT_NOTE' } as never);
     return { service, repository, client };
   }

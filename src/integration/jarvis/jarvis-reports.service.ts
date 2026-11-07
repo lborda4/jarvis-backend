@@ -7,6 +7,7 @@ import { Workbook } from 'exceljs';
 import { DataSource } from 'typeorm';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
+import { buildReportSuggestions } from './helpers/jarvis-report-suggestions.helper';
 import {
   calculateJarvisReport,
   reportColumns,
@@ -105,7 +106,7 @@ export class JarvisReportsService {
     private readonly integrations: IntegrationsRepository,
   ) {}
 
-  private async dataset(companyId: string, query: ReportQuery) {
+  private async documents(companyId: string, query: ReportQuery) {
     if (!companyId?.trim())
       throw new BadRequestException('La empresa activa es obligatoria.');
     const filters = validateReportQuery(query);
@@ -164,6 +165,16 @@ export class JarvisReportsService {
     `,
       params,
     );
+    return { filters, documents };
+  }
+
+  async suggestions(companyId: string, query: ReportQuery) {
+    const { documents } = await this.documents(companyId, { ...query, search: '', customer: '', product: '', seller: '' });
+    return buildReportSuggestions(documents);
+  }
+
+  private async dataset(companyId: string, query: ReportQuery) {
+    const { documents, filters } = await this.documents(companyId, query);
     const result = calculateJarvisReport(documents, filters);
     return {
       filters,

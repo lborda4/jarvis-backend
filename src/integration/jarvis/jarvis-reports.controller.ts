@@ -8,6 +8,10 @@ import type { ReportQuery } from './jarvis-reports.types';
 @Controller('integrations/jarvis/reports')
 export class JarvisReportsController {
   constructor(private readonly reports: JarvisReportsService) {}
+  @Get('suggestions')
+  suggestions(@CurrentUser() user: AuthenticatedUser, @Query() query: ReportQuery) {
+    return this.reports.suggestions(getAuthenticatedCompanyId(user), query);
+  }
   @Get('export')
   async export(
     @CurrentUser() user: AuthenticatedUser,

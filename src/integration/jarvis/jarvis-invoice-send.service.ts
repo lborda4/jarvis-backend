@@ -54,6 +54,7 @@ import { buildJarvisInvoiceChargeTaxTotals } from './helpers/jarvis-invoice-tax.
 import { toNextPymePartyName } from './helpers/nextpyme-party-name.helper';
 import { calculateJarvisRetention } from './helpers/jarvis-tax-calculation.helper';
 import { issuerTaxProfile } from './helpers/jarvis-issuer-tax-profile.helper';
+import { captureIssuedSnapshot } from './helpers/jarvis-issued-snapshot.helper';
 import { JarvisCredentials } from '../interfaces/integration-credentials.interface';
 
 const DOCUMENT_TYPE_IDENTIFICATION_FALLBACK: Record<string, number> = {
@@ -595,6 +596,15 @@ export class JarvisInvoiceSendService {
             invoice_lines: invoiceLines,
           };
 
+          const emissionSnapshot = await captureIssuedSnapshot(this.dataSource, {
+            companyId, company, credentials, items,
+            buyer: {
+              name: isSupportCreditNote ? (request.customerName?.trim() || tercero.name).trim() : payload.customer.name,
+              documentType, documentNumber: tercero.documentNumber, checkDigit: tercero.checkDigit || null,
+              address: payload.customer.address, phone: payload.customer.phone, email: payload.customer.email,
+            },
+          });
+
           this.logger.log(
             `[companyId=${companyId}] Body ${documentLabel} -> NextPyme ${JSON.stringify(
               payload,
@@ -703,7 +713,7 @@ export class JarvisInvoiceSendService {
           try {
             historyId = await this.invoiceHistory.record({
               invoiceXml,
-              sourceRequest: JSON.parse(JSON.stringify({ ...request, recipientCopyEmails: tercero.copyEmails ?? [], issuerTaxProfile: issuerTaxProfile(credentials, 'emission'), attachmentDraftId: undefined, attachment, paymentBreakdown, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
+              sourceRequest: JSON.parse(JSON.stringify({ ...request, emissionSnapshot, recipientCopyEmails: tercero.copyEmails ?? [], issuerTaxProfile: issuerTaxProfile(credentials, 'emission'), attachmentDraftId: undefined, attachment, paymentBreakdown, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
               companyId, documentKind: kind, providerId: createdId, prefix: numbering.prefix, number: String(createdNumber),
               issueDate, customerName: request.customerName?.trim() || tercero.name,
               customerIdentification, currency, total: formatMoney(payable), cufe: createdCufe,

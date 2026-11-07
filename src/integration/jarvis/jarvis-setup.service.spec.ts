@@ -96,6 +96,25 @@ describe('JarvisSetupService.saveCredentials — identidad del contribuyente', (
     });
   });
 
+  it.each([undefined, null, '', '   ', 0])('guarda tarifa ICA cero cuando se recibe %j', async ica_rate => {
+    const { service, integrationsRepository } = buildService({});
+    await service.saveCredentials({ ...request, ica_rate } as never, 'company-1');
+    expect(integrationsRepository.save.mock.calls[0][0].credentials.ica_rate).toBe(0);
+  });
+  it('guarda y recupera la tarifa ICA decimal de la empresa', async () => {
+    const { service, integrationsRepository } = buildService({});
+    await service.saveCredentials({ ...request, ica_rate: 7.66 }, 'company-1');
+    const saved = integrationsRepository.save.mock.calls[0][0].credentials;
+    expect(saved.ica_rate).toBe(7.66);
+    expect(normalizeJarvisCredentials(saved).ica_rate).toBe(7.66);
+    expect(normalizeJarvisCredentials({}).ica_rate).toBe(0);
+  });
+  it.each([-1, NaN, Infinity, 'inválido', true, [], {}])('rechaza tarifa ICA inválida %j sin guardar', async ica_rate => {
+    const { service, integrationsRepository } = buildService({});
+    await expect(service.saveCredentials({ ...request, ica_rate } as never, 'company-1')).rejects.toThrow('tarifa de ICA');
+    expect(integrationsRepository.save).not.toHaveBeenCalled();
+  });
+
   it.each(['given_names', 'surnames'])('exige %s para persona natural', async field => {
     const { service, integrationsRepository } = buildService({});
     await expect(service.saveCredentials({ ...request, [field]: ' ' }, 'company-1')).rejects.toThrow('Los nombres y apellidos son obligatorios');

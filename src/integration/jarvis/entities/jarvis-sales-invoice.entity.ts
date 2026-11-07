@@ -9,6 +9,7 @@ export class JarvisSalesInvoice {
   sourceRequest: (import('../dto/create-jarvis-invoice.dto').CreateJarvisInvoiceRequestDto & {
     issuerTaxProfile?: import('../helpers/jarvis-issuer-tax-profile.helper').JarvisIssuerTaxProfile;
     recipientCopyEmails?: string[];
+    emissionSnapshot?: import('../helpers/jarvis-issued-snapshot.helper').JarvisIssuedSnapshot;
   }) | null;
   @Column({ name: 'document_kind', type: 'varchar', length: 30, default: 'ELECTRONIC_INVOICE' }) documentKind: string;
   @PrimaryGeneratedColumn('uuid') id: string;

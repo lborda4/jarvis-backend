@@ -104,6 +104,9 @@ export class JarvisCredentialsStatusResponseDto {
   })
   economic_activity?: string;
 
+  @ApiPropertyOptional({ example: 0, description: 'Tarifa de ICA por mil.' })
+  ica_rate?: number;
+
   @ApiPropertyOptional({ enum: JarvisTaxRegime })
   tax_regime?: JarvisTaxRegime;
 

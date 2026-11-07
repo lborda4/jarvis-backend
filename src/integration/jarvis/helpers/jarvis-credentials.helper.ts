@@ -135,6 +135,7 @@ export function normalizeJarvisCredentials(
 
   return {
     business_name: readString(raw, 'business_name', 'businessName'),
+    ica_rate: Number.isFinite(Number(raw.ica_rate)) && Number(raw.ica_rate) >= 0 ? Number(raw.ica_rate) : 0,
     person_type: Object.values(CompanyPersonType).includes(raw.person_type as CompanyPersonType)
       ? raw.person_type as CompanyPersonType : undefined,
     given_names: readString(raw, 'given_names', 'givenNames') || undefined,

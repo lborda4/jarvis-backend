@@ -71,6 +71,17 @@ function setup(
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
+  it.each([JarvisResolutionKind.ELECTRONIC_INVOICE, JarvisResolutionKind.SUPPORT_DOCUMENT])('captura productos y tercero antes del envío y guarda su copia en %s', async kind => {
+    const thirdParty = { name: 'Cliente original', municipalityId: 149, typeRegimeId: 2, documentNumber: '901335977', email: 'original@example.com', address: 'Calle original' };
+    const { service, request, dataSource, history, client } = setup('company-token', thirdParty);
+    dataSource.query.mockImplementation(async (sql: string) => sql.startsWith('SELECT sku, name') ? [{ sku: '01', name: 'Producto original' }] : []);
+    await service.createAndSendInvoice(request, 'company-1', kind);
+    thirdParty.name = 'Cliente editado'; thirdParty.address = 'Dirección editada';
+    const saved = history.record.mock.calls[0][0].sourceRequest.emissionSnapshot;
+    expect(saved.items[0].name).toBe('Producto original');
+    expect(saved.buyer).toMatchObject({ name: 'Cliente original', address: 'Calle original', email: 'original@example.com' });
+    expect(dataSource.query.mock.invocationCallOrder[0]).toBeLessThan((kind === JarvisResolutionKind.SUPPORT_DOCUMENT ? client.createSupportDocument : client.createInvoice).mock.invocationCallOrder[0]);
+  });
   it.each([JarvisResolutionKind.ELECTRONIC_INVOICE, JarvisResolutionKind.SUPPORT_DOCUMENT])('incluye las copias del tercero al emitir %s sin duplicar destinatarios', async kind => {
     const { service, request, client, history, integrations } = setup('company-token', { name: 'Cliente', municipalityId: 149, typeRegimeId: 2, email: 'Cliente@example.com', copyEmails: ['CC@example.com', 'cc@example.com', 'cliente@example.com', 'empresa@example.com'] });
     integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { email: 'EMPRESA@example.com' } });
@@ -530,7 +541,10 @@ describe('invoice source persistence', () => {
     const { service, request, history } = setup();
     await service.createAndSendInvoice(request, 'company-1');
     const saved = history.record.mock.calls[0][0].sourceRequest;
-    expect(saved).toEqual({ ...request, recipientCopyEmails: [] });
+    expect(saved).toEqual({ ...request, recipientCopyEmails: [], emissionSnapshot: expect.objectContaining({
+      buyer: expect.objectContaining({ name: 'Cliente' }),
+      items: [{ code: '01', description: 'Servicio', name: 'Servicio' }],
+    }) });
     request.items[0].description = 'Changed';
     expect(saved.items[0].description).toBe('Servicio');
   });
