@@ -2,16 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfiguration } from '../../config/configuration';
 import { isSafeMailFrom } from '../helpers/password-reset.helper';
+import { buildPasswordResetEmail } from '../helpers/password-reset-email.helper';
+import { buildWelcomeEmail } from '../helpers/welcome-email.helper';
 
 const RESEND_EMAILS_URL = 'https://api.resend.com/emails';
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 @Injectable()
 export class ResendMailService {
@@ -22,6 +16,14 @@ export class ResendMailService {
   ) {}
 
   async sendPasswordReset(recipient: string, resetUrl: string): Promise<void> {
+    await this.send(recipient, buildPasswordResetEmail(resetUrl));
+  }
+
+  async sendWelcome(recipient: string, companyName: string, registrationUrl: string): Promise<boolean> {
+    return this.send(recipient, buildWelcomeEmail(companyName, registrationUrl));
+  }
+
+  private async send(recipient: string, template: { subject: string; html: string; text: string }): Promise<boolean> {
     const apiKey = this.configService.get('passwordResetMail.apiKey', {
       infer: true,
     });
@@ -31,12 +33,10 @@ export class ResendMailService {
 
     if (!apiKey || !isSafeMailFrom(from)) {
       this.logger.warn(
-        'No se envió el correo de restablecimiento porque falta la configuración de Resend.',
+        'No se envió el correo porque falta la configuración de Resend.',
       );
-      return;
+      return false;
     }
-
-    const safeUrl = escapeHtml(resetUrl);
 
     try {
       const response = await fetch(RESEND_EMAILS_URL, {
@@ -48,9 +48,7 @@ export class ResendMailService {
         body: JSON.stringify({
           from,
           to: [recipient],
-          subject: 'Restablece tu contraseña en Jarvis',
-          html: `<p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en Jarvis.</p><p><a href="${safeUrl}">Restablecer contraseña</a></p><p>El enlace vence en 45 minutos. Si no fuiste tú, ignora este correo.</p>`,
-          text: `Recibimos una solicitud para restablecer la contraseña de tu cuenta en Jarvis.\n\n${resetUrl}\n\nEl enlace vence en 45 minutos. Si no fuiste tú, ignora este correo.`,
+          ...template,
         }),
         signal: AbortSignal.timeout(10_000),
       });
@@ -62,8 +60,10 @@ export class ResendMailService {
           `El proveedor de correo rechazó el envío (${response.status}).`,
         );
       }
+      return response.ok;
     } catch {
       this.logger.warn('No se pudo contactar al proveedor de correo.');
+      return false;
     }
   }
 }

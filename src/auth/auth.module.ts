@@ -15,6 +15,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { AuthenticatedUserResolverService } from './services/authenticated-user-resolver.service';
 import { PasswordResetService } from './services/password-reset.service';
 import { ResendMailService } from './services/resend-mail.service';
+import { RegistrationInvitationService } from './services/registration-invitation.service';
 import { WsAuthService } from './services/ws-auth.service';
 import { AppConfiguration } from '../config/configuration';
 import { RutParserService } from '../admin/rut-parser.service';
@@ -37,6 +38,7 @@ import { PlanModule } from '../plan/plan.module';
     AuthService,
     PasswordResetService,
     ResendMailService,
+    RegistrationInvitationService,
     UsersRepository,
     UserCompaniesRepository,
     RutParserService,
@@ -49,6 +51,7 @@ import { PlanModule } from '../plan/plan.module';
     },
   ],
   exports: [
+    RegistrationInvitationService,
     AuthService,
     UsersRepository,
     UserCompaniesRepository,

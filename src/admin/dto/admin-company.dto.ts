@@ -86,6 +86,8 @@ export class AdminIntegrationItemDto {
 }
 
 export class AdminCompanyListItemDto {
+  @ApiPropertyOptional({ nullable: true })
+  registrationEmail?: string | null;
   @ApiProperty({ enum: ['BILLING', 'PAYROLL'], isArray: true })
   jarvisModules: JarvisModule[];
   @ApiPropertyOptional({
@@ -171,6 +173,8 @@ export class AdminCompanyListItemDto {
 }
 
 export class CreateAdminCompanyRequestDto {
+  @ApiProperty({ description: 'Correo que recibirá el enlace de creación de usuario.' })
+  registrationEmail?: string;
   @ApiPropertyOptional({ enum: ['BILLING', 'PAYROLL'], isArray: true })
   jarvisModules?: JarvisModule[];
   @ApiPropertyOptional({ maxLength: 120 })
@@ -251,7 +255,7 @@ export class CreateAdminCompanyRequestDto {
 
   @ApiPropertyOptional({
     description:
-      'Token Bearer propio de la empresa para NextPyme. Es necesario para consultar documentos en NextPyme.',
+      'Token Bearer propio de la empresa para NextPyme. Sin token se crea solo en Jarvis y el paquete inicial queda pendiente de asignación desde la recarga.',
   })
   nextPymeToken?: string;
 
@@ -314,6 +318,10 @@ export class UpdateSiigoDocumentQuotasResponseDto {
 }
 
 export class CreateAdminCompanyResponseDto {
+  @ApiPropertyOptional({ description: 'Resultado de la asignación del cupo inicial en NextPyme. PENDING requiere vincular la empresa y asignar el paquete desde la recarga.' })
+  nextPymePackage?: { status: 'ASSIGNED' | 'PENDING'; message: string };
+  @ApiPropertyOptional()
+  welcome?: { status: 'SENT' | 'FAILED'; message: string };
   @ApiProperty({ type: AdminCompanyListItemDto })
   company: AdminCompanyListItemDto;
 }
@@ -341,7 +349,7 @@ export class RegenerateCompanyInviteCodeResponseDto {
 export class UpdateCompanyNextPymeTokenRequestDto {
   @ApiProperty({
     description:
-      'Token Bearer de NextPyme para esta empresa. Enviar vacío/null para volver a usar el token global.',
+      'Token Bearer propio de NextPyme para esta empresa. Enviar vacío/null elimina la vinculación. Guardar el token no asigna documentos; usa la recarga para asignar el paquete pendiente.',
     example: 'e7f162aab2e81ec13840102d744c31eb6504f5d7a94cc8ca5709acdcaef16c30',
   })
   nextPymeToken: string | null;

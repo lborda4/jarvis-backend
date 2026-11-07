@@ -17,6 +17,7 @@ import { DataSource } from 'typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { Company } from '../company/entities/company.entity';
+import { registrationEmail } from '../auth/helpers/company-registration.helper';
 import { DEFAULT_JARVIS_MODULES, validateJarvisModules } from '../company/jarvis-modules';
 import { CompanyPersonType } from '../company/enums/company-person-type.enum';
 import { CompaniesRepository } from '../company/repositories/companies.repository';
@@ -367,6 +368,7 @@ export class AdminService {
         )
       : null;
 
+    const welcomeEmail = registrationEmail(request?.registrationEmail ?? request?.responsible?.email);
     const existingCompany = await this.companiesRepository.findByNit(nit);
 
     if (existingCompany) {
@@ -396,6 +398,7 @@ export class AdminService {
           cityName: request?.cityName?.trim() || null,
           nextPymeToken,
           jarvisModules,
+          registrationEmail: welcomeEmail,
         }),
       );
 
@@ -470,8 +473,10 @@ export class AdminService {
 
       // El documento de reserva mantiene disponibles los servicios de NextPyme
       // cuando se agota el cupo comercial; nunca se suma al plan de Jarvis.
-      // Si la asignación falla, la transacción revierte el alta para poder reintentar.
-      if (jarvisPlan?.documentLimit != null) {
+      // Sin token propio el alta es solo en Jarvis: NextPyme aún no puede recibir
+      // el paquete. Se podrá asignar desde la recarga al vincular la empresa.
+      // Con token, un fallo revierte el alta para poder reintentar.
+      if (nextPymeToken && jarvisPlan?.documentLimit != null) {
         await this.assignNextPymePackageForNit(request.nit, jarvisPlan.documentLimit + 1);
       }
 
@@ -487,6 +492,11 @@ export class AdminService {
 
     return {
       company: this.mapCompany(company),
+      ...(jarvisPlan?.documentLimit != null ? {
+        nextPymePackage: nextPymeToken
+          ? { status: 'ASSIGNED' as const, message: 'Paquete de documentos asignado en NextPyme.' }
+          : { status: 'PENDING' as const, message: 'Empresa creada en Jarvis. Regístrala en NextPyme, configura su token propio y asigna el paquete de documentos desde la recarga.' },
+      } : {}),
     };
   }
 
@@ -878,6 +888,7 @@ export class AdminService {
   private mapCompany(company: Company): AdminCompanyListItemDto {
     return {
       id: company.id,
+      registrationEmail: company.registrationEmail ?? null,
       nit: company.nit,
       jarvisModules: company.jarvisModules ?? [...DEFAULT_JARVIS_MODULES],
       name: company.name,

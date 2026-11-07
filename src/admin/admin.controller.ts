@@ -24,6 +24,7 @@ import type { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
 import { AdminService } from './admin.service';
+import { RegistrationInvitationService } from '../auth/services/registration-invitation.service';
 import {
   CreateAdminCompanyRequestDto,
   CreateAdminCompanyResponseDto,
@@ -88,6 +89,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly rutParserService: RutParserService,
+    private readonly registrationInvitations: RegistrationInvitationService,
   ) {}
 
   @Get('companies/:companyId/bold/credentials')
@@ -189,11 +191,19 @@ export class AdminController {
     description:
       'Crea una empresa por NIT, configura integraciones y asigna plan SIIGO/Jarvis si aplica.',
   })
-  createCompany(
+  async createCompany(
     @CurrentUser() user: AuthenticatedUser,
     @Body() request: CreateAdminCompanyRequestDto,
   ): Promise<CreateAdminCompanyResponseDto> {
-    return this.adminService.createCompany(request, user.userId);
+    const response = await this.adminService.createCompany(request, user.userId);
+    response.welcome = await this.registrationInvitations.send(response.company.id, response.company.registrationEmail, user.userId);
+    return response;
+  }
+
+  @Post('companies/:companyId/welcome')
+  @ApiOperation({ summary: 'Enviar o reenviar la bienvenida con un enlace nuevo de registro' })
+  sendCompanyWelcome(@Param('companyId') companyId: string, @Body() request: { email?: string }, @CurrentUser() user: AuthenticatedUser) {
+    return this.registrationInvitations.send(companyId, request?.email, user.userId);
   }
 
   @Post('companies/:companyId/invite-code/regenerate')

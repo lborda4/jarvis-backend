@@ -1,11 +1,13 @@
 import { INTEGRATION_POLICIES } from './constants/integration-policies';
+import { assertRegistrationPolicy } from './helpers/registration-policy.helper';
+import { RegistrationInvitationService } from './services/registration-invitation.service';
+import { registrationTokenHash } from './helpers/company-registration.helper';
 import { createHash } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
   Inject,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
   forwardRef,
 } from '@nestjs/common';
@@ -42,7 +44,6 @@ import {
 } from './constants/auth-error.constants';
 import { UserRole } from './enums/user-role.enum';
 import { resolveActiveCompanyId } from './helpers/authenticated-company.helper';
-import { normalizeCompanyInviteCode } from '../company/helpers/company-invite-code.helper';
 import {
   applyPrivacyConsent,
   assertPrivacyPolicyAccepted,
@@ -74,63 +75,45 @@ export class AuthService {
     private readonly userCompaniesRepository: UserCompaniesRepository,
     @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
+    private readonly registrationInvitations: RegistrationInvitationService,
   ) {}
 
+  async getRegistrationPolicy(token: unknown) {
+    return this.registrationInvitations.preview(token);
+  }
+
+  async inviteAccountant(currentUser: AuthenticatedUser, email: unknown) {
+    return this.registrationInvitations.inviteAccountant(currentUser.userId, currentUser.companyId, email);
+  }
+
   async register(request: RegisterRequestDto): Promise<AuthTokensResponseDto> {
-    const name = request?.name?.trim();
-    const email = request?.email?.trim().toLowerCase();
     const password = request?.password ?? '';
-    const companyNit = this.normalizeNit(request?.nit);
-    const inviteCode = normalizeCompanyInviteCode(request?.inviteCode);
-
-    this.validateRegisterInput(name, email, password, companyNit, inviteCode);
+    registrationTokenHash(request?.registrationToken);
+    if (typeof password !== 'string' || password.length < 6 || password.length > 128)
+      throw new BadRequestException('La contraseña debe tener entre 6 y 128 caracteres.');
     assertPrivacyPolicyAccepted(request?.acceptPrivacyPolicy);
-
-    const existingUser = await this.usersRepository.findByEmail(email);
-
-    if (existingUser) {
-      const passwordMatches = await bcrypt.compare(
-        password,
-        existingUser.password,
-      );
-
-      if (!passwordMatches) {
-        throw new ConflictException('Ya existe un usuario con ese email.');
-      }
-    }
-
-    const passwordHash = existingUser
-      ? existingUser.password
-      : await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
     const { user, company } = await this.dataSource.transaction(
       async (manager) => {
         const usersRepository = manager.getRepository(User);
-        const companiesRepository = manager.getRepository(Company);
         const userCompaniesRepository = manager.getRepository(UserCompany);
-
-        const company = await companiesRepository.findOne({
-          where: { nit: companyNit },
-        });
-
-        if (!company) {
-          throw new NotFoundException({
-            message: AUTH_ERROR_MESSAGE.COMPANY_NOT_REGISTERED,
-            code: AUTH_ERROR_CODE.COMPANY_NOT_REGISTERED,
-          });
-        }
-
-        if (company.inviteCode !== inviteCode) {
-          throw new UnauthorizedException({
-            message: AUTH_ERROR_MESSAGE.INVALID_INVITE_CODE,
-            code: AUTH_ERROR_CODE.INVALID_INVITE_CODE,
-          });
-        }
+        const { invitationId, email, company } = await this.registrationInvitations.resolve(request.registrationToken, manager);
+        if (request.email !== undefined && (typeof request.email !== 'string' || request.email.trim().toLowerCase() !== email))
+          throw new BadRequestException('El correo debe coincidir con el destinatario del enlace.');
+        const acceptedPolicy = assertRegistrationPolicy(request.acceptedIntegrationPolicyId, company.integrations);
+        // Serialize account creation when different company invitations target the same email.
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`registration:${email}`]);
+        const existingUser = await usersRepository.findOne({ where: { email } });
+        if (existingUser && (!existingUser.active || !await bcrypt.compare(password, existingUser.password)))
+          throw new ConflictException('Ya existe una cuenta con este correo. Usa su contraseña actual para vincular esta empresa.');
+        const passwordHash = existingUser?.password ?? await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
         const user =
           existingUser ??
           usersRepository.create({
-            name,
+            name: company.registrationEmail && company.registrationEmail !== email
+              ? email.split('@')[0]
+              : company.responsible?.name?.trim() || company.name,
             email,
             password: passwordHash,
             active: true,
@@ -159,6 +142,14 @@ export class AuthService {
             companyId: company.id,
           }),
         );
+
+        if (acceptedPolicy) {
+          await manager.query(
+            'INSERT INTO integration_policy_acceptances (user_id, company_id, policy_id, version, policy_text, policy_hash) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id, company_id, policy_id) DO NOTHING',
+            [user.id, company.id, acceptedPolicy.policyId, acceptedPolicy.version, acceptedPolicy.text, createHash('sha256').update(acceptedPolicy.text).digest('hex')],
+          );
+        }
+        await manager.query('UPDATE company_registration_invitations SET used_at=now() WHERE id=$1 AND used_at IS NULL', [invitationId]);
 
         return {
           user,
@@ -445,39 +436,4 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private validateRegisterInput(
-    name?: string,
-    email?: string,
-    password?: string,
-    companyNit?: string,
-    inviteCode?: string,
-  ): void {
-    if (!name) {
-      throw new BadRequestException('El nombre es obligatorio.');
-    }
-
-    if (!email) {
-      throw new BadRequestException('El email es obligatorio.');
-    }
-
-    if (!password || password.length < 6) {
-      throw new BadRequestException(
-        'La contraseña debe tener al menos 6 caracteres.',
-      );
-    }
-
-    if (!companyNit) {
-      throw new BadRequestException('El NIT de la empresa es obligatorio.');
-    }
-
-    if (!inviteCode) {
-      throw new BadRequestException(
-        'El código de invitación de la empresa es obligatorio.',
-      );
-    }
-  }
-
-  private normalizeNit(nit?: string): string {
-    return nit?.replace(/[^\d]/g, '') ?? '';
-  }
 }

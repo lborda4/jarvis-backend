@@ -53,6 +53,19 @@ it('no consulta con el token global si la empresa no tiene token propio', async 
   expect(client.getAssignedPackage).not.toHaveBeenCalled();
 });
 
+it('expone el campo rechazado por NextPyme en vez del mensaje genérico de validación', async () => {
+  const http = { put: jest.fn().mockReturnValue(of({ status: 422, data: {
+    message: 'The given data was invalid.',
+    errors: { user_identification_number: ['user identification number es inválido.'] },
+  } })) };
+  const config = { get: jest.fn(() => 'https://example.test/ubl2.1') };
+  const client = new NextPymeApiClient(http as never, config as never);
+  await expect(client.assignDocumentPackage({
+    user_identification_number: 900123456,
+    absolut_start_plan_date: '2026-11-06 18:15:46', absolut_documents: 21,
+  }, 'token')).rejects.toThrow('user_identification_number: user identification number es inválido.');
+});
+
 it('no recarga con otro token cuando falta el token de Jarvis', async () => {
   const { service, companies, client } = setup();
   companies.findByNit.mockResolvedValue({ nextPymeToken: ' ' });

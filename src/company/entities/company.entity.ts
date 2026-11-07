@@ -17,6 +17,8 @@ import type { JarvisModule } from '../jarvis-modules';
 
 @Entity('companies')
 export class Company {
+  @Column({ name: 'registration_email', type: 'varchar', length: 254, nullable: true })
+  registrationEmail: string | null;
   @Column({ name: 'jarvis_modules', type: 'jsonb', nullable: true })
   jarvisModules: JarvisModule[] | null;
 

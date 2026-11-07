@@ -1,9 +1,9 @@
 export class RegisterRequestDto {
-  name: string;
-  email: string;
+  registrationToken: string;
+  acceptedIntegrationPolicyId?: string;
+  name?: string;
+  email?: string;
   password: string;
-  nit: string;
-  inviteCode: string;
   acceptPrivacyPolicy: boolean;
 }
 

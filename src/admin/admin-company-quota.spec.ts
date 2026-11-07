@@ -11,7 +11,7 @@ function setup(documentLimit: number | null = 20) {
   const companies = {
     findByNit: jest.fn(async (nit: string) => nit === '902086460' ? { nextPymeToken: ' jarvis-token ' } : null),
     create: jest.fn((value) => ({ ...company, ...value })),
-    save: jest.fn(async (value) => value),
+    save: jest.fn(async (value) => Object.assign(company, value)),
     findOne: jest.fn(async () => company),
   };
   const integrations = {
@@ -23,11 +23,14 @@ function setup(documentLimit: number | null = 20) {
   const dataSource = { transaction: jest.fn(async (callback) => callback({
     getRepository: (entity) => entity === Company ? companies : entity === Integration ? integrations : links,
   })) };
-  const nextPyme = { assignDocumentPackage: jest.fn().mockResolvedValue({ success: true }) };
+  const nextPyme = {
+    configureProductionEnvironment: jest.fn().mockResolvedValue(undefined),
+    assignDocumentPackage: jest.fn().mockResolvedValue({ success: true }),
+  };
   const service = new AdminService(dataSource as never, companies as never,
     { findById: jest.fn().mockResolvedValue(plan) } as never, {} as never,
     { normalizeDocumentTypes: () => [], resolveIncludedDocumentTypes: () => [] } as never, {} as never, {} as never, nextPyme as never);
-  const request = { nit: company.nit, name: company.name, personType: CompanyPersonType.LEGAL_ENTITY,
+  const request = { registrationEmail: 'user@example.com', nextPymeToken: ' company-token ', nit: company.nit, name: company.name, personType: CompanyPersonType.LEGAL_ENTITY,
     integrations: [IntegrationProvider.JARVIS], jarvisPlanId: plan.id };
   return { service, request, nextPyme, companies, plan };
 }
@@ -43,6 +46,19 @@ describe('Cupo inicial Jarvis y reserva NextPyme', () => {
     }, 'jarvis-token');
     expect(result.company.integrations[0].plan?.documentLimit).toBe(limit);
     expect(plan.documentLimit).toBe(limit);
+    expect(result.nextPymePackage?.status).toBe('ASSIGNED');
+  });
+
+  it.each([undefined, '', ' '])('crea primero en Jarvis sin asignar documentos si no hay token propio (%s)', async (token) => {
+    const { service, request, nextPyme, companies } = setup();
+    const result = await service.createCompany({ ...request, nextPymeToken: token }, 'admin');
+    expect(result.company.id).toBe('company-1');
+    expect(result.company.nextPymeToken).toBeNull();
+    expect(result.company.integrations[0].plan?.documentLimit).toBe(20);
+    expect(result.nextPymePackage).toEqual({ status: 'PENDING', message: expect.stringContaining('recarga') });
+    expect(companies.findByNit).toHaveBeenCalledTimes(1);
+    expect(nextPyme.configureProductionEnvironment).not.toHaveBeenCalled();
+    expect(nextPyme.assignDocumentPackage).not.toHaveBeenCalled();
   });
 
   it('no asigna una cantidad finita a planes ilimitados', async () => {

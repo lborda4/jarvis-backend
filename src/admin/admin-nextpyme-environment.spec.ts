@@ -32,7 +32,7 @@ function setup() {
     { normalizeDocumentTypes: () => [] } as never,
     {} as never, {} as never, nextPyme as never,
   );
-  const request = {
+  const request = { registrationEmail: 'user@example.com',
     nit: '900123456', name: 'Empresa', personType: CompanyPersonType.LEGAL_ENTITY,
     integrations: [IntegrationProvider.BOLD], nextPymeToken: ' company-token ',
   };

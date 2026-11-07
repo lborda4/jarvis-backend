@@ -1489,7 +1489,15 @@ export class NextPymeApiClient {
     }
 
     const record = payload as UnknownRecord;
+    const validationErrors = record.errors && typeof record.errors === 'object' && !Array.isArray(record.errors)
+      ? Object.entries(record.errors).flatMap(([field, messages]) =>
+          (Array.isArray(messages) ? messages : [messages])
+            .filter((message): message is string => typeof message === 'string' && Boolean(message.trim()))
+            .map((message) => `${field}: ${message.trim()}`),
+        ).join(' | ')
+      : null;
     const candidates = [
+      validationErrors,
       record.message,
       record.error,
       record.errors,

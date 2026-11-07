@@ -44,6 +44,12 @@ import type { AuthenticatedUser } from './interfaces/jwt-payload.interface';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  @Post('company/invite-accountant')
+  @ApiOperation({ summary: 'Invitar al contador a la empresa activa con un enlace de bienvenida' })
+  inviteAccountant(@CurrentUser() user: AuthenticatedUser, @Body() request: { email?: unknown }) {
+    return this.authService.inviteAccountant(user, request?.email);
+  }
+
   @Get('integration-policy/:policyId')
   getPolicyAcceptance(@CurrentUser() user: AuthenticatedUser, @Param('policyId') policyId: string) {
     return this.authService.integrationPolicyAcceptance(user.userId, user.companyId, policyId);
@@ -83,12 +89,19 @@ export class AuthController {
   @Public()
   @Post('register')
   @ApiOperation({
-    summary: 'Registrar usuario y vincularlo a una empresa existente por NIT',
+    summary: 'Crear usuario desde el enlace de bienvenida de una empresa',
   })
   register(
     @Body() request: RegisterRequestDto,
   ): Promise<AuthTokensResponseDto> {
     return this.authService.register(request);
+  }
+
+  @Public()
+  @Post('registration-policy')
+  @ApiOperation({ summary: 'Consultar el documento de registro con NIT y código de invitación' })
+  registrationPolicy(@Body() request: { registrationToken?: unknown }) {
+    return this.authService.getRegistrationPolicy(request?.registrationToken);
   }
 
   @Public()

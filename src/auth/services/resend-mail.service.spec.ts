@@ -15,6 +15,25 @@ function configWith(
 }
 
 describe('ResendMailService', () => {
+  it('envía la plantilla Jarvis en HTML y texto plano al destinatario indicado', async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, text: jest.fn().mockResolvedValue('{}') });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      const service = new ResendMailService(configWith({
+        'passwordResetMail.apiKey': API_KEY,
+        'passwordResetMail.from': 'Jarvis <no-reply@jarviscol.com>',
+      }));
+      const url = 'https://www.jarviscol.com/restablecer-contrasena?token=sample&source=email';
+      await service.sendPasswordReset(RECIPIENT, url);
+      const request = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { to: string[]; html: string; text: string };
+      expect(request.to).toEqual([RECIPIENT]);
+      expect(request.html).toContain('Crear nueva contraseña');
+      expect(request.html).toContain('SEGURIDAD DE TU CUENTA');
+      expect(request.html).toContain('token=sample&amp;source=email');
+      expect(request.text).toContain(url);
+    } finally { global.fetch = originalFetch; }
+  });
   const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
   beforeEach(() => {
