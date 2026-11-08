@@ -22,6 +22,7 @@ const state = {
 };
 const worker = {
   id: 'employee-a',
+  workerCode: 'EMP001',
   identification: '12345678',
   firstName: 'Ana',
   surname: 'Pérez',
@@ -270,6 +271,24 @@ describe('nómina: persistencia y transmisión', () => {
       'integración',
     );
     expect(api.payrollRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('código persistido del empleado al transmitir', () => {
+  it('envía el código de la ficha aunque el borrador anterior no lo tenga', async () => {
+    const legacySnapshot = { ...worker };
+    delete (legacySnapshot as { workerCode?: string }).workerCode;
+    const { service, api, query } = build({ employee_snapshot: legacySnapshot });
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ worker_code: 'EMP001', worker: expect.objectContaining({ identification_number: '12345678' }) }), 'private-token');
+    const saved = query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO jarvis_payroll_transmissions')) as any;
+    expect(JSON.parse(saved[1][3]).worker_code).toBe('EMP001');
+    expect(legacySnapshot).not.toHaveProperty('workerCode');
+  });
+  it('usa el código del empleado guardado y conserva el salario histórico del borrador', async () => {
+    const { service, api } = build({ employee_snapshot: { ...worker, workerCode: 'CODIGO-OBSOLETO', salary: '900' } });
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ worker_code: 'EMP001', worker: expect.objectContaining({ salary: '900.00' }) }), 'private-token');
   });
 });
 

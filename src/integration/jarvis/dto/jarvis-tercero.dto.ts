@@ -4,7 +4,11 @@ import { JarvisEntityType } from '../enums/jarvis-entity-type.enum';
 import { JarvisTaxRegime } from '../enums/jarvis-tax-regime.enum';
 
 export class CreateJarvisTerceroRequestDto {
-  @ApiPropertyOptional({ type: [String], maxItems: 10, description: 'Correos para copia automática de documentos.' })
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: 10,
+    description: 'Correos para copia automática de documentos.',
+  })
   copy_emails?: string[];
   @ApiProperty({
     enum: JarvisDocumentType,
@@ -231,6 +235,12 @@ export class LookupJarvisTerceroNitResponseDto {
 
   @ApiPropertyOptional({ nullable: true })
   stateCode: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'ID interno del municipio en NextPyme; no es el código DANE.',
+  })
+  municipalityId?: number | null;
 }
 
 export class JarvisTypeLiabilityDto {

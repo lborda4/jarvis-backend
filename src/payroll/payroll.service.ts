@@ -220,7 +220,7 @@ export class PayrollService {
         const [saved] = await m.query(
           `INSERT INTO jarvis_payroll_employees(id,company_id,identification,data,active) VALUES($1,$2,$3,$4,$5)
         ON CONFLICT(id) DO UPDATE SET identification=EXCLUDED.identification,data=EXCLUDED.data,active=EXCLUDED.active,updated_at=now()
-        WHERE jarvis_payroll_employees.company_id=EXCLUDED.company_id RETURNING id`,
+        WHERE jarvis_payroll_employees.company_id=EXCLUDED.company_id RETURNING id, worker_code AS "workerCode"`,
           [
             id,
             company,
@@ -648,6 +648,8 @@ export class PayrollService {
           );
         worker = original.employee_snapshot;
       }
+      // Conserva los datos históricos del documento y toma solo el código persistido del empleado.
+      if (worker && employee?.data.workerCode) worker = { ...worker, workerCode: employee.data.workerCode };
       const total = totals(state.lines);
       // Once edited, preserve parameters already captured for the document.
       let snapshot =
@@ -707,8 +709,9 @@ export class PayrollService {
   }
   async validate(company: string, id: string) {
     const d = await this.get(company, id);
-    const { settings } = await this.bootstrap(company);
-    const errors = validatePayroll(d.state, { ...d.employee_snapshot, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
+    const { settings, employees } = await this.bootstrap(company);
+    const currentEmployee = employees.find((employee: { id: string }) => employee.id === d.employee_id);
+    const errors = validatePayroll(d.state, { ...d.employee_snapshot, workerCode: currentEmployee?.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
     if (!settings.enabled)
       errors.push('Habilita la transmisión en configuración de nómina.');
     return { errors, valid: errors.length === 0 };
@@ -763,7 +766,8 @@ export class PayrollService {
         );
         if (!currentEmployee || !isPayrollEmployeeActive(currentEmployee.data?.retirementDate))
           throw new BadRequestException('El empleado está inactivo.');
-        const errors = validatePayroll(d.state, { ...d.employee_snapshot, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
+        const worker = { ...d.employee_snapshot, workerCode: currentEmployee.data.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) };
+        const errors = validatePayroll(d.state, worker, true);
         if (errors.length) throw new BadRequestException(errors.join(' '));
         const number = d.number ?? Number(s.next_number);
         if (!Number.isSafeInteger(Number(number)))
@@ -786,7 +790,7 @@ export class PayrollService {
         }
         const payload = buildPayrollPayload(
           d.state,
-          { ...d.employee_snapshot, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) },
+          worker,
           Number(number),
           d.prefix ?? s.settings.prefix,
           predecessor,

@@ -211,6 +211,8 @@ export function validatePayroll(
   )
     errors.push('Completa los datos de pago y trabajador.');
   if (transmission) {
+    if (!employee?.workerCode?.trim())
+      errors.push('El empleado no tiene código asignado. Actualiza el empleado antes de enviar.');
     if (!employee?.address?.trim())
       errors.push('Completa la dirección del empleado.');
     if (
@@ -300,7 +302,7 @@ export function buildPayrollPayload(
     novelty: { novelty: false, uuidnov: null },
     sendmail: false,
     sendmailtome: false,
-    worker_code: worker.workerCode ?? worker.identification,
+    worker_code: worker.workerCode!.trim(),
     payroll_period_id: state.payrollPeriodId!,
     payment_dates: state.paymentDates!.map((payment_date) => ({
       payment_date,

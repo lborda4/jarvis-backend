@@ -335,7 +335,22 @@ export class NextPymeRutService {
       'codemunicipality',
       'codigomunicipio',
     ]);
+    const rawMunicipalityId = this.findValue(orderedRecords, [
+      'municipalityid',
+      'idmunicipality',
+      'idmunicipio',
+    ]);
+    const parsedMunicipalityId = /^\d+$/.test(rawMunicipalityId ?? '')
+      ? Number(rawMunicipalityId)
+      : NaN;
+    const municipalityId =
+      Number.isSafeInteger(parsedMunicipalityId) && parsedMunicipalityId > 0
+        ? parsedMunicipalityId
+        : null;
     const cityName = this.findValue(orderedRecords, [
+      'cityname',
+      'municipalityname',
+      'nombremunicipio',
       'city',
       'municipality',
       'municipio',
@@ -348,7 +363,16 @@ export class NextPymeRutService {
     ]);
 
     return {
-      found: Boolean(checkDigit || name || email || phone || address),
+      found: Boolean(
+        checkDigit ||
+        name ||
+        email ||
+        phone ||
+        address ||
+        cityCode ||
+        cityName ||
+        municipalityId,
+      ),
       document_number: documentNumber,
       check_digit: checkDigit,
       name,
@@ -358,6 +382,7 @@ export class NextPymeRutService {
       cityCode,
       cityName,
       stateCode,
+      municipalityId,
     };
   }
 

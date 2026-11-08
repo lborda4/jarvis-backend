@@ -6,6 +6,7 @@ import {
 } from './payroll-domain';
 
 const worker: PayrollWorker = {
+  workerCode: 'EMP001',
   salary: '1500000.00',
   address: 'BRR LIMONAR MZ 6 CS 3 ET 1',
   surname: 'PEREZ',
@@ -123,12 +124,25 @@ describe('contrato de envío de nómina NextPyme', () => {
         pension_type_law_deductions_id: 5,
       },
       consecutive: 1,
-      worker_code: '100000000',
+      worker_code: 'EMP001',
       sendmailtome: false,
       payment_dates: [{ payment_date: '2021-03-10' }],
       type_document_id: 9,
       payroll_period_id: 4,
     });
+  });
+
+  it.each([undefined, '', '   '])('no sustituye un código ausente por la identificación: %s', workerCode => {
+    expect(() => buildPayrollPayload(state, { ...worker, workerCode }, 1, 'NI')).toThrow('código asignado');
+  });
+
+  it('mantiene el código en nóminas y notas de ajuste sin cambiar la identificación', () => {
+    const predecessor = { predecessor_number: 'NI1', predecessor_cune: 'cune', predecessor_issue_date: '2021-07-28' };
+    for (const previous of [undefined, predecessor]) {
+      const payload = buildPayrollPayload({ ...state, noteType: 1 }, worker, 2, 'NI', previous);
+      expect(payload.worker_code).toBe('EMP001');
+      expect(payload.worker.identification_number).toBe('100000000');
+    }
   });
 
   it('conserva segundos nombres y agrega conceptos repetidos sin perder centavos', () => {
