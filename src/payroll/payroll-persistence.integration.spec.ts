@@ -31,6 +31,7 @@ integration('persistencia de nómina en PostgreSQL (rollback)', () => {
     const catalogs = {
       getPayrollWorkerCatalogs: async () => ({
         workerTypes: [{ id: 1 }],
+        contractTypes: [{ key: 'INDEFINITE', id: 1, name: 'Término indefinido', code: '2' }],
         workerSubtypes: [{ id: 1 }],
         identifications: [{ id: 3 }],
         paymentMethods: [{ id: 1 }],
@@ -145,6 +146,7 @@ integration('persistencia de nómina en PostgreSQL (rollback)', () => {
         name: 'Prueba de nómina conjunta',
         period: '2199-12',
         periodicity: 'FIRST_HALF' as const,
+        paymentDate: '2199-12-20',
         employeeIds: [employeeId, secondEmployeeId],
       };
       const created = await service.createPeriod(
@@ -166,10 +168,8 @@ integration('persistencia de nómina en PostgreSQL (rollback)', () => {
             d.status === 'DRAFT',
         ),
       ).toBe(true);
-      expect(grouped.map((d) => d.net).sort()).toEqual([
-        '1000000.00',
-        '1500000.00',
-      ]);
+      expect(grouped.map((d) => d.net)).toEqual(['0.00', '0.00']);
+      expect(grouped.every((d) => d.state.lines.length === 0)).toBe(true);
       expect(
         (
           await service.createPeriod(

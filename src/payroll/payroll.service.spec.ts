@@ -58,7 +58,7 @@ function build(overrides: any = {}) {
             enabled: true,
             environment: 2,
             syncedEnvironment: 2,
-            prefix: 'NE',
+            prefix: 'SETP',
           },
           next_number: '1',
         },
@@ -88,8 +88,10 @@ function build(overrides: any = {}) {
     db as any,
     {
       requireCompanyToken: jest.fn().mockResolvedValue('private-token'),
+      getPayrollOvertimeSurcharges: jest.fn().mockResolvedValue([{ id: 19, name: 'Hora Extra Diurna', code: '1' }]),
       getPayrollWorkerCatalogs: jest.fn().mockResolvedValue({
         workerTypes: [{ id: 1 }],
+        contractTypes: [{ key: 'INDEFINITE', id: 1, name: 'Término indefinido', code: '2' }],
         workerSubtypes: [{ id: 1 }],
         identifications: [{ id: 3 }],
         paymentMethods: [{ id: 1 }],
@@ -105,7 +107,8 @@ describe('nómina: persistencia y transmisión', () => {
     const { service, api, query } = build();
     await service.send(company, actor, 'document-a');
     expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({
-      type_document_id: 9, consecutive: 1, prefix: 'NE', payroll_period_id: 4,
+      type_document_id: 9, consecutive: 1, prefix: 'SETP', payroll_period_id: 4,
+      novelty: { novelty: false, uuidnov: '' },
       accrued: { salary: '1000.00', worked_days: 30, accrued_total: '1000.00' },
       deductions: { deductions_total: '0.00' },
       worker: expect.objectContaining({ municipality_id: 439, type_contract_id: 1 }),
@@ -113,6 +116,22 @@ describe('nómina: persistencia y transmisión', () => {
     }), 'private-token');
     const saved = query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO jarvis_payroll_transmissions')) as any;
     expect(JSON.parse(saved[1][3])).toEqual(api.payrollRequest.mock.calls[0][1]);
+  });
+  it('conserva prefijo y consecutivo de un documento rechazado sin consumir otro número', async () => {
+    const { service, api, query } = build({ status: 'REJECTED', number: '27', prefix: 'NE' });
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ prefix: 'NE', consecutive: 27 }), 'private-token');
+    expect(query.mock.calls.some(([sql]) => sql.startsWith('UPDATE jarvis_payroll_settings SET next_number=next_number+1'))).toBe(false);
+  });
+  it('una nómina nueva toma el contador guardado y no un número enviado en el estado', async () => {
+    const { service, api, query } = build({ state: { ...state, prefix: 'USUARIO', consecutive: 1 } });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql: string) => sql.startsWith('SELECT * FROM jarvis_payroll_settings')
+      ? [{ settings: { enabled: true, environment: 2, syncedEnvironment: 2, prefix: 'SETP' }, next_number: '38' }]
+      : original(sql));
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ prefix: 'SETP', consecutive: 38 }), 'private-token');
+    expect(query).toHaveBeenCalledWith('UPDATE jarvis_payroll_settings SET next_number=next_number+1 WHERE company_id=$1', [company]);
   });
   it('una consulta negativa no habilita otro envío de una nómina incierta', async () => {
     const { service, query, api } = build({
@@ -314,5 +333,19 @@ describe('estado del empleado según fecha de retiro', () => {
     query.mockImplementation(async (sql: string) => sql.startsWith('SELECT id, data, active FROM jarvis_payroll_employees') ? [{ id: 'employee-a', data: worker, active: false }] : []);
     const result = await service.bootstrap(company);
     expect(result.employees[0].active).toBe(true);
+  });
+});
+
+describe('envío de horas extra diurnas con catálogo', () => {
+  const overtime = { id: 'hed', concept: 'overtime_day', kind: 'accrued', quantity: '2.5', amount: '100', startTime: '2026-10-08T17:00:00', endTime: '2026-10-08T19:30:00', overtimeSurchargeId: 19 };
+  it('incluye HEDs con el ID de la empresa al transmitir', async () => {
+    const { service, api } = build({ state: { ...state, lines: [...state.lines, overtime] } });
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ accrued: expect.objectContaining({ HEDs: [expect.objectContaining({ quantity: 2.5, percentage: 19, payment: '100.00' })] }) }), 'private-token');
+  });
+  it('bloquea un ID que no corresponde al recargo del catálogo', async () => {
+    const { service, api } = build({ state: { ...state, lines: [...state.lines, { ...overtime, overtimeSurchargeId: 25 }] } });
+    await expect(service.send(company, actor, 'document-a')).rejects.toThrow('recargo');
+    expect(api.payrollRequest).not.toHaveBeenCalled();
   });
 });

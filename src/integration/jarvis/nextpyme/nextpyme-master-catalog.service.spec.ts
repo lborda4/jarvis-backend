@@ -1,6 +1,48 @@
 import { NextPymeMasterCatalogService } from './nextpyme-master-catalog.service';
 
 describe('NextPyme company catalogs', () => {
+  it('carga recargos con el token de la empresa y rechaza una tabla vacía', async () => {
+    const { service, client } = setup();
+    await service.getPayrollOvertimeSurcharges('a');
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('type_overtime_surcharges', 'token-a');
+    client.fetchMasterTable.mockResolvedValueOnce([]);
+    await expect(service.getPayrollOvertimeSurcharges('b')).rejects.toThrow('recargos');
+  });
+  it('consulta únicamente payroll_type_document_identifications si NextPyme devuelve vacío', async () => {
+    const { service, client } = setup();
+    client.fetchMasterTable.mockImplementation(async (table: string, token: string) => table === 'payroll_type_document_identifications' ? [] : [{ id: 3, name: token }]);
+    await expect(service.getPayrollWorkerCatalogs('a')).rejects.toThrow('tipos de documento');
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('payroll_type_document_identifications', 'token-a');
+    expect(client.fetchMasterTable).not.toHaveBeenCalledWith('payroll_type_document_identification', expect.anything());
+    expect(client.fetchMasterTable).not.toHaveBeenCalledWith('type_document_identifications', expect.anything());
+  });
+  it('propaga el error de la tabla exacta sin consultar variantes', async () => {
+    const { service, client } = setup();
+    client.fetchMasterTable.mockImplementation(async (table: string, token: string) => {
+      if (table === 'payroll_type_document_identifications') throw new Error('Tabla no disponible');
+      return [{ id: 3, name: token }];
+    });
+    await expect(service.getPayrollWorkerCatalogs('a')).rejects.toThrow('Tabla no disponible');
+    expect(client.fetchMasterTable).not.toHaveBeenCalledWith('payroll_type_document_identification', expect.anything());
+  });
+  it('no acepta ni conserva en caché catálogos de documentos vacíos y permite reintentar', async () => {
+    const { service, client } = setup();
+    client.fetchMasterTable.mockImplementation(async (table: string, token: string) => table.startsWith('payroll_type_document_identifications') ? [] : [{ id: 1, name: token }]);
+    await expect(service.getPayrollWorkerCatalogs('a')).rejects.toThrow('tipos de documento');
+    client.fetchMasterTable.mockImplementation(async (_table: string, token: string) => [{ id: 3, name: token }]);
+    expect((await service.getPayrollWorkerCatalogs('a')).identifications).toEqual([{ id: 3, name: 'token-a' }]);
+  });
+  it('consulta la tabla específica de documentos de nómina con el token de cada empresa', async () => {
+    const { service, client } = setup();
+    const result = await service.getPayrollWorkerCatalogs('payroll-company');
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('payroll_type_document_identifications', 'token-payroll-company');
+    expect(client.fetchMasterTable).not.toHaveBeenCalledWith('type_document_identifications', expect.anything());
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('type_contracts', 'token-payroll-company');
+    expect(result.identifications).toEqual([{ id: 1, name: 'token-payroll-company' }]);
+    await service.getPayrollWorkerCatalogs('another-company');
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('payroll_type_document_identifications', 'token-another-company');
+    await expect(service.getPayrollWorkerCatalogs('missing')).rejects.toThrow('token de NextPyme');
+  });
   it.each(['non_vat_responsible', 'No responsable de IVA', '49'])('resuelve %s como no responsable sin confundirlo con el responsable', async value => {
     const { service, client } = setup();
     client.fetchMasterTable.mockResolvedValue([{ id: 1, code: '48', name: 'Responsable de IVA' }, { id: 2, code: '49', name: 'No responsable de IVA' }] as never);

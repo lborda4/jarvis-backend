@@ -1,3 +1,4 @@
+import { payrollContractOptions } from '../helpers/payroll-contract-types.helper';
 import { CompaniesRepository } from '../../../company/repositories/companies.repository';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { IntegrationProvider } from '../../enums/integration-provider.enum';
@@ -55,11 +56,26 @@ export class NextPymeMasterCatalogService {
 
   async getPayrollWorkerCatalogs(companyId: string) {
     const token=await this.requireCompanyToken(companyId);
-    const [workerTypes,workerSubtypes,identifications,paymentMethods]=await Promise.all([
+    const [workerTypes,workerSubtypes,identifications,paymentMethods,contracts]=await Promise.all([
       this.getTable('type_workers',token),this.getTable('sub_type_workers',token),
-      this.getTable('type_document_identifications',token),this.getTable('payment_methods',token),
+      this.getPayrollDocumentIdentifications(token),this.getTable('payment_methods',token),
+      this.getTable('type_contracts',token),
     ]);
-    return {workerTypes,workerSubtypes,identifications,paymentMethods};
+    return {workerTypes,workerSubtypes,identifications,paymentMethods,contractTypes: payrollContractOptions(contracts)};
+  }
+
+  private async getPayrollDocumentIdentifications(token: string): Promise<NextPymeMasterRow[]> {
+    const rows = await this.getTable('payroll_type_document_identifications', token);
+    if (!rows.length) {
+      throw new ServiceUnavailableException('No se pudieron cargar los tipos de documento de nómina desde NextPyme. Intenta nuevamente.');
+    }
+    return rows;
+  }
+
+  async getPayrollOvertimeSurcharges(companyId: string) {
+    const rows = await this.getTable('type_overtime_surcharges', await this.requireCompanyToken(companyId));
+    if (!rows.length) throw new ServiceUnavailableException('No pudimos cargar los recargos de nómina. Intenta de nuevo.');
+    return rows;
   }
 
   getElectronicInvoiceTypeId(): number {
@@ -339,7 +355,7 @@ export class NextPymeMasterCatalogService {
     const now = Date.now();
     const cached = this.cache.get(cacheKey);
 
-    if (cached && now - cached.loadedAt < CACHE_TTL_MS) {
+    if (cached?.value.length && now - cached.loadedAt < CACHE_TTL_MS) {
       return cached.value;
     }
 
@@ -351,7 +367,7 @@ export class NextPymeMasterCatalogService {
     const request = this.nextPymeApiClient
       .fetchMasterTable(table, tokenOverride)
       .then((value) => {
-        this.cache.set(cacheKey, { loadedAt: now, value });
+        if (value.length) this.cache.set(cacheKey, { loadedAt: now, value });
         return value;
       })
       .finally(() => {

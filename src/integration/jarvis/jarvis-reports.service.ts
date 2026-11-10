@@ -7,7 +7,7 @@ import { Workbook } from 'exceljs';
 import { DataSource } from 'typeorm';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
-import { buildReportSuggestions } from './helpers/jarvis-report-suggestions.helper';
+import { buildReportSuggestions, type ReportSuggestionCatalog } from './helpers/jarvis-report-suggestions.helper';
 import {
   calculateJarvisReport,
   reportColumns,
@@ -170,7 +170,18 @@ export class JarvisReportsService {
 
   async suggestions(companyId: string, query: ReportQuery) {
     const { documents } = await this.documents(companyId, { ...query, search: '', customer: '', product: '', seller: '' });
-    return buildReportSuggestions(documents);
+    const [customers, products, sellers] = await Promise.all([
+      this.source.query<ReportSuggestionCatalog['customers']>(
+        'SELECT document_number AS value, name FROM jarvis_terceros WHERE company_id=$1 ORDER BY name,id', [companyId],
+      ),
+      this.source.query<ReportSuggestionCatalog['products']>(
+        'SELECT sku AS value, name FROM products WHERE company_id=$1 ORDER BY name,id', [companyId],
+      ),
+      this.source.query<ReportSuggestionCatalog['sellers']>(
+        'SELECT id::text AS value, name FROM jarvis_sellers WHERE company_id=$1 ORDER BY name,id', [companyId],
+      ),
+    ]);
+    return buildReportSuggestions(documents, { customers, products, sellers });
   }
 
   private async dataset(companyId: string, query: ReportQuery) {

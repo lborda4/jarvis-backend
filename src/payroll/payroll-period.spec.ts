@@ -8,6 +8,7 @@ const request = {
   period: '2026-10',
   periodicity: 'FIRST_HALF' as const,
   employeeIds,
+  paymentDate: '2026-10-20',
 };
 const groupId = '33333333-3333-4333-8333-333333333333';
 function build(
@@ -71,8 +72,9 @@ describe('creación conjunta de nómina', () => {
         startDate: '2026-10-01',
         endDate: '2026-10-15',
         workedDays: '15.00',
+        paymentDates: ['2026-10-20'],
       });
-      expect(state.lines[0].amount).toBe('1000000.00');
+      expect(state.lines).toEqual([]);
     }
     expect(api.payrollRequest).not.toHaveBeenCalled();
     expect(plans.assertCanCreateDocuments).not.toHaveBeenCalled();
@@ -85,6 +87,7 @@ describe('creación conjunta de nómina', () => {
         payrollName: request.name.trim(),
         period: request.period,
         periodicity: request.periodicity,
+        paymentDates: [request.paymentDate],
       },
     }));
     const { service, save } = build(existing);
@@ -92,6 +95,17 @@ describe('creación conjunta de nómina', () => {
       (await service.createPeriod('company', 'actor', groupId, request))
         .documentIds,
     ).toEqual(['document-0', 'document-1']);
+    expect(save).not.toHaveBeenCalled();
+  });
+  it.each(['', '2026-02-30', '2026-13-01'])('rechaza una fecha de pago inválida antes de crear registros: %s', async paymentDate => {
+    const { service, db, save } = build();
+    await expect(service.createPeriod('company', 'actor', groupId, { ...request, paymentDate })).rejects.toThrow('fecha de pago válida');
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+  it('no ignora un cambio de fecha al reintentar un grupo ya creado', async () => {
+    const { service, save } = build(employeeIds.map(employee_id => ({ employee_id, state: { payrollName: request.name.trim(), period: request.period, periodicity: request.periodicity, paymentDates: [request.paymentDate] } })));
+    await expect(service.createPeriod('company', 'actor', groupId, { ...request, paymentDate: '2026-10-21' })).rejects.toThrow('otra información');
     expect(save).not.toHaveBeenCalled();
   });
   it('rechaza reutilizar el identificador con otra selección', async () => {
@@ -122,16 +136,16 @@ describe('creación conjunta de nómina', () => {
 });
 
 describe('ingresos parciales en nómina', () => {
-  it('liquida quince días a quien ingresa el 16 sin cambiar el período mensual', async () => {
+  it('calcula quince días de ingreso sin precargar salario en el período mensual', async () => {
     const employees = [{ id: employeeIds[0], active: true, data: { salary: '2000000', admittanceDate: '2026-10-16' } }];
     const { service, save } = build([], employees);
     await service.createPeriod('company', 'actor', groupId, { ...request, periodicity: 'MONTHLY', employeeIds: [employeeIds[0]] });
-    expect(save.mock.calls[0][3]).toMatchObject({ startDate: '2026-10-01', endDate: '2026-10-31', workedDays: '15.00', lines: [{ quantity: '15.00', amount: '1000000.00' }] });
+    expect(save.mock.calls[0][3]).toMatchObject({ startDate: '2026-10-01', endDate: '2026-10-31', workedDays: '15.00', lines: [] });
   });
-  it('liquida únicamente seis días al ingresar el 10 en la primera quincena', async () => {
+  it('conserva seis días de ingreso sin precargar importes en la primera quincena', async () => {
     const { service, save } = build([], [{ id: employeeIds[0], active: true, data: { salary: '2000000', admittanceDate: '2026-10-10' } }]);
     await service.createPeriod('company', 'actor', groupId, { ...request, employeeIds: [employeeIds[0]] });
-    expect(save.mock.calls[0][3]).toMatchObject({ workedDays: '6.00', lines: [{ quantity: '6.00', amount: '400000.00' }] });
+    expect(save.mock.calls[0][3]).toMatchObject({ workedDays: '6.00', lines: [] });
   });
   it('rechaza empleados cuyo ingreso ocurre después del período', async () => {
     const { service, save } = build([], [{ id: employeeIds[0], active: true, data: { salary: '2000000', admittanceDate: '2026-11-01' } }]);

@@ -12,7 +12,7 @@ export interface PayrollPaymentMethod {
 export const payrollPaymentColumns = 'id, name, system_key AS "systemKey", nextpyme_method_id AS "nextpymeMethodId", nextpyme_method_name AS "nextpymeMethodName"';
 export const payrollPaymentPresets = [
   { systemKey: 'cash' as const, name: 'Efectivo', code: '10', masterName: 'efectivo' },
-  { systemKey: 'transfer' as const, name: 'Transferencia bancaria', code: '30', masterName: 'transferenciacredito' },
+  { systemKey: 'transfer' as const, name: 'Consignación bancaria', code: '30', masterName: 'transferenciacredito' },
 ];
 
 export function payrollPaymentMaster(catalog: NextPymeMasterRow[], preset: typeof payrollPaymentPresets[number]) {

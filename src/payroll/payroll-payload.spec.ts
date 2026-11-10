@@ -21,7 +21,7 @@ const worker: PayrollWorker = {
   identification: '100000000',
   documentTypeId: 3,
   admittanceDate: '2018-10-10',
-  paymentMethodId: 10,
+  paymentMethodId: 42,
   bankName: 'BANCO DAVIVIENDA',
   accountType: 'AHORROS',
   accountNumber: '00000000',
@@ -74,11 +74,11 @@ const state: PayrollInput = {
 
 describe('contrato de envío de nómina NextPyme', () => {
   it('usa los nombres y la estructura del curl y calcula los totales reales', () => {
-    expect(buildPayrollPayload(state, worker, 1, 'NI')).toEqual({
+    expect(buildPayrollPayload(state, { ...worker, highRiskPension: true }, 1, 'NI')).toEqual({
       notes: state.notes,
       period: {
         issue_date: '2021-07-28',
-        worked_time: '785.00',
+        worked_time: 1011,
         admision_date: '2018-10-10',
         settlement_end_date: '2021-07-31',
         settlement_start_date: '2021-07-01',
@@ -106,12 +106,12 @@ describe('contrato de envío de nómina NextPyme', () => {
         accrued_total: '865000.00',
         transportation_allowance: '115000.00',
       },
-      novelty: { novelty: false, uuidnov: null },
+      novelty: { novelty: false, uuidnov: '' },
       payment: {
         bank_name: 'BANCO DAVIVIENDA',
         account_type: 'AHORROS',
         account_number: '00000000',
-        payment_method_id: 10,
+        payment_method_id: 42,
       },
       sendmail: false,
       foot_note: state.footNote,
@@ -132,6 +132,24 @@ describe('contrato de envío de nómina NextPyme', () => {
     });
   });
 
+  it('toma el ingreso del empleado y las fechas y días de la nómina sin sustituir emisión por pago', () => {
+    const payload = buildPayrollPayload({ ...state, period: '2026-01', startDate: '2026-01-01', endDate: '2026-01-31', workedDays: '30', workedTime: undefined, issueDate: '2026-02-05', paymentDates: ['2026-01-31'] }, { ...worker, admittanceDate: '2024-01-01' }, 1, 'SETP');
+    expect(payload.period).toEqual({ admision_date: '2024-01-01', settlement_start_date: '2026-01-01', settlement_end_date: '2026-01-31', worked_time: 750, issue_date: '2026-02-05' });
+    expect(payload.payment_dates).toEqual([{ payment_date: '2026-01-31' }]);
+  });
+  it('omite datos bancarios de efectivo incluso si quedaron en una captura antigua', () => {
+    const payload = buildPayrollPayload(state, { ...worker, paymentMethodId: 10 }, 1, 'NI');
+    expect(payload.payment).toEqual({ payment_method_id: 10 });
+  });
+  it('usa las claves bancarias de NextPyme y conserva los ceros iniciales', () => {
+    const payload = buildPayrollPayload(state, { ...worker, bankName: ' Banco ', accountType: ' corriente ', accountNumber: ' 001234 ' }, 1, 'NI');
+    expect(payload.payment).toEqual({ payment_method_id: 42, bank_name: 'Banco', account_type: 'CORRIENTE', account_number: '001234' });
+  });
+  it.each([
+    { bankName: '' }, { bankName: '   ' }, { accountType: '' }, { accountType: 'OTRO' }, { accountNumber: '' }, { accountNumber: '12abc' },
+  ])('bloquea envíos bancarios incompletos o inválidos: %j', fields => {
+    expect(() => buildPayrollPayload(state, { ...worker, ...fields }, 1, 'NI')).toThrow(/banco|cuenta/);
+  });
   it.each([undefined, '', '   '])('no sustituye un código ausente por la identificación: %s', workerCode => {
     expect(() => buildPayrollPayload(state, { ...worker, workerCode }, 1, 'NI')).toThrow('código asignado');
   });
@@ -217,5 +235,50 @@ describe('contrato de envío de nómina NextPyme', () => {
       predecessor,
       consecutive: 2,
     });
+  });
+});
+
+describe('cálculo independiente de días y antigüedad', () => {
+  it.each([
+    ['2026-01-01', '2026-10-01', '2026-10-31', undefined, '30', 300],
+    ['2026-01-01', '2026-10-01', '2026-10-15', undefined, '15', 285],
+    ['2026-10-10', '2026-10-01', '2026-10-15', undefined, '6', 6],
+    ['2026-01-01', '2026-10-01', '2026-10-31', '2026-10-10', '10', 280],
+    ['2026-01-01', '2026-02-01', '2026-02-28', undefined, '30', 60],
+    ['2028-01-01', '2028-02-01', '2028-02-29', undefined, '30', 60],
+  ])('separa ingreso %s, período %s a %s, retiro %s', (admittanceDate, startDate, endDate, retirementDate, workedDays, tenure) => {
+    const payload = buildPayrollPayload({ ...state, period: startDate.slice(0, 7), startDate, endDate, workedDays, workedTime: '999999', issueDate: '2029-01-01', paymentDates: ['2029-01-02'] }, { ...worker, admittanceDate, retirementDate }, 1, 'SETP');
+    expect(payload.period.worked_time).toBe(tenure);
+    expect(payload.accrued.worked_days).toBe(Number(workedDays));
+  });
+});
+
+describe('borradores con importes manuales', () => {
+  it('permite guardar una nómina vacía pero bloquea su envío', () => {
+    const empty = { ...state, lines: [] };
+    expect(validatePayroll(empty, worker)).toEqual([]);
+    expect(() => buildPayrollPayload(empty, worker, 1, 'SETP')).toThrow('Agrega al menos un devengado.');
+  });
+  it('envía el importe ingresado sin prorratear el salario del empleado', () => {
+    const manual = { ...state, workedDays: '15', lines: [{ ...state.lines[0], amount: '123456.78', quantity: '15', manual: true }] };
+    const payload = buildPayrollPayload(manual, { ...worker, salary: '9000000' }, 1, 'SETP');
+    expect(payload.accrued.salary).toBe('123456.78');
+    expect(payload.accrued.accrued_total).toBe('123456.78');
+  });
+});
+
+describe('Horas extra diurnas', () => {
+  const overtime = { id: 'hed', concept: 'overtime_day', kind: 'accrued' as const, quantity: '2.5', amount: '100000.25', startTime: '2021-07-08T17:00:00', endTime: '2021-07-08T19:30:00', overtimeSurchargeId: 19 };
+  it('envía HEDs como arreglo y usa el ID de recargo como percentage', () => {
+    const payload = buildPayrollPayload({ ...state, lines: [...state.lines, overtime, { ...overtime, id: 'hed2', startTime: '2021-07-09T17:00:00', endTime: '2021-07-09T19:30:00' }] }, worker, 1, 'SETP');
+    expect(payload.accrued.HEDs).toEqual([
+      { start_time: overtime.startTime, end_time: overtime.endTime, quantity: 2.5, percentage: 19, payment: '100000.25' },
+      { start_time: '2021-07-09T17:00:00', end_time: '2021-07-09T19:30:00', quantity: 2.5, percentage: 19, payment: '100000.25' },
+    ]);
+    expect(payload.accrued.accrued_total).toBe('1065000.50');
+  });
+  it('omite HEDs si no hay horas extra diurnas', () => expect(buildPayrollPayload(state, worker, 1, 'SETP').accrued).not.toHaveProperty('HEDs'));
+  it.each([{ startTime: '' }, { endTime: '2021-07-08T16:00:00' }, { overtimeSurchargeId: 0 }, { quantity: '0' }, { endTime: '2021-08-01T17:00:00' }])('impide el envío si faltan datos: %j', patch => {
+    expect(() => buildPayrollPayload({ ...state, lines: [...state.lines, { ...overtime, ...patch }] }, worker, 1, 'SETP')).toThrow();
   });
 });

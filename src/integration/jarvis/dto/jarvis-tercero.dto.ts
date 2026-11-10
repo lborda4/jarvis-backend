@@ -60,6 +60,9 @@ export class CreateJarvisTerceroRequestDto {
       'Id de la tabla maestra de NextPyme type_regime. Por defecto 2 (No Responsable de IVA).',
   })
   type_regime_id?: number;
+
+  @ApiPropertyOptional({ example: 42, description: 'ID de payment_methods de NextPyme: Efectivo o Consignación bancaria.' })
+  payment_method_id?: number;
 }
 
 export class JarvisTerceroDto {
@@ -103,6 +106,9 @@ export class JarvisTerceroDto {
 
   @ApiPropertyOptional({ nullable: true, example: 2 })
   type_regime_id: number | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 42 })
+  payment_method_id: number | null;
 
   @ApiPropertyOptional({ nullable: true, example: 'No Responsable de IVA' })
   type_regime_name: string | null;

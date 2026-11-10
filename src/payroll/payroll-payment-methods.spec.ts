@@ -33,7 +33,7 @@ it('inicializa solo efectivo y transferencia con los códigos del catálogo real
   expect(items).toHaveLength(2);
   expect(items).toEqual(expect.arrayContaining([
     expect.objectContaining({ name: 'Efectivo', nextpymeMethodId: 100, systemKey: 'cash' }),
-    expect.objectContaining({ name: 'Transferencia bancaria', nextpymeMethodId: 420, systemKey: 'transfer' }),
+    expect.objectContaining({ name: 'Consignación bancaria', nextpymeMethodId: 420, systemKey: 'transfer' }),
   ]));
   expect((await service.paymentMethods('company-a')).total).toBe(2);
   expect(catalogs.getPaymentMethods).toHaveBeenCalledTimes(1);

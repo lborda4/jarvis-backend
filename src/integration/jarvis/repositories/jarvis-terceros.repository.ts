@@ -56,7 +56,7 @@ export class JarvisTercerosRepository {
       | 'address'
       | 'municipalityId'
       | 'typeRegimeId'
-    > & { copyEmails?: string[] },
+    > & { copyEmails?: string[]; paymentMethodId?: number | null },
   ): JarvisTercero {
     return this.repository.create(data);
   }

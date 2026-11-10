@@ -1219,7 +1219,7 @@ export class NextPymeApiClient {
   }
 
   private parseMasterRows(payload: unknown): NextPymeMasterRow[] {
-    const records = collectRecords(payload);
+    const records = collectRecords(payload, { parseJsonStrings: true });
     const results: NextPymeMasterRow[] = [];
 
     for (const record of records) {
@@ -1545,11 +1545,35 @@ export class NextPymeApiClient {
   /** Payroll requests deliberately have no automatic retry: a timeout is ambiguous. */
   async payrollRequest(endpoint: 'payroll' | 'payroll-adjust-note' | 'config/environment', body: unknown, token: string, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
     token = this.requireToken(token);
-    const response = await firstValueFrom(this.httpService.request({
-      method, url: `${this.getBaseUrl()}/${endpoint}`, data: body,
-      headers: this.buildAuthHeaders(token), timeout: 25_000,
-    }));
-    return JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
+    const url = `${this.getBaseUrl()}/${endpoint}`;
+    console.log(
+      `[NextPyme ${endpoint}] ${method} ${url} - Body antes de enviar:`,
+      JSON.stringify(body, null, 2),
+    );
+    try {
+      const response = await firstValueFrom(this.httpService.request({
+        method, url, data: body,
+        headers: this.buildAuthHeaders(token), timeout: 25_000,
+      }));
+      console.log(
+        `[NextPyme ${endpoint}] Respuesta pura HTTP ${response.status}:`,
+        JSON.stringify(response.data, null, 2),
+      );
+      return JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        console.log(
+          `[NextPyme ${endpoint}] Respuesta pura de error HTTP ${error.response.status}:`,
+          JSON.stringify(error.response.data, null, 2),
+        );
+      } else {
+        console.log(
+          `[NextPyme ${endpoint}] Error sin respuesta de NextPyme:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      throw error;
+    }
   }
 
   async payrollStatus(cune: string, token: string): Promise<unknown> {

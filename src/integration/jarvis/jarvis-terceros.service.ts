@@ -9,6 +9,7 @@ import { mapWithConcurrency } from '../../common/helpers/concurrency.helper';
 import { CompaniesRepository } from '../../company/repositories/companies.repository';
 import { ElectronicDocumentsRepository } from '../../electronic-document/repositories/electronic-documents.repository';
 import { normalizeJarvisDocumentNumber } from './helpers/jarvis-document-number.helper';
+import { terceroPaymentMethods } from './helpers/jarvis-tercero-payment-methods.helper';
 import { normalizeCopyEmails } from './helpers/jarvis-copy-emails.helper';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
@@ -125,6 +126,12 @@ export class JarvisTercerosService {
     };
   }
 
+  async listPaymentMethods(companyId: string) {
+    const company = this.requireCompanyId(companyId);
+    await this.requireJarvisIntegration(company);
+    return { items: terceroPaymentMethods(await this.nextPymeMasterCatalogService.getPaymentMethods(company)) };
+  }
+
   async list(
     companyId: string,
     search?: string,
@@ -228,7 +235,17 @@ export class JarvisTercerosService {
       );
     }
 
+    let paymentMethodId = target?.paymentMethodId ?? null;
+    if (request.payment_method_id !== undefined) {
+      if (!Number.isSafeInteger(request.payment_method_id) || request.payment_method_id < 1)
+        throw new BadRequestException('Selecciona un método de pago válido.');
+      const { items } = await this.listPaymentMethods(trimmedCompanyId);
+      if (!items.some(method => method.id === request.payment_method_id))
+        throw new BadRequestException('Selecciona Efectivo o Consignación bancaria.');
+      paymentMethodId = request.payment_method_id;
+    }
     const data = {
+        paymentMethodId,
         companyId: trimmedCompanyId,
         integrationId: integration.id,
         documentType,
@@ -517,6 +534,7 @@ export class JarvisTercerosService {
       address: tercero.address,
       municipality_id: tercero.municipalityId,
       type_regime_id: tercero.typeRegimeId,
+      payment_method_id: tercero.paymentMethodId ?? null,
       type_regime_name: typeRegimeName ?? null,
       created_at: tercero.createdAt.toISOString(),
       updated_at: tercero.updatedAt.toISOString(),

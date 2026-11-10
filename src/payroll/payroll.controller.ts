@@ -32,6 +32,9 @@ export class PayrollController {
   @Get('catalogs') catalogs(@CurrentUser() u: AuthenticatedUser) {
     return this.service.workerCatalogs(getAuthenticatedCompanyId(u));
   }
+  @Get('overtime-surcharges') overtimeSurcharges(@CurrentUser() u: AuthenticatedUser) {
+    return this.service.overtimeSurcharges(getAuthenticatedCompanyId(u));
+  }
   @Get('bootstrap') bootstrap(@CurrentUser() u: AuthenticatedUser) {
     return this.service.bootstrap(getAuthenticatedCompanyId(u));
   }

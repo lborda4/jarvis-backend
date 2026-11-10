@@ -2,7 +2,13 @@ import type { ReportDocument } from '../jarvis-reports.types';
 
 export interface ReportSuggestion { value: string; label: string }
 
-export function buildReportSuggestions(documents: ReportDocument[]) {
+export interface ReportSuggestionCatalog {
+  customers: Array<{ value: string; name: string }>;
+  products: Array<{ value: string; name: string }>;
+  sellers: Array<{ value: string; name: string }>;
+}
+
+export function buildReportSuggestions(documents: ReportDocument[], catalog?: ReportSuggestionCatalog) {
   const customers = new Map<string, ReportSuggestion>();
   const products = new Map<string, ReportSuggestion>();
   const sellers = new Map<string, ReportSuggestion>();
@@ -14,6 +20,13 @@ export function buildReportSuggestions(documents: ReportDocument[]) {
     const key = selected.toLocaleLowerCase('es');
     if (!target.has(key)) target.set(key, { value: selected, label });
   };
+  // Current company catalogs remain available even without sales in this period.
+  for (const row of catalog?.customers ?? []) {
+    add(customers, row.value, row.name);
+    add(search, row.value, row.name);
+  }
+  for (const row of catalog?.products ?? []) add(products, row.value, row.name);
+  for (const row of catalog?.sellers ?? []) add(sellers, row.value, row.name);
   for (const document of documents) {
     add(customers, document.customerId, document.customerName);
     add(search, document.customerId, document.customerName);

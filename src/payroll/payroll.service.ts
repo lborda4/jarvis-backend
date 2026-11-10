@@ -1,6 +1,11 @@
+import { dayOvertimeMaster, isDayOvertime } from './payroll-overtime';
+import { ensurePayrollNumbering, PAYROLL_PREFIX } from './payroll-numbering';
+import { resolvePayrollContractId } from '../integration/jarvis/helpers/payroll-contract-types.helper';
+import { employeePaymentType, employeeBankFields, employeeBankErrors } from './payroll-employee-payment';
+import type { PayrollWorker } from './payroll-domain';
 import { extendPayrollNoveltyConcepts } from './payroll-novelty-concepts';
 import { isPayrollEmployeeActive } from './payroll-employee-status';
-import { payrollEmploymentDays } from './payroll-employment';
+import { payrollEmploymentDays, payrollWorkedTime } from './payroll-employment';
 import { payrollPaymentColumns, payrollPaymentPresets, payrollPaymentMaster, type PayrollPaymentMethod } from './payroll-payment-methods';
 import {
   BadRequestException,
@@ -19,6 +24,7 @@ import { NextPymeMasterCatalogService } from '../integration/jarvis/nextpyme/nex
 import { NextPymeApiClient } from '../integration/jarvis/nextpyme/nextpyme-api.client';
 import { parseDianValidationResult } from '../integration/jarvis/nextpyme/nextpyme-dian-validation.helper';
 import {
+  PAYROLL_TYPE_DOCUMENT_ID,
   buildPayrollPayload,
   cents,
   totals,
@@ -71,6 +77,7 @@ export class PayrollService {
       }
       items = await read();
     }
+    items = items.map(item => item.systemKey === 'transfer' ? { ...item, name: 'Consignación bancaria' } : item);
     return { items, total: items.length };
   }
 
@@ -101,7 +108,18 @@ export class PayrollService {
   workerCatalogs(company: string) {
     return this.catalogs.getPayrollWorkerCatalogs(company);
   }
+  overtimeSurcharges(company: string) {
+    return this.catalogs.getPayrollOvertimeSurcharges(company);
+  }
+  private async validateDayOvertimeMaster(company: string, state: { lines: import('./payroll-domain').PayrollLine[] }) {
+    const lines = state.lines.filter(isDayOvertime);
+    if (!lines.length) return;
+    const master = dayOvertimeMaster(await this.catalogs.getPayrollOvertimeSurcharges(company));
+    if (!master || lines.some(line => line.overtimeSurchargeId !== master.id))
+      throw new BadRequestException('Revisa el recargo de las horas extra diurnas. Abre la novedad y vuelve a guardarla.');
+  }
   async bootstrap(company: string) {
+    await ensurePayrollNumbering(this.db, company);
     const [employees, positions, parameters, settings] = await Promise.all([
       this.db.query(
         "SELECT id, data, active FROM jarvis_payroll_employees WHERE company_id=$1 ORDER BY data->>'firstName'",
@@ -130,7 +148,7 @@ export class PayrollService {
       parameters,
       settings: settings[0]?.settings ?? {
         environment: 2,
-        prefix: 'NE',
+        prefix: PAYROLL_PREFIX,
         enabled: false,
       },
       nextNumber: settings[0]?.nextNumber ?? '1',
@@ -170,13 +188,6 @@ export class PayrollService {
       throw new BadRequestException(
         'Completa las fechas de la etapa del aprendiz.',
       );
-    if (
-      data.bankName &&
-      (!data.accountType?.trim() || !data.accountNumber?.trim())
-    )
-      throw new BadRequestException(
-        'Completa el tipo y número de cuenta del empleado.',
-      );
     try {
       cents(data.salary);
     } catch {
@@ -215,6 +226,12 @@ export class PayrollService {
       throw new BadRequestException(
         'Selecciona un documento y método de pago válidos.',
       );
+    const typeContractId = resolvePayrollContractId(data.contractType as string, codes.contractTypes, data.typeContractId as number | undefined);
+    const paymentMethodType = employeePaymentType(data.paymentMethodId as number, codes.paymentMethods);
+    const paymentWorker = { ...data, paymentMethodType } as PayrollWorker;
+    const bankErrors = employeeBankErrors(paymentWorker);
+    if (bankErrors.length) throw new BadRequestException(bankErrors.join(' '));
+    const bankFields = paymentMethodType ? employeeBankFields(paymentWorker, paymentMethodType) : {};
     return this.db
       .transaction(async (m) => {
         const [saved] = await m.query(
@@ -225,7 +242,7 @@ export class PayrollService {
             id,
             company,
             data.identification,
-            JSON.stringify({ ...data, active: isPayrollEmployeeActive(data.retirementDate) }),
+            JSON.stringify({ ...data, ...bankFields, paymentMethodType, typeContractId, highRiskPension: false, active: isPayrollEmployeeActive(data.retirementDate) }),
             isPayrollEmployeeActive(data.retirementDate),
           ],
         );
@@ -346,19 +363,17 @@ export class PayrollService {
       });
   }
   async saveSettings(company: string, actor: string, data: any) {
-    if (
-      ![1, 2].includes(data?.environment) ||
-      !/^[A-Za-z0-9-]{1,20}$/.test(data?.prefix ?? '')
-    )
-      throw new BadRequestException('Ambiente o prefijo inválido.');
+    if (![1, 2].includes(data?.environment))
+      throw new BadRequestException('Ambiente inválido.');
     return this.db.transaction(async (m) => {
+      await ensurePayrollNumbering(m, company);
       await m.query(
         `INSERT INTO jarvis_payroll_settings(company_id,settings) VALUES($1,$2) ON CONFLICT(company_id) DO UPDATE SET settings=EXCLUDED.settings || jsonb_build_object('syncedEnvironment',jarvis_payroll_settings.settings->'syncedEnvironment'),updated_at=now()`,
         [
           company,
           JSON.stringify({
             environment: data.environment,
-            prefix: data.prefix,
+            prefix: PAYROLL_PREFIX,
             enabled: data.enabled === true,
           }),
         ],
@@ -372,7 +387,7 @@ export class PayrollService {
     const token = await this.catalogs.requireCompanyToken(company);
     const result = await this.api.payrollRequest(
       'config/environment',
-      { payroll_type_environment_id: settings.environment },
+      { type_document_id: PAYROLL_TYPE_DOCUMENT_ID, payroll_type_environment_id: settings.environment },
       token,
       'PUT',
     );
@@ -463,7 +478,8 @@ export class PayrollService {
             (d: any) =>
               d.state.payrollName !== name ||
               d.state.period !== request.period ||
-              d.state.periodicity !== request.periodicity,
+              d.state.periodicity !== request.periodicity ||
+              d.state.paymentDates?.[0] !== request.paymentDate,
           )
         )
           throw new ConflictException(
@@ -518,11 +534,6 @@ export class PayrollService {
           ? periodWorkedDays
           : prorate(periodWorkedDays, String(employment.days), String(employment.periodDays));
         const documentId = randomUUID();
-        const amount = prorate(
-          String(employee.data.salary),
-          workedDays,
-          String(parameter.data.monthlyDays),
-        );
         await this.saveDocument(
           company,
           actor,
@@ -537,18 +548,8 @@ export class PayrollService {
             endDate,
             issueDate,
             workedDays,
-            paymentDates: [endDate],
-            lines: [
-              {
-                id: randomUUID(),
-                concept: 'salary',
-                kind: 'accrued',
-                quantity: workedDays,
-                amount,
-                formula: `${employee.data.salary} / ${parameter.data.monthlyDays} días × ${workedDays} días`,
-                manual: false,
-              },
-            ],
+            paymentDates: [request.paymentDate],
+            lines: [],
           },
           m,
         );
@@ -573,6 +574,7 @@ export class PayrollService {
         period: state.period,
         periodicity: state.periodicity,
         employeeIds: [state.employeeId],
+        paymentDate: state.paymentDates?.[0],
       });
       if (errors.length) throw new BadRequestException(errors.join(' '));
       const dates = payrollPeriodBounds(state.period, state.periodicity);
@@ -650,6 +652,7 @@ export class PayrollService {
       }
       // Conserva los datos históricos del documento y toma solo el código persistido del empleado.
       if (worker && employee?.data.workerCode) worker = { ...worker, workerCode: employee.data.workerCode };
+      state.workedTime = String(payrollWorkedTime(state.endDate, worker));
       const total = totals(state.lines);
       // Once edited, preserve parameters already captured for the document.
       let snapshot =
@@ -679,6 +682,7 @@ export class PayrollService {
             : concept.code,
         };
       });
+      await this.validateDayOvertimeMaster(company, state);
       const [saved] = await m.query(
         `INSERT INTO jarvis_payroll_documents(id,company_id,employee_id,original_id,state,employee_snapshot,parameter_snapshot,accrued,deductions,net) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,employee_id=EXCLUDED.employee_id,employee_snapshot=EXCLUDED.employee_snapshot,parameter_snapshot=EXCLUDED.parameter_snapshot,accrued=EXCLUDED.accrued,deductions=EXCLUDED.deductions,net=EXCLUDED.net,status='DRAFT',cune=NULL,updated_at=now() WHERE jarvis_payroll_documents.company_id=EXCLUDED.company_id RETURNING id`,
@@ -707,11 +711,16 @@ export class PayrollService {
       throw e;
     });
   }
+  private async resolveWorkerPayment(company: string, worker: PayrollWorker): Promise<PayrollWorker> {
+    const { paymentMethods } = await this.catalogs.getPayrollWorkerCatalogs(company);
+    return { ...worker, paymentMethodType: employeePaymentType(worker.paymentMethodId, paymentMethods) };
+  }
   async validate(company: string, id: string) {
     const d = await this.get(company, id);
     const { settings, employees } = await this.bootstrap(company);
     const currentEmployee = employees.find((employee: { id: string }) => employee.id === d.employee_id);
-    const errors = validatePayroll(d.state, { ...d.employee_snapshot, workerCode: currentEmployee?.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
+    const paymentWorker = await this.resolveWorkerPayment(company, d.employee_snapshot as PayrollWorker);
+    const errors = validatePayroll(d.state, { ...paymentWorker, workerCode: currentEmployee?.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
     if (!settings.enabled)
       errors.push('Habilita la transmisión en configuración de nómina.');
     return { errors, valid: errors.length === 0 };
@@ -750,6 +759,7 @@ export class PayrollService {
           throw new ConflictException(
             'La nómina ya se envió o tiene un envío pendiente de confirmación.',
           );
+        await ensurePayrollNumbering(m, company);
         const [s] = await m.query(
           'SELECT * FROM jarvis_payroll_settings WHERE company_id=$1 FOR UPDATE',
           [company],
@@ -766,11 +776,12 @@ export class PayrollService {
         );
         if (!currentEmployee || !isPayrollEmployeeActive(currentEmployee.data?.retirementDate))
           throw new BadRequestException('El empleado está inactivo.');
-        const worker = { ...d.employee_snapshot, workerCode: currentEmployee.data.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) };
+        const paymentWorker = await this.resolveWorkerPayment(company, d.employee_snapshot as PayrollWorker);
+        const worker = { ...paymentWorker, workerCode: currentEmployee.data.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) };
         const errors = validatePayroll(d.state, worker, true);
         if (errors.length) throw new BadRequestException(errors.join(' '));
         const number = d.number ?? Number(s.next_number);
-        if (!Number.isSafeInteger(Number(number)))
+        if (!Number.isSafeInteger(Number(number)) || Number(number) < 1)
           throw new BadRequestException('Consecutivo fuera de rango.');
         let predecessor: any;
         if (d.original_id) {
@@ -788,11 +799,12 @@ export class PayrollService {
             predecessor_issue_date: original.state.issueDate,
           };
         }
+        await this.validateDayOvertimeMaster(company, d.state);
         const payload = buildPayrollPayload(
           d.state,
           worker,
           Number(number),
-          d.prefix ?? s.settings.prefix,
+          d.number != null ? d.prefix ?? s.settings.prefix : PAYROLL_PREFIX,
           predecessor,
         );
         const transmission = randomUUID();
@@ -804,7 +816,7 @@ export class PayrollService {
           "UPDATE jarvis_payroll_documents SET status='PROCESSING',number=$3,prefix=$4,sent_at=now(),updated_at=now() WHERE company_id=$1 AND id=$2",
           [company, id, number, payload.prefix],
         );
-        if (!d.number)
+        if (d.number == null)
           await m.query(
             'UPDATE jarvis_payroll_settings SET next_number=next_number+1 WHERE company_id=$1',
             [company],

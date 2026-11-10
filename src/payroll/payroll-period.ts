@@ -1,9 +1,12 @@
+import { validDate } from './payroll-domain';
+
 export type PayrollPeriodicity = 'FIRST_HALF' | 'SECOND_HALF' | 'MONTHLY';
 export interface CreatePayrollPeriodRequest {
   name: string;
   period: string;
   periodicity: PayrollPeriodicity;
   employeeIds: string[];
+  paymentDate: string;
 }
 export const PAYROLL_PERIODICITY_LABELS: Record<PayrollPeriodicity, string> = {
   FIRST_HALF: 'Primera quincena',
@@ -29,6 +32,8 @@ export function validatePayrollPeriod(
   request: CreatePayrollPeriodRequest,
 ): string[] {
   const errors: string[] = [];
+  if (typeof request?.paymentDate !== 'string' || !validDate(request.paymentDate))
+    errors.push('Selecciona una fecha de pago válida.');
   if (typeof request?.name !== 'string' || !request.name.trim())
     errors.push('El nombre de la nómina es obligatorio.');
   else if (request.name.trim().length > 150)

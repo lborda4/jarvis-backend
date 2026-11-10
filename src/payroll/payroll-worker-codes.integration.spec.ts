@@ -81,6 +81,7 @@ integration('códigos persistidos de empleados en PostgreSQL', () => {
       getPayrollWorkerCatalogs: jest.fn().mockResolvedValue({
         identifications: [{ id: 3 }],
         workerTypes: [{ id: 1 }],
+        contractTypes: [{ key: 'INDEFINITE', id: 1, name: 'Término indefinido', code: '2' }],
         workerSubtypes: [{ id: 1 }],
         paymentMethods: [{ id: 10 }],
       }),

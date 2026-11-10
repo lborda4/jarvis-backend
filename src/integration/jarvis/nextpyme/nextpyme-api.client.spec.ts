@@ -2,6 +2,12 @@ import { of, throwError } from 'rxjs';
 import { NextPymeApiClient } from './nextpyme-api.client';
 
 describe('NextPyme company authentication', () => {
+  it('lee los documentos de nómina cuando NextPyme devuelve registros como JSON anidado en texto', async () => {
+    const { client, httpService } = buildClient();
+    httpService.post.mockReturnValue(of({ status: 200, data: { success: true, data: { payroll_type_document_identifications: JSON.stringify([{ id: '3', name: 'Cédula de ciudadanía', code: 'CC' }]) } } }));
+    expect(await client.fetchMasterTable('payroll_type_document_identifications', 'token')).toEqual([expect.objectContaining({ id: 3, name: 'Cédula de ciudadanía', code: 'CC' })]);
+    expect(httpService.post).toHaveBeenCalledWith('https://nextpyme.example/reports/master/database', { tables: [{ table: 'payroll_type_document_identifications' }] }, expect.anything());
+  });
   it('consulta únicamente los datos tributarios de la empresa autenticada', async () => {
     const { client, httpService } = buildClient();
     httpService.get.mockReturnValue(of({ status: 200, data: { success: true, data: {

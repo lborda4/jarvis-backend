@@ -6,7 +6,7 @@ function document(overrides: Partial<ReportDocument> = {}): ReportDocument {
   return { id: 'invoice', kind: 'ELECTRONIC_INVOICE', date: '2026-11-06', number: 'FE21', customerId: '123', customerName: 'García', currency: 'COP', total: '100', source: null, ...overrides };
 }
 function setup(documents = [document()]) {
-  const source = { query: jest.fn().mockResolvedValue(documents) };
+  const source = { query: jest.fn().mockResolvedValueOnce(documents).mockResolvedValue([]) };
   const integrations = { findByCompanyAndProvider: jest.fn().mockResolvedValue({ id: 'integration' }) };
   const service = new JarvisReportsService(source as never, integrations as never);
   return { service, source, integrations };
@@ -20,6 +20,34 @@ it('sugiere datos conservados del comprobante y deduplica por identificador', ()
   expect(result.products).toEqual([{ value: 'P01', label: 'Servicio mensual — P01' }, { value: 'Sin código', label: 'Sin código' }]);
   expect(result.sellers).toEqual([{ value: 'seller', label: 'Ana García — seller' }]);
   expect(result.search).toEqual(expect.arrayContaining([{ value: 'FE21', label: 'FE21' }, { value: '123', label: 'García — 123' }]));
+});
+it('combina catálogos e historial sin duplicar ni perder registros eliminados', () => {
+  const result = buildReportSuggestions([document(), document({ customerId: 'old', customerName: 'Cliente eliminado' })], {
+    customers: [{ value: '123', name: 'Nombre actual' }, { value: 'new', name: 'Cliente sin ventas' }],
+    products: [{ value: 'SKU01', name: 'Producto sin ventas' }],
+    sellers: [{ value: 'seller01', name: 'Vendedor sin ventas' }],
+  });
+  expect(result.customers).toHaveLength(3);
+  expect(result.customers).toContainEqual({ value: '123', label: 'Nombre actual — 123' });
+  expect(result.customers).toContainEqual({ value: 'new', label: 'Cliente sin ventas — new' });
+  expect(result.customers).toContainEqual({ value: 'old', label: 'Cliente eliminado — old' });
+  expect(result.products).toEqual([{ value: 'SKU01', label: 'Producto sin ventas — SKU01' }]);
+  expect(result.sellers).toEqual([{ value: 'seller01', label: 'Vendedor sin ventas — seller01' }]);
+});
+it('consulta todos los catálogos de la empresa aunque el período no tenga comprobantes', async () => {
+  const { service, source } = setup([]);
+  source.query.mockReset()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ value: '900', name: 'Cliente guardado' }])
+    .mockResolvedValueOnce([{ value: 'P01', name: 'Producto guardado' }])
+    .mockResolvedValueOnce([{ value: 'seller', name: 'Ana' }]);
+  const result = await service.suggestions('company-a', query);
+  for (const table of ['jarvis_terceros', 'products', 'jarvis_sellers']) {
+    expect(source.query).toHaveBeenCalledWith(expect.stringContaining('FROM ' + table + ' WHERE company_id=$1'), ['company-a']);
+  }
+  expect(result.customers[0].value).toBe('900');
+  expect(result.products[0].value).toBe('P01');
+  expect(result.sellers[0].value).toBe('seller');
 });
 it('incluye el vendedor heredado por las notas y prioriza los vendedores propios', () => {
   const inherited = { id: 'original', name: 'Contador original' };
@@ -36,7 +64,7 @@ it('no inventa productos ni vendedores cuando falta el detalle histórico', () =
 it('acota las sugerencias a la empresa, fechas y tipos y no al texto ya escrito', async () => {
   const { service, source } = setup();
   const result = await service.suggestions('company-a', { ...query, kind: 'CREDIT_NOTE', customer: 'garcia', product: 'otro', seller: 'otra', search: 'anterior' });
-  const [sql, params] = source.query.mock.calls[0];
+  const [sql, params] = source.query.mock.calls[0] as [string, unknown[]];
   expect(sql).toContain('i.company_id=$1 AND i.issue_date >= $2::date AND i.issue_date <= $3::date');
   expect(params).toEqual(['company-a', query.from, query.to, ['CREDIT_NOTE']]);
   expect(result.customers).toHaveLength(1);

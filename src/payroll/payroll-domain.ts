@@ -1,3 +1,9 @@
+import { dayOvertimeErrors } from './payroll-overtime';
+import { payrollWorkedTime } from './payroll-employment';
+import { employeeBankErrors, workerPaymentType } from './payroll-employee-payment';
+
+export const PAYROLL_TYPE_DOCUMENT_ID = 9;
+
 /** Monetary values are decimal strings; integer arithmetic avoids binary rounding. */
 export function cents(value: unknown): bigint {
   const text = String(value ?? '');
@@ -32,6 +38,9 @@ export interface PayrollLine {
   percentage?: string;
   startDate?: string;
   endDate?: string;
+  startTime?: string;
+  endTime?: string;
+  overtimeSurchargeId?: number;
   formula?: string;
   manual?: boolean;
   mapping?: string;
@@ -65,6 +74,7 @@ export interface PayrollWorker {
   retirementDate?: string;
   active?: boolean;
   paymentMethodId: number;
+  paymentMethodType?: 'cash' | 'transfer';
   typeWorkerId: number;
   subTypeWorkerId: number;
   documentTypeId: number;
@@ -83,6 +93,7 @@ export const VERIFIED_CONCEPTS = [
   'transportation_allowance',
   'eps',
   'pension',
+  'overtime_day',
 ];
 export function totals(lines: PayrollLine[]) {
   let accrued = 0n,
@@ -112,6 +123,13 @@ export function validatePayroll(
   transmission = false,
 ): string[] {
   const errors: string[] = [];
+  if (employee) {
+    try {
+      payrollWorkedTime(state.endDate, employee);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'Revisa el tiempo laborado.');
+    }
+  }
   if (!employee) errors.push('Selecciona un empleado de esta empresa.');
   if (
     !validDate(state.startDate) ||
@@ -126,9 +144,9 @@ export function validatePayroll(
     state.endDate?.slice(0, 7) !== state.period
   )
     errors.push('El período debe coincidir con las fechas de liquidación.');
-  if (!Array.isArray(state.lines) || !state.lines.length)
+  if (!Array.isArray(state.lines) || (transmission && !state.lines.length))
     errors.push('Agrega al menos un devengado.');
-  else {
+  else if (state.lines.length) {
     if (state.lines.some((l: PayrollLine) => !l || typeof l !== 'object'))
       return ['Revisa los conceptos de nómina.'];
     try {
@@ -157,6 +175,7 @@ export function validatePayroll(
     )
       errors.push('La naturaleza de un concepto es incorrecta.');
     for (const line of state.lines as PayrollLine[]) {
+      errors.push(...dayOvertimeErrors(line, state.period));
       try {
         if (cents(line.quantity) < 0n) errors.push('Cantidad inválida.');
         if (line.percentage !== undefined && cents(line.percentage) > 10000n)
@@ -210,6 +229,7 @@ export function validatePayroll(
       !employee?.subTypeWorkerId)
   )
     errors.push('Completa los datos de pago y trabajador.');
+  if (transmission && employee) errors.push(...employeeBankErrors(employee));
   if (transmission) {
     if (!employee?.workerCode?.trim())
       errors.push('El empleado no tiene código asignado. Actualiza el empleado antes de enviar.');
@@ -236,13 +256,6 @@ export function validatePayroll(
       state.paymentDates.some((date) => !validDate(date))
     )
       errors.push('Completa las fechas de pago de la nómina.');
-    if (state.workedTime !== undefined) {
-      try {
-        cents(state.workedTime);
-      } catch {
-        errors.push('Revisa el tiempo trabajado.');
-      }
-    }
   }
   if (employee?.retirementDate && state.startDate > employee.retirementDate)
     errors.push('El período comienza después del retiro del empleado.');
@@ -292,14 +305,14 @@ export function buildPayrollPayload(
     deductions[`${key}_type_law_deductions_id`] = id!;
   }
   return {
-    type_document_id: predecessor ? 10 : 9,
+    type_document_id: predecessor ? 10 : PAYROLL_TYPE_DOCUMENT_ID,
     ...(predecessor ? { type_note: state.noteType, predecessor } : {}),
     consecutive: number,
     prefix,
     notes: state.notes ?? '',
     head_note: state.headNote ?? '',
     foot_note: state.footNote ?? '',
-    novelty: { novelty: false, uuidnov: null },
+    novelty: { novelty: false, uuidnov: predecessor ? null : '' },
     sendmail: false,
     sendmailtome: false,
     worker_code: worker.workerCode!.trim(),
@@ -311,7 +324,7 @@ export function buildPayrollPayload(
       admision_date: worker.admittanceDate,
       settlement_start_date: state.startDate,
       settlement_end_date: state.endDate,
-      worked_time: money(cents(state.workedTime ?? state.workedDays)),
+      worked_time: payrollWorkedTime(state.endDate, worker),
       issue_date: state.issueDate,
     },
     worker: {
@@ -326,17 +339,17 @@ export function buildPayrollPayload(
       address: worker.address!,
       municipality_id: worker.municipalityId!,
       type_contract_id: worker.typeContractId!,
-      high_risk_pension: !!worker.highRiskPension,
+      high_risk_pension: false,
       integral_salarary: !!worker.integralSalary,
       salary: money(cents(worker.salary)),
     },
     payment: {
       payment_method_id: worker.paymentMethodId,
-      ...(worker.bankName
+      ...(workerPaymentType(worker) !== 'cash' && worker.bankName
         ? {
-            bank_name: worker.bankName,
-            account_type: worker.accountType,
-            account_number: worker.accountNumber,
+            bank_name: worker.bankName.trim(),
+            account_type: worker.accountType?.trim().toUpperCase(),
+            account_number: worker.accountNumber?.trim(),
           }
         : {}),
     },
@@ -344,6 +357,12 @@ export function buildPayrollPayload(
       salary: money(amounts.salary ?? 0n),
       worked_days: Number(state.workedDays),
       accrued_total: total.accrued,
+      ...(state.lines.some(line => (line.mapping ?? line.concept) === 'overtime_day') ? {
+        HEDs: state.lines.filter(line => (line.mapping ?? line.concept) === 'overtime_day').map(line => ({
+          start_time: line.startTime!, end_time: line.endTime!, quantity: Number(line.quantity),
+          percentage: line.overtimeSurchargeId!, payment: money(cents(line.amount)),
+        })),
+      } : {}),
       ...(amounts.transportation_allowance !== undefined
         ? { transportation_allowance: money(amounts.transportation_allowance) }
         : {}),

@@ -101,6 +101,9 @@ export class JarvisTercero {
   })
   typeRegimeId: number | null;
 
+  @Column({ name: 'payment_method_id', type: 'int', nullable: true })
+  paymentMethodId: number | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

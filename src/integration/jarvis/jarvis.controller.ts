@@ -238,6 +238,12 @@ export class JarvisController {
     );
   }
 
+  @Get('terceros/payment-methods')
+  @ApiOperation({ summary: 'Listar Efectivo y Consignación bancaria desde payment_methods de NextPyme' })
+  listTerceroPaymentMethods(@CurrentUser() user: AuthenticatedUser) {
+    return this.jarvisTercerosService.listPaymentMethods(getAuthenticatedCompanyId(user));
+  }
+
   @Get('terceros/type-liabilities')
   @ApiOperation({
     summary: 'Listar tipos de responsabilidad (NextPyme)',
