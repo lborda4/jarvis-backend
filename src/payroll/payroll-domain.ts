@@ -1,4 +1,4 @@
-import { dayOvertimeErrors } from './payroll-overtime';
+import { dayOvertimeErrors, overtimeDefinition } from './payroll-overtime';
 import { payrollWorkedTime } from './payroll-employment';
 import { employeeBankErrors, workerPaymentType } from './payroll-employee-payment';
 
@@ -94,6 +94,7 @@ export const VERIFIED_CONCEPTS = [
   'eps',
   'pension',
   'overtime_day',
+  'overtime_night',
 ];
 export function totals(lines: PayrollLine[]) {
   let accrued = 0n,
@@ -304,6 +305,32 @@ export function buildPayrollPayload(
     deductions[`${key}_deduction`] = money(amounts[key]);
     deductions[`${key}_type_law_deductions_id`] = id!;
   }
+  const overtimeMap = new Map<string, Array<{ start_time: string; end_time: string; quantity: number; percentage: number; payment: string }>>();
+  for (const line of state.lines) {
+    const key = line.mapping ?? line.concept;
+    const definition = overtimeDefinition(key);
+    if (!definition) continue;
+    const bucket = overtimeMap.get(definition.bodyKey) ?? [];
+    bucket.push({
+      start_time: line.startTime!,
+      end_time: line.endTime!,
+      quantity: Number(line.quantity),
+      percentage: line.overtimeSurchargeId!,
+      payment: money(cents(line.amount)),
+    });
+    overtimeMap.set(definition.bodyKey, bucket);
+  }
+  const accruedPayload: Record<string, string | number | Array<{ start_time: string; end_time: string; quantity: number; percentage: number; payment: string }>> = {
+    salary: money(amounts.salary ?? 0n),
+    worked_days: Number(state.workedDays),
+    accrued_total: total.accrued,
+  };
+  if (amounts.transportation_allowance !== undefined) {
+    accruedPayload.transportation_allowance = money(amounts.transportation_allowance);
+  }
+  for (const [key, rows] of overtimeMap.entries()) {
+    accruedPayload[key] = rows;
+  }
   return {
     type_document_id: predecessor ? 10 : PAYROLL_TYPE_DOCUMENT_ID,
     ...(predecessor ? { type_note: state.noteType, predecessor } : {}),
@@ -353,20 +380,7 @@ export function buildPayrollPayload(
           }
         : {}),
     },
-    accrued: {
-      salary: money(amounts.salary ?? 0n),
-      worked_days: Number(state.workedDays),
-      accrued_total: total.accrued,
-      ...(state.lines.some(line => (line.mapping ?? line.concept) === 'overtime_day') ? {
-        HEDs: state.lines.filter(line => (line.mapping ?? line.concept) === 'overtime_day').map(line => ({
-          start_time: line.startTime!, end_time: line.endTime!, quantity: Number(line.quantity),
-          percentage: line.overtimeSurchargeId!, payment: money(cents(line.amount)),
-        })),
-      } : {}),
-      ...(amounts.transportation_allowance !== undefined
-        ? { transportation_allowance: money(amounts.transportation_allowance) }
-        : {}),
-    },
+    accrued: accruedPayload,
     deductions,
   };
 }

@@ -236,6 +236,43 @@ describe('contrato de envío de nómina NextPyme', () => {
       consecutive: 2,
     });
   });
+
+  it('mapea horas extra nocturnas en el payload con la estructura del proveedor', () => {
+    const payload = buildPayrollPayload(
+      {
+        ...state,
+        period: '2021-07',
+        startDate: '2021-07-10',
+        endDate: '2021-07-11',
+        lines: [
+          ...state.lines,
+          {
+            id: 'night-overtime',
+            concept: 'overtime_night',
+            kind: 'accrued',
+            amount: '200000.00',
+            quantity: '4',
+            startTime: '2021-07-10T22:00:00',
+            endTime: '2021-07-11T02:00:00',
+            overtimeSurchargeId: 175,
+          },
+        ],
+      },
+      worker,
+      2,
+      'NI',
+    );
+
+    expect(payload.accrued.HENs).toEqual([
+      {
+        start_time: '2021-07-10T22:00:00',
+        end_time: '2021-07-11T02:00:00',
+        quantity: 4,
+        percentage: 175,
+        payment: '200000.00',
+      },
+    ]);
+  });
 });
 
 describe('cálculo independiente de días y antigüedad', () => {

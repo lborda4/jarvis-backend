@@ -112,11 +112,18 @@ export class PayrollService {
     return this.catalogs.getPayrollOvertimeSurcharges(company);
   }
   private async validateDayOvertimeMaster(company: string, state: { lines: import('./payroll-domain').PayrollLine[] }) {
-    const lines = state.lines.filter(isDayOvertime);
-    if (!lines.length) return;
-    const master = dayOvertimeMaster(await this.catalogs.getPayrollOvertimeSurcharges(company));
-    if (!master || lines.some(line => line.overtimeSurchargeId !== master.id))
-      throw new BadRequestException('Revisa el recargo de las horas extra diurnas. Abre la novedad y vuelve a guardarla.');
+    const rows = await this.catalogs.getPayrollOvertimeSurcharges(company);
+    for (const code of ['overtime_day', 'overtime_night'] as const) {
+      const lines = state.lines.filter((line) => (line.mapping ?? line.concept) === code);
+      if (!lines.length) continue;
+      const master = dayOvertimeMaster(rows, code);
+      if (!master || lines.some(line => line.overtimeSurchargeId !== master.id))
+        throw new BadRequestException(
+          code === 'overtime_day'
+            ? 'Revisa el recargo de las horas extra diurnas. Abre la novedad y vuelve a guardarla.'
+            : 'Revisa el recargo de las horas extra nocturnas. Abre la novedad y vuelve a guardarla.',
+        );
+    }
   }
   async bootstrap(company: string) {
     await ensurePayrollNumbering(this.db, company);
