@@ -112,15 +112,25 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     expect(history.record.mock.calls[0][0].sourceRequest.items[0].taxAmount).toBe(taxAmount);
   });
 
-  it.each([{ typeRegimeId: 1, ciiu: '4923' }, { typeRegimeId: 2, ciiu: null }])('impide emitir con un registro tributario diferente: %j', async remote => {
+  it('impide emitir cuando no coincide el IVA del emisor', async () => {
     const { service, request, client, numbering } = nonResponsibleIssuer();
-    client.getIssuerTaxConfiguration.mockResolvedValue({ identificationNumber: '1012345678', ...remote } as never);
+    client.getIssuerTaxConfiguration.mockResolvedValue({ identificationNumber: '1012345678', typeRegimeId: 1, ciiu: '4923' });
     await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toThrow('no coincide');
     expect(client.createInvoice).not.toHaveBeenCalled();
     expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
   });
 
-  it('guarda el perfil verificado al emitir y conserva IVA cero en el XML solicitado', async () => {
+  it.each(['6201', null, undefined, ''])('emite y conserva el CIIU local cuando NextPyme devuelve %s', async ciiu => {
+    const { service, request, client, history } = nonResponsibleIssuer();
+    client.getIssuerTaxConfiguration.mockResolvedValue({ identificationNumber: '1012345678', typeRegimeId: 2, ciiu } as never);
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice).toHaveBeenCalledTimes(1);
+    const savedRequest = history.record.mock.calls[0][0].sourceRequest;
+    expect(savedRequest.issuerTaxProfile).toMatchObject({ economicActivity: '4923', source: 'emission' });
+    expect(savedRequest.emissionSnapshot.issuer.economicActivity).toBe('4923');
+  });
+
+  it('guarda el perfil local al emitir y conserva IVA cero en el XML solicitado', async () => {
     const { service, request, client, history } = nonResponsibleIssuer();
     await service.createAndSendInvoice(request, 'company-1');
     expect(client.getIssuerTaxConfiguration).toHaveBeenCalledWith('company-token');

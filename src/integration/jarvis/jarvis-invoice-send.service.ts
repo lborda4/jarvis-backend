@@ -267,10 +267,6 @@ export class JarvisInvoiceSendService {
       if (issuer.typeRegimeId !== expectedRegimeId) {
         throw new BadRequestException('El régimen de IVA guardado en Jarvis no coincide con el registro del emisor para facturar. El administrador debe sincronizarlo antes de emitir.');
       }
-      const ciiu = credentials.economic_activity?.match(/^\s*(\d{4})\b/)?.[1];
-      if (ciiu && issuer.ciiu !== ciiu) {
-        throw new BadRequestException('La actividad económica CIIU guardada en Jarvis no coincide con el registro del emisor para facturar. El administrador debe sincronizarla antes de emitir.');
-      }
     }
 
     const municipalityId =
