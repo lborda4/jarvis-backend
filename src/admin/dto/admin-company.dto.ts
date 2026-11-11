@@ -49,6 +49,9 @@ export class AdminPlanDto {
 }
 
 export class AdminIntegrationItemDto {
+  @ApiPropertyOptional({ description: 'Cupo actual calculado con el consumo del plan. remaining null significa sin límite.' })
+  documentQuota?: { documentLimit: number | null; documentsUsed: number; remaining: number | null };
+
   @ApiProperty()
   id: string;
 
@@ -100,8 +103,14 @@ export class AdminCompanyListItemDto {
   commercial?: string | null;
   @ApiPropertyOptional({ enum: ['MONTHLY', 'ANNUAL'], nullable: true })
   billingCycle?: 'MONTHLY' | 'ANNUAL' | null;
+  @ApiPropertyOptional({ minimum: 1, maximum: 1200, nullable: true })
+  billingMonths?: number | null;
   @ApiPropertyOptional({ nullable: true })
   subscriptionDueDate?: string | null;
+  @ApiPropertyOptional({ nullable: true })
+  trackingPeriodStart?: string | null;
+  @ApiPropertyOptional({ nullable: true })
+  trackingLastPaidAt?: string | null;
 
   @ApiProperty()
   id: string;
@@ -181,6 +190,8 @@ export class CreateAdminCompanyRequestDto {
   commercial?: string;
   @ApiPropertyOptional({ enum: ['MONTHLY', 'ANNUAL'], default: 'MONTHLY' })
   billingCycle?: 'MONTHLY' | 'ANNUAL';
+  @ApiPropertyOptional({ minimum: 1, maximum: 1200, default: 1 })
+  billingMonths?: number;
 
   @ApiProperty({ example: '900123456' })
   nit: string;
@@ -440,8 +451,14 @@ export class LookupAdminCompanyNameResponseDto {
 }
 
 export class UpdateCompanyTrackingDto {
+  @ApiPropertyOptional({ description: 'Registrar el pago y renovar un período. Omitir o false al editar otros campos.' })
+  paymentReceived?: boolean;
+  @ApiPropertyOptional({ nullable: true, description: 'Vencimiento visto por el administrador; impide registrar dos veces el mismo pago.' })
+  expectedDueDate?: string | null;
   @ApiPropertyOptional({ maxLength: 120, nullable: true })
   commercial?: string | null;
-  @ApiProperty({ enum: ['MONTHLY', 'ANNUAL'] })
-  billingCycle: 'MONTHLY' | 'ANNUAL';
+  @ApiPropertyOptional({ enum: ['MONTHLY', 'ANNUAL'] })
+  billingCycle?: 'MONTHLY' | 'ANNUAL';
+  @ApiPropertyOptional({ minimum: 1, maximum: 1200 })
+  billingMonths?: number;
 }

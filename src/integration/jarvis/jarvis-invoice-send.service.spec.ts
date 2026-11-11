@@ -112,12 +112,15 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     expect(history.record.mock.calls[0][0].sourceRequest.items[0].taxAmount).toBe(taxAmount);
   });
 
-  it('impide emitir cuando no coincide el IVA del emisor', async () => {
-    const { service, request, client, numbering } = nonResponsibleIssuer();
-    client.getIssuerTaxConfiguration.mockResolvedValue({ identificationNumber: '1012345678', typeRegimeId: 1, ciiu: '4923' });
-    await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toThrow('no coincide');
-    expect(client.createInvoice).not.toHaveBeenCalled();
-    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+  it('usa el perfil local sin consultar el registro tributario de NextPyme', async () => {
+    const { service, request, client, history } = nonResponsibleIssuer();
+    client.getIssuerTaxConfiguration.mockRejectedValue(new Error('Servicio no disponible'));
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.getIssuerTaxConfiguration).not.toHaveBeenCalled();
+    expect(client.createInvoice).toHaveBeenCalledTimes(1);
+    expect(history.record.mock.calls[0][0].sourceRequest.issuerTaxProfile).toMatchObject({
+      vatRegime: 'non_vat_responsible', economicActivity: '4923', taxResponsibility: 'R-99-PN',
+    });
   });
 
   it.each(['6201', null, undefined, ''])('emite y conserva el CIIU local cuando NextPyme devuelve %s', async ciiu => {
@@ -133,7 +136,7 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
   it('guarda el perfil local al emitir y conserva IVA cero en el XML solicitado', async () => {
     const { service, request, client, history } = nonResponsibleIssuer();
     await service.createAndSendInvoice(request, 'company-1');
-    expect(client.getIssuerTaxConfiguration).toHaveBeenCalledWith('company-token');
+    expect(client.getIssuerTaxConfiguration).not.toHaveBeenCalled();
     expect(client.createInvoice.mock.calls[0][0].tax_totals[0].tax_amount).toBe('0.00');
     expect(history.record.mock.calls[0][0].sourceRequest.issuerTaxProfile).toEqual({
       icaRate: 0,
@@ -141,7 +144,7 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     });
   });
 
-  it('compara el NIT del emisor sin confundir el dígito de verificación', async () => {
+  it('emite con los datos de la empresa local sin consultar el emisor remoto', async () => {
     const { service, request, companies, client } = nonResponsibleIssuer();
     companies.findById.mockResolvedValue({ nextPymeToken: 'company-token', nit: '1.012.345.678-9' } as never);
     await service.createAndSendInvoice(request, 'company-1');

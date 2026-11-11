@@ -5,6 +5,10 @@ import { JarvisSalesInvoice } from './entities/jarvis-sales-invoice.entity';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { attachmentMetadata } from './helpers/jarvis-invoice-attachment.helper';
 export interface SalesInvoiceHistoryQuery { search?: string; from?: string; to?: string; page?: string; }
+type InvoiceAdjustmentStatus = 'NONE' | 'CREDIT_NOTE' | 'DEBIT_NOTE' | 'CREDIT_AND_DEBIT';
+interface AdjustmentInvoice { status: 'SENT' | 'SAVED'; prefix: string; number: string; cufe: string | null; }
+interface IssuedAdjustment { kind: string; referenceUuid: string | null; referenceNumber: string | null; }
+
 @Injectable()
 export class JarvisInvoiceHistoryService {
   constructor(@InjectRepository(JarvisSalesInvoice) private readonly repository: Repository<JarvisSalesInvoice>) {}
@@ -64,6 +68,48 @@ export class JarvisInvoiceHistoryService {
     const items = await this.repository.query(documents + ' SELECT * FROM documents' + where +
       ` ORDER BY "sentAt" DESC,id DESC LIMIT $${parameters.length + 1} OFFSET $${parameters.length + 2}`,
       [...parameters, pageSize, (page - 1) * pageSize]);
-    return { items, total: Number(count.total), page, pageSize };
+    const result = documentKind === JarvisResolutionKind.ELECTRONIC_INVOICE
+      ? await this.withAdjustmentStatus(companyId.trim(), items)
+      : items;
+    return { items: result, total: Number(count.total), page, pageSize };
   }
+
+  private async withAdjustmentStatus<T extends AdjustmentInvoice>(companyId: string, items: T[]): Promise<Array<T & { adjustmentStatus: InvoiceAdjustmentStatus }>> {
+    const uuid = (value: string | null | undefined) => value?.trim().toLowerCase() || '';
+    const invoiceNumber = (invoice: AdjustmentInvoice) => {
+      const prefix = invoice.prefix?.trim() || '';
+      const number = invoice.number?.trim() || '';
+      return (number.startsWith(prefix) ? number : prefix + number).toUpperCase();
+    };
+    const sent = items.filter(item => item.status === 'SENT');
+    const cufes = [...new Set(sent.map(item => uuid(item.cufe)).filter(Boolean))];
+    const numbers = [...new Set(sent.filter(item => !uuid(item.cufe)).map(invoiceNumber).filter(Boolean))];
+    const notes: IssuedAdjustment[] = cufes.length || numbers.length ? await this.repository.query(
+      `SELECT document_kind AS kind,
+        source_request->'billingReference'->>'uuid' AS "referenceUuid",
+        source_request->'billingReference'->>'number' AS "referenceNumber"
+      FROM jarvis_sales_invoices
+      WHERE company_id=$1 AND document_kind IN ('CREDIT_NOTE','DEBIT_NOTE')
+        AND (LOWER(BTRIM(source_request->'billingReference'->>'uuid')) = ANY($2::text[])
+          OR UPPER(BTRIM(source_request->'billingReference'->>'number')) = ANY($3::text[]))`,
+      [companyId, cufes, numbers],
+    ) : [];
+    const byUuid = new Map<string, number>();
+    const byNumber = new Map<string, number>();
+    for (const note of notes) {
+      const flag = note.kind === JarvisResolutionKind.CREDIT_NOTE ? 1 : note.kind === JarvisResolutionKind.DEBIT_NOTE ? 2 : 0;
+      const referenceUuid = uuid(note.referenceUuid);
+      const referenceNumber = note.referenceNumber?.trim().toUpperCase();
+      if (referenceUuid) byUuid.set(referenceUuid, (byUuid.get(referenceUuid) ?? 0) | flag);
+      if (referenceNumber) byNumber.set(referenceNumber, (byNumber.get(referenceNumber) ?? 0) | flag);
+    }
+    return items.map(item => {
+      const referenceUuid = uuid(item.cufe);
+      const flag = item.status !== 'SENT' ? 0
+        : referenceUuid ? byUuid.get(referenceUuid) ?? 0 : byNumber.get(invoiceNumber(item)) ?? 0;
+      const adjustmentStatus: InvoiceAdjustmentStatus = flag === 3 ? 'CREDIT_AND_DEBIT' : flag === 1 ? 'CREDIT_NOTE' : flag === 2 ? 'DEBIT_NOTE' : 'NONE';
+      return { ...item, adjustmentStatus };
+    });
+  }
+
 }

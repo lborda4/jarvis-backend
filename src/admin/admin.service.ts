@@ -1,5 +1,5 @@
 import { UpdateAdminPlanRequestDto } from './dto/admin-plan.dto';
-import { companyDueDate, normalizeCompanyTracking } from './company-tracking';
+import { billingMonthsFromCycle, companyTrackingDueDate, normalizeCompanyTracking, trackingToday } from './company-tracking';
 import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
 import { UpdateCompanyTrackingDto } from './dto/admin-company.dto';
 import type { BoldCredentials } from '../integration/interfaces/integration-credentials.interface';
@@ -13,7 +13,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { Company } from '../company/entities/company.entity';
@@ -282,13 +282,27 @@ export class AdminService {
   }
 
   async updateCompanyTracking(companyId: string, request: UpdateCompanyTrackingDto) {
-    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle);
-    const company = await this.companiesRepository.findById(companyId);
-    if (!company) throw new NotFoundException('Empresa no encontrada.');
-    Object.assign(company, tracking);
-    await this.companiesRepository.save(company);
+    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle, request?.billingMonths);
+    if (request.paymentReceived !== undefined && typeof request.paymentReceived !== 'boolean') throw new BadRequestException('Indica si se recibió el pago.');
+    const company = await this.dataSource.transaction(async manager => {
+      const repository = manager.getRepository(Company);
+      const company = await repository.findOne({ where: { id: companyId }, lock: { mode: 'pessimistic_write' } });
+      if (!company) throw new NotFoundException('Empresa no encontrada.');
+      if (request.paymentReceived) {
+        const currentDueDate = companyTrackingDueDate(company);
+        if (request.expectedDueDate === undefined || request.expectedDueDate !== currentDueDate) throw new ConflictException('El vencimiento cambió. Actualiza el seguimiento antes de registrar otro pago.');
+        const now = new Date();
+        const today = trackingToday(now);
+        company.trackingPeriodStart = currentDueDate && currentDueDate > today ? currentDueDate : today;
+        company.trackingLastPaidAt = now;
+        await manager.getRepository(Integration).update({ companyId, active: true, provider: In([IntegrationProvider.SIIGO, IntegrationProvider.JARVIS]) }, { subscriptionStatus: SubscriptionStatus.ACTIVE });
+      }
+      Object.assign(company, tracking);
+      await repository.save(company);
+      return company;
+    });
     const updated = (await this.companiesRepository.findAllWithIntegrations()).find(item => item.id === companyId);
-    return { company: this.mapCompany(updated ?? company) };
+    return { company: await this.mapCompanyWithDocumentQuotas(updated ?? company) };
   }
 
   async listCompanies(
@@ -297,7 +311,7 @@ export class AdminService {
     const companies = await this.companiesRepository.findAllWithIntegrations();
 
     return {
-      items: companies.map((company) => this.mapCompany(company)),
+      items: await this.mapCompaniesWithDocumentQuotas(companies),
     };
   }
 
@@ -305,7 +319,7 @@ export class AdminService {
     request: CreateAdminCompanyRequestDto,
     adminUserId: string,
   ): Promise<CreateAdminCompanyResponseDto> {
-    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle ?? 'MONTHLY');
+    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle ?? 'MONTHLY', request?.billingMonths);
     const nit = this.normalizeNit(request?.nit);
     const name = request?.name?.trim();
     const personType = this.normalizePersonType(request?.personType);
@@ -885,6 +899,30 @@ export class AdminService {
     };
   }
 
+  private async mapCompaniesWithDocumentQuotas(companies: Company[]): Promise<AdminCompanyListItemDto[]> {
+    const items: AdminCompanyListItemDto[] = [];
+    // Bound parallel quota queries so larger client lists do not exhaust the pool.
+    for (let offset = 0; offset < companies.length; offset += 10) {
+      items.push(...await Promise.all(companies.slice(offset, offset + 10).map(company => this.mapCompanyWithDocumentQuotas(company))));
+    }
+    return items;
+  }
+
+  private async mapCompanyWithDocumentQuotas(company: Company): Promise<AdminCompanyListItemDto> {
+    const item = this.mapCompany(company);
+    await Promise.all(item.integrations.map(async integration => {
+      const source = company.integrations?.find(value => value.id === integration.id);
+      if (integration.provider === IntegrationProvider.BOLD || (!integration.plan && !source?.documentLimits)) return;
+      const quota = await this.planSubscriptionService.getSubscription(company.id, integration.provider);
+      integration.documentQuota = {
+        documentLimit: quota.documentLimit,
+        documentsUsed: quota.documentsUsed,
+        remaining: quota.remaining,
+      };
+    }));
+    return item;
+  }
+
   private mapCompany(company: Company): AdminCompanyListItemDto {
     return {
       id: company.id,
@@ -902,7 +940,10 @@ export class AdminService {
       responsible: company.responsible,
       commercial: company.commercial ?? null,
       billingCycle: company.billingCycle ?? null,
-      subscriptionDueDate: companyDueDate(company.createdAt, company.billingCycle),
+      billingMonths: company.billingMonths ?? billingMonthsFromCycle(company.billingCycle),
+      subscriptionDueDate: companyTrackingDueDate(company),
+      trackingPeriodStart: company.trackingPeriodStart ?? null,
+      trackingLastPaidAt: company.trackingLastPaidAt?.toISOString() ?? null,
       createdAt: company.createdAt.toISOString(),
       inviteCode: company.inviteCode,
       nextPymeToken: company.nextPymeToken,

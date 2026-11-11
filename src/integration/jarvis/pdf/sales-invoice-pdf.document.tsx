@@ -30,19 +30,21 @@ const s = StyleSheet.create({
 });
 const money = (value: number) => value.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const value = (text: string | null | undefined) => text || '—';
-function Party({ title, party }: { title: string; party: JarvisInvoicePdfParty }) {
+const optionalValue = (text: string | null | undefined) => {
+  const trimmed = text?.trim()
+  return trimmed && trimmed !== '—' && trimmed !== '-' ? trimmed : null
+}
+function Party({ title, party, isDraft }: { title: string; party: JarvisInvoicePdfParty; isDraft?: boolean }) {
+  const contactFields = [['Dirección', party.address], ['Ciudad', party.cityName], ['Tel', party.phone], ['Correo', party.email]] as const
   return <View style={s.half}><Text style={s.heading}>{title}</Text><Text style={s.name} hyphenationCallback={keepPdfWordIntact}>{value(party.name)}</Text>
     <Text style={s.field}>{party.documentType || 'Documento'}: {value(party.documentNumber)}{party.checkDigit ? `-${party.checkDigit}` : ''}</Text>
-    <Text style={s.field}>Dirección: {value(party.address)}</Text><Text style={s.field}>Ciudad: {value(party.cityName)}</Text>
-    <Text style={s.field}>Tel: {value(party.phone)}</Text><Text style={s.field}>Correo: {value(party.email)}</Text></View>;
+    {contactFields.map(([label, text]) => (isDraft || optionalValue(text)) ? <Text key={label} style={s.field}>{label}: {optionalValue(text) ?? '—'}</Text> : null)}</View>
 }
 const widths = ['4%', '13%', '18%', '5%', '11%', '8%', '6%', '7%', '7%', '7%', '14%'];
 export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfData; qr: string }) {
   const profile = data.issuerTaxProfile;
-  const xmlActivity = data.issuer.economicActivity?.trim();
-  const savedActivity = profile?.economicActivity?.trim();
-  const sameActivity = xmlActivity?.match(/^\d{4}\b/)?.[0] === savedActivity?.match(/^\d{4}\b/)?.[0] && /^\d{4}\b/.test(xmlActivity ?? '');
-  const economicActivity = savedActivity && (!xmlActivity || (sameActivity && savedActivity.length > xmlActivity.length)) ? savedActivity : xmlActivity;
+  const economicActivity = profile?.economicActivity?.trim();
+  const fiscalRegime = profile?.taxResponsibility?.trim();
   const icaRate = profile?.icaRate != null && Number.isFinite(profile.icaRate) && profile.icaRate > 0 ? `${profile.icaRate} ‰` : null;
   const profileLabel = profile?.source === 'current' ? ' (configuración actual)' : '';
   const vatRegimeLabel = profile?.vatRegime === 'non_vat_responsible' ? 'No responsable de IVA'
@@ -89,7 +91,7 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
       <View style={s.financial}>
         <View style={s.box}><Text style={s.heading}>Detalles de pago</Text><Text style={s.field}>Forma de negociación: {mixedPayment ? 'Contado y crédito' : data.isCreditPayment == null ? '—' : data.isCreditPayment ? 'Crédito' : 'Contado'}</Text>
           {allocations.length ? allocations.map((payment, index) => <Text key={index} style={s.field}>{payment.methodName} ({payment.negotiation === 'CREDIT' ? 'Crédito' : 'Contado'}): {money(payment.amount)}</Text>) : <Text style={s.field}>Forma de pago: {value(data.paymentMethodName)}</Text>}{data.isCreditPayment && <Text style={s.field}>Plazo: {days ?? '—'} días después de la emisión</Text>}
-          <Text style={[s.name, { marginTop: 16 }]}>Observaciones</Text><Text style={s.small}>{value(data.observations)}</Text></View>
+          {optionalValue(data.observations) && <><Text style={[s.name, { marginTop: 16 }]}>Observaciones</Text><Text style={s.small}>{optionalValue(data.observations)}</Text></>}</View>
         <View style={s.box} wrap={false}>{totals.map(([label, amount]) => <View key={label} style={s.totalRow}><Text>{label}:</Text><Text>{money(amount)}</Text></View>)}
           <View style={[s.totalRow, s.total]}><Text>Total antes de retenciones:</Text><Text>{money(beforeRetentions)}</Text></View>
           {([['ReteFuente', '06'], ['ReteICA', '07'], ['ReteIVA', '05']] as const).map(([label, code]) => <View key={code} style={s.totalRow}><Text>{label}:</Text><Text>-{money(retention(code))}</Text></View>)}
@@ -102,12 +104,11 @@ export function SalesInvoicePdfDocument({ data, qr }: { data: JarvisInvoicePdfDa
         <Image src={qr} style={s.qr} />
         <View style={s.half}><Text style={s.name}>Documento electrónico validado por la DIAN</Text><Text style={[s.field, { marginTop: 7 }]}>Fecha y hora de generación:</Text><Text style={s.small}>{data.issueDate} {data.issueTime}</Text></View>
         <View style={s.half}><Text style={s.name}>Información tributaria y resolución de facturación</Text>
-          <Text style={s.small}>Responsabilidad fiscal (XML): {value(data.issuer.fiscalRegime)}</Text>
-          <Text style={s.small}>Tributo (XML): {value(data.issuer.taxResponsibility)}</Text>
+          <Text style={s.small}>Responsabilidad fiscal{profileLabel}: {value(fiscalRegime)}</Text>
           {vatRegimeLabel && <Text style={s.small}>Régimen IVA{profileLabel}: {vatRegimeLabel}</Text>}
           <Text style={s.small}>Resolución No. {value(data.authorization?.number)}</Text><Text style={s.small}>Prefijo: {value(data.prefix)}</Text><Text style={s.small}>Desde: {value(data.authorization?.from)}  Hasta: {value(data.authorization?.to)}</Text><Text style={s.small}>Vigencia: {value(data.authorization?.startDate)} a {value(data.authorization?.endDate)}</Text></View>
       </View>
-        <Text style={s.small}>Actividad económica{!xmlActivity ? profileLabel : ''}: {value(economicActivity)}{icaRate ? ` · Tarifa ICA: ${icaRate}` : ''}</Text>
+        <Text style={s.small}>Actividad económica{profileLabel}: {value(economicActivity)}{icaRate ? ` · Tarifa ICA: ${icaRate}` : ''}</Text>
         <Text style={s.uniqueCode} hyphenationCallback={keepPdfWordIntact}>{copy.uniqueCode}: {data.cufe}</Text>
       </View>
       <Text style={s.footer}>Esta es una representación gráfica de la {copy.footer}.{'\n'}Emitido por Jarvis Colombia</Text>

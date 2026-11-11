@@ -64,6 +64,15 @@ export class Company {
   @Column({ type: 'varchar', length: 120, nullable: true })
   commercial: string | null;
 
+  @Column({ name: 'tracking_period_start', type: 'date', nullable: true })
+  trackingPeriodStart: string | null;
+
+  @Column({ name: 'tracking_last_paid_at', type: 'timestamptz', nullable: true })
+  trackingLastPaidAt: Date | null;
+
+  @Column({ name: 'billing_months', type: 'integer', nullable: true })
+  billingMonths: number | null;
+
   @Column({ name: 'billing_cycle', type: 'varchar', length: 10, nullable: true })
   billingCycle: 'MONTHLY' | 'ANNUAL' | null;
 

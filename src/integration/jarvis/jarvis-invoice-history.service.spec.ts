@@ -33,7 +33,7 @@ describe('listado unificado', () => {
     const query = jest.fn().mockResolvedValueOnce([{ total: '23' }]).mockResolvedValueOnce(items);
     const service = new JarvisInvoiceHistoryService({ query } as never);
     const result = await service.list(' company ', { search: 'Cliente', from: '2026-10-01', to: '2026-10-16', page: '2' });
-    expect(result).toEqual({ items, total: 23, page: 2, pageSize: 20 });
+    expect(result).toEqual({ items: items.map(item => ({ ...item, adjustmentStatus: 'NONE' })), total: 23, page: 2, pageSize: 20 });
     const [sql, params] = query.mock.calls[1];
     expect(sql).toContain('UNION ALL');
     expect(sql).toContain('jarvis_invoice_drafts WHERE company_id=$1 AND document_kind=$2');
@@ -47,5 +47,51 @@ describe('listado unificado', () => {
     const service = new JarvisInvoiceHistoryService({ query } as never);
     await expect(service.list('company', { page: '0' })).rejects.toThrow();
     expect(query).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('estado de ajustes de facturas', () => {
+  const cufe = 'a'.repeat(96);
+  const invoice = { id: 'invoice', status: 'SENT', prefix: 'FE', number: '1', cufe };
+  function setup(items: unknown[], notes: unknown[]) {
+    const query = jest.fn().mockResolvedValueOnce([{ total: String(items.length) }]).mockResolvedValueOnce(items).mockResolvedValueOnce(notes);
+    return { service: new JarvisInvoiceHistoryService({ query } as never), query };
+  }
+  it.each([
+    [[], 'NONE'],
+    [['CREDIT_NOTE'], 'CREDIT_NOTE'],
+    [['DEBIT_NOTE'], 'DEBIT_NOTE'],
+    [['CREDIT_NOTE', 'CREDIT_NOTE', 'DEBIT_NOTE'], 'CREDIT_AND_DEBIT'],
+  ])('identifica las notas enviadas %j de cada factura', async (kinds, expected) => {
+    const notes = (kinds as string[]).map(kind => ({ kind, referenceUuid: cufe.toUpperCase(), referenceNumber: 'FE1' }));
+    const { service, query } = setup([invoice, { ...invoice, id: 'other', number: '2', cufe: 'b'.repeat(96) }], notes);
+    const result = await service.list(' company ', { search: 'Cliente', from: '2026-11-01' });
+    expect(result.items[0].adjustmentStatus).toBe(expected);
+    expect(result.items[1].adjustmentStatus).toBe('NONE');
+    const [sql, parameters] = query.mock.calls[2];
+    expect(sql).toContain('FROM jarvis_sales_invoices');
+    expect(sql).toContain('company_id=$1');
+    expect(sql).toContain("document_kind IN ('CREDIT_NOTE','DEBIT_NOTE')");
+    expect(sql).not.toContain('jarvis_invoice_drafts');
+    expect(parameters).toEqual(['company', [cufe, 'b'.repeat(96)], []]);
+  });
+  it('no vincula una nota por numero si su CUFE corresponde a otra factura', async () => {
+    const { service } = setup([invoice], [{ kind: 'CREDIT_NOTE', referenceUuid: 'b'.repeat(96), referenceNumber: 'FE1' }]);
+    expect((await service.list('company')).items[0].adjustmentStatus).toBe('NONE');
+  });
+  it('usa el numero completo cuando una factura antigua no tiene CUFE local', async () => {
+    const { service, query } = setup([{ ...invoice, number: 'FE1', cufe: null }], [{ kind: 'DEBIT_NOTE', referenceUuid: cufe, referenceNumber: ' FE1 ' }]);
+    expect((await service.list('company')).items[0].adjustmentStatus).toBe('DEBIT_NOTE');
+    expect(query.mock.calls[2][1]).toEqual(['company', [], ['FE1']]);
+  });
+  it('no busca ajustes para borradores ni para listados de notas', async () => {
+    const drafts = setup([{ ...invoice, status: 'SAVED' }], []);
+    expect((await drafts.service.list('company')).items[0].adjustmentStatus).toBe('NONE');
+    expect(drafts.query).toHaveBeenCalledTimes(2);
+    const notes = setup([invoice], []);
+    const result = await notes.service.list('company', {}, JarvisResolutionKind.CREDIT_NOTE);
+    expect(result.items[0]).not.toHaveProperty('adjustmentStatus');
+    expect(notes.query).toHaveBeenCalledTimes(2);
   });
 });

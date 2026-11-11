@@ -256,19 +256,6 @@ export class JarvisInvoiceSendService {
       };
     });
 
-    if (isSaleInvoice && credentials.vat_regime) {
-      const expectedRegimeId = await this.nextPymeMasterCatalogService.resolveRegimeId(credentials.vat_regime, companyId);
-      const issuer = await this.nextPymeApiClient.getIssuerTaxConfiguration(companyToken);
-      const companyNit = company.nit?.split('-')[0].replace(/\D/g, '');
-      const issuerNit = issuer.identificationNumber?.split('-')[0].replace(/\D/g, '');
-      if (companyNit && issuerNit !== companyNit) {
-        throw new BadRequestException('El registro de emisión no corresponde al NIT de la empresa activa.');
-      }
-      if (issuer.typeRegimeId !== expectedRegimeId) {
-        throw new BadRequestException('El régimen de IVA guardado en Jarvis no coincide con el registro del emisor para facturar. El administrador debe sincronizarlo antes de emitir.');
-      }
-    }
-
     const municipalityId =
       tercero.municipalityId ??
       (await this.nextPymeMasterCatalogService.resolveMunicipalityId(

@@ -18,6 +18,9 @@ import {
 import { renderJarvisInvoicePdfBase64 } from './pdf/sales-invoice-pdf.renderer';
 import { buildJarvisDocumentEmail } from './helpers/jarvis-document-email.helper';
 import { randomUUID } from 'node:crypto';
+import { IntegrationsRepository } from '../repositories/integrations.repository';
+import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
+import { issuerTaxProfile, type JarvisIssuerTaxProfile } from './helpers/jarvis-issuer-tax-profile.helper';
 
 function uniqueCodeLabel(kind?: string | null) {
   if (
@@ -44,6 +47,7 @@ export class JarvisInvoicePdfService {
     private readonly companies: CompaniesRepository,
     private readonly nextPyme: NextPymeApiClient,
     private readonly logos: IntegrationLogoService,
+    private readonly integrations: IntegrationsRepository,
   ) {}
 
   async sendEmail(companyId: string, id: string, request: { additionalEmails?: string[]; message?: string }) {
@@ -124,11 +128,12 @@ export class JarvisInvoicePdfService {
     if (!invoice) throw new NotFoundException('No se encontró el documento.');
     const code = uniqueCodeLabel(invoice.documentKind);
     if (!invoice.cufe) throw new BadGatewayException(`El documento aún no tiene ${code} disponible. No vuelvas a emitirlo; actualiza el listado e intenta visualizarlo después.`);
+    const profile = await this.loadIssuerTaxProfile(companyId);
     const logo = await this.safeLogo(companyId);
     const withKind = { documentKind: invoice.documentKind, recipientCopyEmails: invoice.sourceRequest?.recipientCopyEmails ?? [], sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
     const withMetadata = (data: JarvisInvoicePdfData) => ({
       ...data, ...withKind,
-      issuerTaxProfile: invoice.sourceRequest?.issuerTaxProfile?.source === 'emission' ? invoice.sourceRequest.issuerTaxProfile : undefined,
+      issuerTaxProfile: profile,
       items: data.items.map((item, index) => ({ ...item,
         name: item.name?.trim() && item.name.trim() !== item.code?.trim() ? item.name
           : issuedItemName(invoice.sourceRequest?.emissionSnapshot, index, item) || item.name,
@@ -195,7 +200,8 @@ export class JarvisInvoicePdfService {
   }): Promise<JarvisInvoicePdfData | null> {
     if (input.historyId) return this.getData(input.companyId, input.historyId);
     const logo = await this.safeLogo(input.companyId);
-    const withKind = { documentKind: input.documentKind ?? null, ...logo };
+    const profile = await this.loadIssuerTaxProfile(input.companyId);
+    const withKind = { documentKind: input.documentKind ?? null, issuerTaxProfile: profile, ...logo };
     if (input.invoiceXml && input.cufe) {
       try {
         return {
@@ -231,6 +237,11 @@ export class JarvisInvoicePdfService {
       return null;
     }
     return mapJarvisIssuedDocumentToPdfData(invoice);
+  }
+
+  private async loadIssuerTaxProfile(companyId: string): Promise<JarvisIssuerTaxProfile | undefined> {
+    const integration = await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.JARVIS);
+    return integration ? issuerTaxProfile(normalizeJarvisCredentials(integration.credentials), 'current') : undefined;
   }
 
   private async safeLogo(companyId: string): Promise<{ logoDataUrl: string | null }> {

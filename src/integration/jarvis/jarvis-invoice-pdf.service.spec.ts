@@ -5,25 +5,56 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
-  it('no completa documentos antiguos con el CIIU ni régimen actuales', async () => {
-    const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
+  it('completa el perfil ausente con la configuracion local de Jarvis sin consultar NextPyme', async () => {
+    const { service, integrations, client } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
     integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
-      business_name: 'Empresa SAS', vat_regime: 'non_vat_responsible', economic_activity: '4923',
+      business_name: 'Empresa SAS', vat_regime: 'non_vat_responsible', economic_activity: '4923', tax_responsibility: 'R-99-PN',
     } } as never);
     const data = await service.getData('company', 'id');
-    expect(data.issuerTaxProfile).toBeUndefined();
-    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
+    expect(data.issuerTaxProfile).toMatchObject({ source: 'current', economicActivity: '4923', vatRegime: 'non_vat_responsible', taxResponsibility: 'R-99-PN' });
+    expect(integrations.findByCompanyAndProvider).toHaveBeenCalledWith('company', 'JARVIS');
+    expect(client.getInvoiceXmlByCufe).not.toHaveBeenCalled();
     expect(data.total).toBe(238);
     expect(data.iva).toBe(38);
   });
 
-  it('conserva el perfil de emisión aunque la configuración actual de la empresa cambie', async () => {
-    const profile = { source: 'emission', vatRegime: 'non_vat_responsible', economicActivity: '4923', icaRate: 4.14 };
-    const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { issuerTaxProfile: profile } });
-    const data = await service.getData('company', 'id');
-    expect(data.issuerTaxProfile).toEqual(profile);
-    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
+  it('consulta siempre la configuracion de Jarvis aunque la factura tenga un perfil completo', async () => {
+    const saved = { source: 'emission', vatRegime: 'vat_responsible', economicActivity: '1410', taxResponsibility: 'O-13', icaRate: 0 };
+    const { service, integrations, client } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { issuerTaxProfile: saved } });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
+      vat_regime: 'non_vat_responsible', economic_activity: '4923', tax_responsibility: 'R-99-PN', ica_rate: 4.14,
+    } } as never);
+    const first = await service.getData('company', 'id');
+    expect(first.issuerTaxProfile).toEqual({ source: 'current', vatRegime: 'non_vat_responsible', economicActivity: '4923', taxResponsibility: 'R-99-PN', icaRate: 4.14 });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
+      vat_regime: 'vat_responsible', economic_activity: '6201', tax_responsibility: 'O-13', ica_rate: 0,
+    } } as never);
+    const second = await service.getData('company', 'id');
+    expect(second.issuerTaxProfile).toEqual({ source: 'current', vatRegime: 'vat_responsible', economicActivity: '6201', taxResponsibility: 'O-13', icaRate: 0 });
+    expect(integrations.findByCompanyAndProvider).toHaveBeenCalledTimes(2);
+    expect(integrations.findByCompanyAndProvider).toHaveBeenCalledWith('company', 'JARVIS');
+    expect(client.getInvoiceXmlByCufe).not.toHaveBeenCalled();
   });
+
+  it('no recupera el perfil historico cuando no existe configuracion de Jarvis', async () => {
+    const saved = { source: 'emission', vatRegime: 'vat_responsible', economicActivity: '1410' };
+    const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { issuerTaxProfile: saved } });
+    integrations.findByCompanyAndProvider.mockResolvedValue(null as never);
+    expect((await service.getData('company', 'id')).issuerTaxProfile).toBeUndefined();
+  });
+
+  it.each([undefined, '', '   '])('completa el IVA %s junto con los demas datos desde la configuracion de Jarvis', async vatRegime => {
+    const saved = { source: 'emission', vatRegime, economicActivity: '1410', taxResponsibility: 'O-13', icaRate: 0 };
+    const { service, integrations, client } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { issuerTaxProfile: saved } });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
+      vat_regime: 'non_vat_responsible', economic_activity: '4923', tax_responsibility: 'R-99-PN', ica_rate: 4.14,
+    } } as never);
+    const data = await service.getData('company', 'id');
+    expect(data.issuerTaxProfile).toEqual({ source: 'current', vatRegime: 'non_vat_responsible', economicActivity: '4923', taxResponsibility: 'R-99-PN', icaRate: 4.14 });
+    expect(integrations.findByCompanyAndProvider).toHaveBeenCalledWith('company', 'JARVIS');
+    expect(client.getInvoiceXmlByCufe).not.toHaveBeenCalled();
+  });
+
   it('informa el adjunto sin cargar sus bytes en la respuesta del visor', async () => {
     const attachment = { name: 'soporte.pdf', mimeType: 'application/pdf', size: 5, dataBase64: 'JVBERi0=' };
     const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { attachment } });
@@ -57,7 +88,6 @@ describe('sales invoice PDF data', () => {
     expect(data.buyer.name).toBe('Comprador XML');
     expect(data.items[0].name).toBe('Nombre al emitir');
     expect(data.items[0].description).toBe('Producto original');
-    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
   });
 
   it.each(['ELECTRONIC_INVOICE', 'SUPPORT_DOCUMENT', 'CREDIT_NOTE', 'DEBIT_NOTE', 'SUPPORT_CREDIT_NOTE'])('conserva partes y productos emitidos en %s si el proveedor no entrega XML', async documentKind => {
@@ -74,8 +104,9 @@ describe('sales invoice PDF data', () => {
     expect(first.issuer).toMatchObject(saved.issuer);
     expect(first.buyer).toMatchObject(saved.buyer);
     expect(first.items[0]).toMatchObject({ name: 'Producto original', description: 'Descripción enviada', unitValue: 100 });
-    expect(second).toEqual(first);
-    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
+    expect(second.issuer).toEqual(first.issuer);
+    expect(second.buyer).toEqual(first.buyer);
+    expect(second.items).toEqual(first.items);
   });
 
   function setup(invoice: unknown) {
@@ -85,7 +116,7 @@ describe('sales invoice PDF data', () => {
     const client = { getInvoiceXmlByCufe: jest.fn().mockResolvedValue(DOWNLOAD_XML) };
     const logos = { get: jest.fn().mockResolvedValue({ logoDataUrl: null }) };
     const integrations = { findByCompanyAndProvider: jest.fn().mockResolvedValue({ credentials: { business_name: 'Empresa SAS' } }) };
-    return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never, logos as never), repository, query, client, logos, integrations, companies };
+    return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never, logos as never, integrations as never), repository, query, client, logos, integrations, companies };
   }
   it('adds only the owning company logo to the PDF', async () => {
     const { service, logos } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE' });
@@ -156,14 +187,12 @@ describe('sales invoice PDF data', () => {
     expect(data.subtotal).toBe(200000);
     expect(data.iva).toBe(38000);
     expect(repository.update).not.toHaveBeenCalled();
-    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
   });
 
   it('preserves the XML error when an old document has no stored items', async () => {
     const { service, client, integrations } = setup({ cufe: 'cuds', sourceRequest: null });
     client.getInvoiceXmlByCufe.mockRejectedValue(new Error('XML HTTP 402'));
     await expect(service.getData('company', 'id')).rejects.toThrow('XML HTTP 402');
-    expect(integrations.findByCompanyAndProvider).not.toHaveBeenCalled();
   });
 
   it('renders the Jarvis PDF from the issued XML for the email graphic', async () => {
@@ -195,7 +224,7 @@ describe('reenvío de correo de documentos emitidos', () => {
     const repository = { findOne: jest.fn().mockResolvedValue({ prefix: 'NDS', number: 'NDS5' }) };
     const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'owner-token' }) };
     const client = { sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
-    const service = new JarvisInvoicePdfService(repository as never, companies as never, client as never, {} as never);
+    const service = new JarvisInvoicePdfService(repository as never, companies as never, client as never, {} as never, {} as never);
     jest.spyOn(service, 'getData').mockResolvedValue({ issuer: { name: 'Empresa SAS', documentNumber: '900123456' }, buyer: { email: 'cliente@correo.com', name: 'Cliente' }, invoiceNumber: 'NDS5', issueDate: '2026-10-12', total: 238000, currency: 'COP', documentKind: 'SUPPORT_CREDIT_NOTE' } as never);
     return { service, repository, client };
   }
