@@ -14,6 +14,7 @@ import {
 } from './helpers/jarvis-report-calculation.helper';
 import {
   REPORT_TYPES,
+  REPORT_TAX_FILTERS,
   type ReportDocument,
   type ReportFilters,
   type ReportQuery,
@@ -70,6 +71,9 @@ export function validateReportQuery(query: ReportQuery): ReportFilters {
     throw new BadRequestException(
       'El tipo de comprobante no corresponde al reporte.',
     );
+  const tax = text('tax');
+  if (tax && (report !== 'taxes' || !REPORT_TAX_FILTERS.some(option => option.value === tax)))
+    throw new BadRequestException('El impuesto seleccionado no es válido para este reporte.');
   const currency = text('currency').toUpperCase();
   if (currency && !/^[A-Z]{3}$/.test(currency))
     throw new BadRequestException(
@@ -93,7 +97,8 @@ export function validateReportQuery(query: ReportQuery): ReportFilters {
     ...(text('search') ? { search: text('search') } : {}),
     customer: text('customer'),
     seller: text('seller'),
-    product: text('product'),
+    product: report === 'taxes' ? '' : text('product'),
+    ...(tax ? { tax } : {}),
     page,
     pageSize,
   };
@@ -169,7 +174,7 @@ export class JarvisReportsService {
   }
 
   async suggestions(companyId: string, query: ReportQuery) {
-    const { documents } = await this.documents(companyId, { ...query, search: '', customer: '', product: '', seller: '' });
+    const { documents } = await this.documents(companyId, { ...query, search: '', customer: '', product: '', tax: '', seller: '' });
     const [customers, products, sellers] = await Promise.all([
       this.source.query<ReportSuggestionCatalog['customers']>(
         'SELECT document_number AS value, name FROM jarvis_terceros WHERE company_id=$1 ORDER BY name,id', [companyId],
@@ -369,12 +374,12 @@ export class JarvisReportsService {
       to: 'Hasta',
       customer: 'Cliente / proveedor',
       seller: 'Vendedor',
-      product: 'Producto o servicio',
+      ...(data.filters.report === 'taxes' ? { tax: 'Impuesto' } : { product: 'Producto o servicio' }),
       kind: 'Tipo de comprobante',
       currency: 'Moneda',
     };
     (
-      Object.entries(filterLabels) as Array<[keyof typeof filterLabels, string]>
+      Object.entries(filterLabels) as Array<[keyof ReportFilters, string]>
     ).forEach(([key, label]) => {
       const value =
         key === 'report'
@@ -383,6 +388,8 @@ export class JarvisReportsService {
             ? data.filters.view === 'detail'
               ? 'Registros individuales'
               : 'Consolidado'
+            : key === 'tax'
+              ? REPORT_TAX_FILTERS.find(option => option.value === data.filters.tax)?.label || 'Todos'
             : key === 'kind'
               ? kindLabels[data.filters.kind] || 'Todos'
               : data.filters[key] || 'Todos';

@@ -1,3 +1,4 @@
+import { REPORT_TAX_FILTERS } from '../jarvis-reports.types';
 import type { CreateJarvisInvoiceRequestDto } from '../dto/create-jarvis-invoice.dto';
 import type {
   ReportColumn,
@@ -452,6 +453,10 @@ export function calculateJarvisReport(
           total: cents(document.total),
           payable: null,
         };
+    if (filters.report === 'taxes' && filters.tax) {
+      const selected = REPORT_TAX_FILTERS.find(option => option.value === filters.tax);
+      if (!selected || amounts[selected.value] == null || amounts[selected.value] === 0) continue;
+    }
     if (filters.report === 'sellers') {
       const allocation = sellers.length
         ? sellers

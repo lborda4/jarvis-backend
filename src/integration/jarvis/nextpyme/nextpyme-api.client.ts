@@ -1,3 +1,4 @@
+import { parseInvoiceRadianStatus, type InvoiceRadianStatus } from './nextpyme-radian-status';
 import { parseRadianEventResult, type RadianEventResult } from './nextpyme-radian-result';
 import { extractNextPymeInvoiceXml } from './nextpyme-invoice-xml.helper';
 import {
@@ -788,6 +789,22 @@ export class NextPymeApiClient {
       const safeBody = JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
       return parseRadianEventResult(safeBody, response.status);
     } catch { return { status: 'unknown', message: 'No se pudo confirmar el evento. Consulta su estado antes de reenviarlo.' }; }
+  }
+
+  /** Consulta oficial: POST /status/events-document/{CUFE}; no utiliza el historial local. */
+  async getInvoiceRadianStatus(cufe: string, companyToken: string): Promise<InvoiceRadianStatus> {
+    const token = this.requireToken(companyToken);
+    if (typeof cufe !== 'string' || !/^[a-f0-9]{96}$/i.test(cufe.trim()))
+      throw new BadGatewayException('El CUFE no es válido para consultar RADIAN.');
+    try {
+      const response = await firstValueFrom(this.httpService.post<unknown>(
+        this.getBaseUrl() + '/status/events-document/' + encodeURIComponent(cufe.trim().toLowerCase()), {},
+        { headers: this.buildAuthHeaders(token), timeout: 20000, validateStatus: () => true },
+      ));
+      const parsed = response.status >= 200 && response.status < 300 ? parseInvoiceRadianStatus(response.data) : null;
+      if (parsed) return parsed;
+    } catch { /* No convertir fallos de consulta en ausencia de aceptación. */ }
+    throw new BadGatewayException('No se pudo verificar la aceptación RADIAN de esta factura en NextPyme. Intenta nuevamente antes de crear la nota.');
   }
 
   async getRadianEventStatus(cude: string, companyToken: string): Promise<RadianEventResult> {

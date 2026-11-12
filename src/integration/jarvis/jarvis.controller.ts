@@ -98,6 +98,12 @@ export class JarvisController {
     private readonly jarvisTaxesService: JarvisTaxesService,
   ) {}
 
+  @Post('radian/note-eligibility')
+  @ApiOperation({ summary: 'Verificar en NextPyme la aceptación RADIAN antes de crear una nota.' })
+  noteEligibility(@CurrentUser() user: AuthenticatedUser, @Body() request: { cufe: string }) {
+    return this.radian.noteEligibility(getAuthenticatedCompanyId(user), request?.cufe);
+  }
+
   @Post('radian/invoice')
   @ApiOperation({ summary: 'Consultar una factura recibida por CUFE para RADIAN.' })
   lookupRadianInvoice(@CurrentUser() user: AuthenticatedUser, @Body() request: { cufe: string }) {
@@ -446,8 +452,8 @@ export class JarvisController {
 
   @Get('invoices')
   @ApiOperation({ summary: 'Historial de facturas de venta enviadas de la empresa activa.' })
-  listInvoices(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string) {
-    return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page });
+  listInvoices(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('page') page?: string, @Query('number') number?: string) {
+    return this.jarvisInvoiceHistoryService.list(getAuthenticatedCompanyId(user), { search, from, to, page, number });
   }
 
   @Post('invoices')

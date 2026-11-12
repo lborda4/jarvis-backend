@@ -61,6 +61,7 @@ export interface JarvisDianResolution {
 }
 
 export interface JarvisCredentials {
+  invoice_appearance?: import('../jarvis/pdf/invoice-appearance').InvoiceAppearance;
   /** Tarifa de ICA por mil. Cero cuando no se configura. */
   ica_rate?: number;
   person_type?: import('../../company/enums/company-person-type.enum').CompanyPersonType;

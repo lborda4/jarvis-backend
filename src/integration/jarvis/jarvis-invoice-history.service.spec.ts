@@ -95,3 +95,26 @@ describe('estado de ajustes de facturas', () => {
     expect(notes.query).toHaveBeenCalledTimes(2);
   });
 });
+
+
+describe('búsqueda de referencia por consecutivo para notas', () => {
+  it.each(['F', 'FV', 'FV12', "FV%_'"])('busca %s solo en facturas emitidas y parametriza el texto literal', async number => {
+    const query = jest.fn().mockResolvedValueOnce([{ total: '0' }]).mockResolvedValueOnce([]);
+    const service = new JarvisInvoiceHistoryService({ query } as never);
+    await expect(service.list('owner', { number })).resolves.toMatchObject({ items: [], total: 0 });
+    for (const [sql, params] of query.mock.calls) {
+      expect(params.slice(0, 3)).toEqual(['owner', JarvisResolutionKind.ELECTRONIC_INVOICE, number]);
+      expect(sql).toContain("status='SENT'");
+      expect(sql).toContain("NULLIF(BTRIM(cufe),'') IS NOT NULL");
+      expect(sql).toContain('POSITION(LOWER($3) IN LOWER(');
+      expect(sql).not.toContain('"customerName" ILIKE');
+      if (number.length > 2) expect(sql).not.toContain(number);
+    }
+  });
+  it('rechaza consecutivos demasiado largos antes de consultar la base de datos', async () => {
+    const query = jest.fn();
+    const service = new JarvisInvoiceHistoryService({ query } as never);
+    await expect(service.list('owner', { number: 'F'.repeat(101) })).rejects.toThrow('consecutivo');
+    expect(query).not.toHaveBeenCalled();
+  });
+});

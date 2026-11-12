@@ -1,9 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Integration } from '../entities/integration.entity';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
-import { IntegrationCredentials } from '../interfaces/integration-credentials.interface';
+import { JarvisDianResolution, IntegrationCredentials } from '../interfaces/integration-credentials.interface';
 import { SubscriptionStatus } from '../../plan/enums/subscription-status.enum';
 
 @Injectable()
@@ -78,6 +78,28 @@ export class IntegrationsRepository {
       relations: { plan: true },
       order: { provider: 'ASC' },
     });
+  }
+
+  /** Actualización atómica de una sola resolución. GREATEST impide retrocesos por respuestas tardías. */
+  async advanceJarvisResolutionNumber(companyId: string, key: string, resolution: JarvisDianResolution): Promise<void> {
+    const rows = await this.repository.query(
+      `WITH advanced AS (UPDATE integrations SET credentials = jsonb_set(COALESCE(credentials,'{}'::jsonb), '{resolutions}',
+        (CASE WHEN jsonb_typeof(credentials->'resolutions')='object' THEN credentials->'resolutions' ELSE '{}'::jsonb END) ||
+        jsonb_build_object($3::text,
+          $4::jsonb ||
+          (CASE WHEN jsonb_typeof(credentials #> ARRAY['resolutions',$3::text])='object' THEN credentials #> ARRAY['resolutions',$3::text] ELSE '{}'::jsonb END) ||
+          jsonb_build_object('nextConsecutive',GREATEST(
+            CASE WHEN credentials #>> ARRAY['resolutions',$3::text,'nextConsecutive'] ~ '^[0-9]+$'
+              THEN (credentials #>> ARRAY['resolutions',$3::text,'nextConsecutive'])::numeric ELSE 0 END,
+            ($4::jsonb->>'nextConsecutive')::numeric
+          ))
+        ), true), updated_at=NOW()
+       WHERE company_id=$1 AND provider=$2 AND active=true
+         AND COALESCE(NULLIF(BTRIM(credentials #>> ARRAY['resolutions',$3::text,'prefix']),''),$5)=$5
+       RETURNING id) SELECT id FROM advanced`,
+      [companyId, IntegrationProvider.JARVIS, key, JSON.stringify(resolution), resolution.prefix.trim()],
+    );
+    if (!rows.length) throw new ConflictException('La configuración del prefijo cambió durante el envío. Revisa la resolución e intenta nuevamente.');
   }
 
   save(integration: Integration): Promise<Integration> {

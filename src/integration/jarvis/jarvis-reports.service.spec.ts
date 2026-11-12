@@ -519,3 +519,50 @@ it('valida y recorta la busqueda general del reporte', () => {
   expect(filters({ search: '  FV1  ' }).search).toBe('FV1');
   expect(() => filters({ search: 'x'.repeat(201) })).toThrow();
 });
+
+
+it.each(['iva', 'otherTaxes', 'retefuente', 'reteIca', 'reteIva'])('filtra comprobantes por %s antes de consolidar y totalizar', tax => {
+  const selected = invoice({ id: 'selected', kind: 'CREDIT_NOTE' });
+  const charge = tax === 'iva' || tax === 'reteIva' ? 19 : tax === 'otherTaxes' ? 8 : 0;
+  selected.source!.items[0].taxAmount = charge;
+  selected.source!.items[0].taxId = tax === 'otherTaxes' ? 4 : 1;
+  selected.total = String(100 + charge);
+  const retention = tax === 'retefuente' ? { id: 6, type: 'ReteRenta', percentage: 2 }
+    : tax === 'reteIca' ? { id: 7, type: 'ReteICA', percentage: 10 }
+    : tax === 'reteIva' ? { id: 5, type: 'ReteIVA', percentage: 15 } : null;
+  if (retention) selected.source!.retentions = [retention];
+  const plain = invoice({ id: 'plain', total: '100' });
+  plain.source!.items[0].taxAmount = 0;
+  const result = calculateJarvisReport([selected, plain, invoice({ id: 'legacy', source: null })], filters({ report: 'taxes', tax }));
+  expect(result.detail).toHaveLength(1);
+  expect(result.detail[0].id).toBe('selected');
+  expect(Number(result.detail[0][tax])).toBeLessThan(0);
+  expect(result.summary).toHaveLength(1);
+  expect(result.totals[0].total).toBe(-Number(selected.total));
+});
+
+it('valida el impuesto y elimina el filtro de producto del reporte fiscal', () => {
+  expect(filters({ report: 'taxes', tax: 'iva', product: 'producto anterior' })).toMatchObject({ tax: 'iva', product: '' });
+  expect(() => filters({ report: 'taxes', tax: 'inventado' })).toThrow('impuesto');
+  expect(() => filters({ report: 'sales', tax: 'iva' })).toThrow('impuesto');
+});
+
+it('exporta y pagina solo comprobantes con el impuesto consultado y registra ese filtro en Excel', async () => {
+  const plain = invoice({ id: 'plain', number: 'FV2', total: '100' });
+  plain.source!.items[0].taxAmount = 0;
+  const { service } = setup([invoice(), plain]);
+  const selected = { ...query, report: 'taxes', tax: 'iva', view: 'detail', page: '99', pageSize: '10' };
+  const result = await service.query('company-a', selected);
+  expect(result).toMatchObject({ total: 1, page: 1 });
+  expect(result.items[0].id).toBe('invoice-1');
+  expect(result.totals[0].iva).toBe(19);
+  const exported = await service.export('company-a', selected);
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  expect(workbook.getWorksheet('Registros')!.rowCount).toBe(2);
+  expect(workbook.getWorksheet('Consolidado')!.rowCount).toBe(2);
+  const metadata: unknown[] = [];
+  workbook.getWorksheet('Filtros y criterios')!.eachRow(row => metadata.push(row.values));
+  expect(metadata).toContainEqual(expect.arrayContaining(['Impuesto', 'IVA']));
+  expect(metadata).not.toContainEqual(expect.arrayContaining(['Producto o servicio']));
+}, 30000);

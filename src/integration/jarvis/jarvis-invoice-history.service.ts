@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { JarvisSalesInvoice } from './entities/jarvis-sales-invoice.entity';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { attachmentMetadata } from './helpers/jarvis-invoice-attachment.helper';
-export interface SalesInvoiceHistoryQuery { search?: string; from?: string; to?: string; page?: string; }
+export interface SalesInvoiceHistoryQuery { search?: string; number?: string; from?: string; to?: string; page?: string; }
 type InvoiceAdjustmentStatus = 'NONE' | 'CREDIT_NOTE' | 'DEBIT_NOTE' | 'CREDIT_AND_DEBIT';
 interface AdjustmentInvoice { status: 'SENT' | 'SAVED'; prefix: string; number: string; cufe: string | null; }
 interface IssuedAdjustment { kind: string; referenceUuid: string | null; referenceNumber: string | null; }
@@ -12,6 +12,23 @@ interface IssuedAdjustment { kind: string; referenceUuid: string | null; referen
 @Injectable()
 export class JarvisInvoiceHistoryService {
   constructor(@InjectRepository(JarvisSalesInvoice) private readonly repository: Repository<JarvisSalesInvoice>) {}
+  /** Mayor consecutivo emitido del mismo emisor, tipo y prefijo; nunca mezcla notas y facturas. */
+  async lastIssuedNumber(companyId: string, kind: JarvisResolutionKind, prefix: string): Promise<number> {
+    const [row] = await this.repository.query(
+      `SELECT COALESCE(MAX(CASE
+        WHEN number ~ '^[0-9]+$' THEN number::numeric
+        WHEN LEFT(number,LENGTH($3))=$3 AND SUBSTRING(number FROM LENGTH($3)+1) ~ '^[0-9]+$'
+          THEN SUBSTRING(number FROM LENGTH($3)+1)::numeric
+        ELSE NULL END),0)::text AS "lastNumber"
+       FROM jarvis_sales_invoices WHERE company_id=$1 AND document_kind=$2 AND prefix=$3`,
+      [companyId, kind, prefix],
+    );
+    const lastNumber = Number(row?.lastNumber);
+    if (!Number.isSafeInteger(lastNumber) || lastNumber < 0)
+      throw new BadRequestException('No se pudo verificar el último consecutivo enviado de este prefijo.');
+    return lastNumber;
+  }
+
   async record(invoice: Pick<JarvisSalesInvoice, 'companyId' | 'providerId' | 'prefix' | 'number' | 'issueDate' | 'customerName' | 'customerIdentification' | 'currency' | 'total' | 'cufe'> & { documentKind?: JarvisResolutionKind; invoiceXml?: string | null; sourceRequest?: JarvisSalesInvoice["sourceRequest"] }): Promise<string | undefined> {
     await this.repository.upsert({ ...invoice, documentKind: invoice.documentKind ?? JarvisResolutionKind.ELECTRONIC_INVOICE }, ['companyId', 'documentKind', 'prefix', 'number']);
     const saved = await this.repository.findOne({ where: { companyId: invoice.companyId, documentKind: invoice.documentKind ?? JarvisResolutionKind.ELECTRONIC_INVOICE, prefix: invoice.prefix, number: invoice.number }, select: { id: true } });
@@ -55,6 +72,14 @@ export class JarvisInvoiceHistoryService {
     )`;
     const parameters: unknown[] = [companyId.trim(), documentKind];
     const conditions: string[] = [];
+    if (filters.number !== undefined && (typeof filters.number !== 'string' || filters.number.length > 100))
+      throw new BadRequestException('El consecutivo de factura no es válido.');
+    const number = filters.number?.trim();
+    if (number) {
+      parameters.push(number);
+      const index = parameters.length;
+      conditions.push(`status='SENT' AND NULLIF(BTRIM(cufe),'') IS NOT NULL AND POSITION(LOWER($${index}) IN LOWER(CASE WHEN LEFT(number,LENGTH(prefix))=prefix THEN number ELSE CONCAT(prefix,number) END)) > 0`);
+    }
     const search = filters.search?.trim();
     if (search) {
       parameters.push('%' + search + '%');

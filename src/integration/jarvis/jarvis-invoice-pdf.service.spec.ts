@@ -5,6 +5,26 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
+  it('aplica las preferencias actuales de la empresa al visor y al PDF de correo', async () => {
+    const appearance = { accentColor: '#123456', footerText: 'Gracias por tu compra.', showLogo: false };
+    const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE' });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { business_name: 'Empresa SAS', invoice_appearance: appearance } } as never);
+    expect((await service.getData('company', 'id')).invoiceAppearance).toEqual(appearance);
+    const renderer = jest.requireMock('./pdf/sales-invoice-pdf.renderer');
+    renderer.renderJarvisInvoicePdfBase64.mockClear();
+    await service.renderGraphicBase64({ companyId: 'company', historyId: 'id' });
+    expect(renderer.renderJarvisInvoicePdfBase64).toHaveBeenCalledWith(expect.objectContaining({ invoiceAppearance: appearance }));
+    renderer.renderJarvisInvoicePdfBase64.mockClear();
+    await service.renderGraphicBase64({ companyId: 'company', invoiceXml: DOWNLOAD_XML, cufe: 'cufe-123', documentKind: 'ELECTRONIC_INVOICE' });
+    expect(renderer.renderJarvisInvoicePdfBase64).toHaveBeenCalledWith(expect.objectContaining({ invoiceAppearance: appearance }));
+  });
+
+  it('no aplica las preferencias de la factura a una nota crédito', async () => {
+    const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'CREDIT_NOTE' });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { invoice_appearance: { accentColor: '#123456', footerText: 'Solo facturas', showLogo: false } } } as never);
+    expect((await service.getData('company', 'id')).invoiceAppearance).toBeUndefined();
+  });
+
   it('completa el perfil ausente con la configuracion local de Jarvis sin consultar NextPyme', async () => {
     const { service, integrations, client } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
     integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {

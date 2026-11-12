@@ -1,4 +1,5 @@
 import { JarvisSetupService } from './jarvis-setup.service';
+
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { SaveJarvisResolutionRequestDto } from './dto/jarvis-resolution.dto';
 import { CompanyPersonType } from '../../company/enums/company-person-type.enum';
@@ -36,6 +37,16 @@ function buildService(overrides: {
       }),
     save: jest.fn().mockImplementation((integration) => integration),
   };
+  Object.assign(integrationsRepository, {
+    advanceJarvisResolutionNumber: jest.fn(async (_companyId, key, resolution) => {
+      const integration = await integrationsRepository.findByCompanyAndProvider();
+      const previous = integration.credentials.resolutions?.[key];
+      integration.credentials = { ...integration.credentials, resolutions: { ...integration.credentials.resolutions,
+        [key]: { ...resolution, ...previous, nextConsecutive: Math.max(previous?.nextConsecutive ?? 0, resolution.nextConsecutive) },
+      } };
+      await integrationsRepository.save(integration);
+    }),
+  });
   const nextPymeApiClient = {
     putConfigResolution:
       overrides.putConfigResolution ?? jest.fn().mockResolvedValue({}),
@@ -798,5 +809,22 @@ describe('resoluciones con base de datos no disponible', () => {
   it.each(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'])('informa la causa %s sin ocultarla como error de resoluciones', async code => {
     const { service } = buildService({ listResolutions: jest.fn().mockRejectedValue(Object.assign(new Error('private connection details'), { code })) });
     await expect(service.listAvailableResolutions('company')).rejects.toThrow('No se pudo conectar con la base de datos');
+  });
+});
+
+describe('el contador de resoluciones no retrocede', () => {
+  it('mantiene el siguiente número reservado cuando llega una confirmación anterior', async () => {
+    const { service, integrationsRepository } = buildService({});
+    await service.commitResolutionNumber('company-1', JarvisResolutionKind.CREDIT_NOTE, 40);
+    await service.commitResolutionNumber('company-1', JarvisResolutionKind.CREDIT_NOTE, 3);
+    const saved = integrationsRepository.save.mock.calls.at(-1)![0];
+    expect(saved.credentials.resolutions.credit_note.nextConsecutive).toBe(41);
+  });
+  it('no modifica una resolución nueva si el prefijo cambió durante la reserva', async () => {
+    const { service, integrationsRepository } = buildService({});
+    await service.commitResolutionNumber('company-1', JarvisResolutionKind.CREDIT_NOTE, 2);
+    integrationsRepository.save.mockClear();
+    await expect(service.commitResolutionNumber('company-1', JarvisResolutionKind.CREDIT_NOTE, 50, 'OTRO')).rejects.toThrow('prefijo cambió');
+    expect(integrationsRepository.save).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,10 @@
-import { BadGatewayException } from '@nestjs/common';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
+import { BadGatewayException } from '@nestjs/common';
+
 import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
+
+beforeEach(() => { jest.useFakeTimers({ now: new Date('2026-09-16T17:00:00Z') }); });
+afterEach(() => { jest.useRealTimers(); });
 
 jest.mock('./jarvis-invoice-pdf.service', () => ({
   JarvisInvoicePdfService: class JarvisInvoicePdfService {},
@@ -21,7 +25,7 @@ function setup(
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner), query: jest.fn().mockResolvedValue([]) };
   const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: token }) };
   const client = { createDebitNote: jest.fn().mockResolvedValue({ cude: 'debit-code' }), createCreditNote: jest.fn().mockResolvedValue({ cude: 'credit-code' }), createSupportCreditNote: jest.fn().mockResolvedValue({ cuds: 'adjustment-code' }), createSupportDocument: jest.fn().mockResolvedValue({ cuds: "support-code" }), createInvoice: jest.fn().mockResolvedValue({ success: true }), sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
-  const issuerClient = { ...client, getIssuerTaxConfiguration: jest.fn().mockResolvedValue({ identificationNumber: '1012345678', typeRegimeId: 2, ciiu: '4923' }) };
+  const issuerClient = { ...client, getInvoiceRadianStatus: jest.fn().mockResolvedValue({ accepted: false, eventCodes: [] }), getIssuerTaxConfiguration: jest.fn().mockResolvedValue({ identificationNumber: '1012345678', typeRegimeId: 2, ciiu: '4923' }) };
   const catalog = {
     getIvaTaxId: () => 1,
     getDefaultUnitMeasureId: () => 70,
@@ -42,7 +46,7 @@ function setup(
     allocateNumber: jest.fn().mockResolvedValue({ prefix: 'NC', number: 1, formNumber: null }),
     commitNumber: jest.fn(),
   };
-  const history = { record: jest.fn().mockResolvedValue(undefined) };
+  const history = { lastIssuedNumber: jest.fn().mockResolvedValue(0), record: jest.fn().mockResolvedValue(undefined) };
   const invoicePdf = { renderGraphicBase64: jest.fn().mockResolvedValue('') };
   const plans = {
     assertCanCreateDocuments: jest.fn().mockResolvedValue(undefined),
@@ -259,7 +263,7 @@ describe('Registro del envio en historial', () => {
 
     await expect(service.createAndSendInvoice(request, 'company-1', kind)).rejects.toBe(error);
     expect(numbering.commitResolutionNumber).toHaveBeenCalledTimes(1);
-    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', kind, 1);
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', kind, 1, expect.any(String));
     expect(send).toHaveBeenCalledTimes(1);
     expect(history.record).not.toHaveBeenCalled();
   });
@@ -272,6 +276,7 @@ describe('Registro del envio en historial', () => {
       'company-1',
       JarvisResolutionKind.ELECTRONIC_INVOICE,
       1,
+      expect.any(String),
     );
   });
 
@@ -314,7 +319,7 @@ describe('Documento soporte con el mismo flujo de ventas', () => {
     }), 'company-token');
     expect(client.createSupportDocument.mock.calls[0][0]).not.toHaveProperty('customer');
     expect(numbering.allocateResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.SUPPORT_DOCUMENT);
-    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.SUPPORT_DOCUMENT, 1);
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', JarvisResolutionKind.SUPPORT_DOCUMENT, 1, expect.any(String));
     expect(history.record).toHaveBeenCalledWith(expect.objectContaining({ documentKind: JarvisResolutionKind.SUPPORT_DOCUMENT, cufe: 'support-code' }));
   });
 
@@ -347,6 +352,7 @@ describe('Documento soporte con el mismo flujo de ventas', () => {
       'company-1',
       JarvisResolutionKind.SUPPORT_DOCUMENT,
       1,
+      expect.any(String),
     );
   });
 });
@@ -424,6 +430,7 @@ describe('Notas credito Jarvis', () => {
       'company-1',
       JarvisResolutionKind.CREDIT_NOTE,
       1,
+      expect.any(String),
     );
   });
 });
@@ -618,6 +625,7 @@ describe('Notas debito Jarvis', () => {
       'company-1',
       JarvisResolutionKind.DEBIT_NOTE,
       1,
+      expect.any(String),
     );
   });
   it('requires an original invoice reference', async () => {
@@ -793,5 +801,111 @@ describe('vendedores internos de facturas', () => {
     const { service, request, client } = setup();
     await expect(service.createAndSendInvoice({ ...request, sellerIds: ['11111111-1111-4111-8111-111111111111'] }, 'company-1')).rejects.toThrow('no pertenecen');
     expect(client.createInvoice).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('fecha autom?tica de los documentos de venta', () => {
+  it.each([
+    [JarvisResolutionKind.ELECTRONIC_INVOICE, 'createInvoice'],
+    [JarvisResolutionKind.CREDIT_NOTE, 'createCreditNote'],
+    [JarvisResolutionKind.DEBIT_NOTE, 'createDebitNote'],
+  ] as const)('emite %s con hoy en Colombia y conserva la fecha de la factura afectada', async (kind, method) => {
+    jest.setSystemTime(new Date('2026-11-12T02:00:00Z'));
+    const { service, request, client, history } = setup();
+    const original = { ...request, issueDate: '2026-09-16',
+      payment: { id: 10, payment_form_id: 1, due_date: '2026-09-16' },
+      billingReference: { number: 'FV1', uuid: 'a'.repeat(96), issueDate: '2026-09-15' },
+      discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo',
+    };
+    await service.createAndSendInvoice(original, 'company-1', kind);
+    const payload = client[method].mock.calls[0][0];
+    expect(payload.date).toBe('2026-11-11');
+    expect(history.record.mock.calls[0][0]).toMatchObject({ issueDate: '2026-11-11', sourceRequest: { issueDate: '2026-11-11' } });
+    if (kind === JarvisResolutionKind.ELECTRONIC_INVOICE) expect(payload.payment_form.payment_due_date).toBe('2026-11-11');
+    else expect(payload.billing_reference.issue_date).toBe('2026-09-15');
+    expect(original.issueDate).toBe('2026-09-16');
+  });
+
+  it('actualiza la fecha al pasar la medianoche de Colombia', async () => {
+    jest.setSystemTime(new Date('2026-11-12T04:59:59Z'));
+    const { service, request, client } = setup();
+    await service.createAndSendInvoice(request, 'company-1');
+    jest.setSystemTime(new Date('2026-11-12T05:00:00Z'));
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice.mock.calls.map(call => call[0].date)).toEqual(['2026-11-11', '2026-11-12']);
+  });
+});
+
+
+describe('consulta RADIAN en NextPyme antes de emitir notas', () => {
+  it.each([JarvisResolutionKind.CREDIT_NOTE, JarvisResolutionKind.DEBIT_NOTE])('bloquea %s aceptada sin asignar consecutivo ni enviarla', async kind => {
+    const { service, request, client, numbering, history } = setup();
+    client.getInvoiceRadianStatus.mockResolvedValue({ accepted: true, eventCodes: ['034'] });
+    const billingReference = { number: 'FV1', uuid: 'a'.repeat(96), issueDate: '2026-09-15' };
+    await expect(service.createAndSendInvoice({ ...request, billingReference, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', kind)).rejects.toThrow('aceptación en RADIAN');
+    expect(client.getInvoiceRadianStatus).toHaveBeenCalledWith(billingReference.uuid, 'company-token');
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+    expect(client.createCreditNote).not.toHaveBeenCalled();
+    expect(client.createDebitNote).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
+  });
+  it('no emite ni numera cuando NextPyme no confirma la consulta', async () => {
+    const { service, request, client, numbering } = setup();
+    client.getInvoiceRadianStatus.mockRejectedValue(new Error('Consulta sin confirmar'));
+    await expect(service.createAndSendInvoice({ ...request, billingReference: { number: 'FV1', uuid: 'a'.repeat(96), issueDate: '2026-09-15' }, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('sin confirmar');
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+    expect(client.createCreditNote).not.toHaveBeenCalled();
+  });
+});
+
+describe('consecutivos mayores al último enviado del prefijo', () => {
+  it.each([
+    [JarvisResolutionKind.ELECTRONIC_INVOICE, 'createInvoice'],
+    [JarvisResolutionKind.SUPPORT_DOCUMENT, 'createSupportDocument'],
+    [JarvisResolutionKind.CREDIT_NOTE, 'createCreditNote'],
+    [JarvisResolutionKind.DEBIT_NOTE, 'createDebitNote'],
+  ] as const)('corrige un contador atrasado en %s antes de enviarlo', async (kind, method) => {
+    const { service, request, client, numbering, history } = setup();
+    history.lastIssuedNumber.mockResolvedValue(42);
+    await service.createAndSendInvoice({ ...request, billingReference: { number: 'FV1', uuid: 'a'.repeat(96), issueDate: '2026-09-15' }, discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo' }, 'company-1', kind);
+    expect(history.lastIssuedNumber).toHaveBeenCalledWith('company-1', kind, 'FVJ');
+    expect(numbering.commitResolutionNumber).toHaveBeenCalledWith('company-1', kind, 43, 'FVJ');
+    expect(client[method].mock.calls[0][0].number).toBe(43);
+    expect(numbering.commitResolutionNumber.mock.invocationCallOrder[0]).toBeLessThan(client[method].mock.invocationCallOrder[0]);
+  });
+
+  it('respeta las reservas mayores al historial para no reutilizar un número en curso', async () => {
+    const { service, request, client, numbering, history } = setup();
+    history.lastIssuedNumber.mockResolvedValue(42);
+    numbering.allocateResolutionNumber.mockResolvedValue({ prefix: 'FVJ', number: 50, formNumber: 'res' });
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice.mock.calls[0][0].number).toBe(50);
+  });
+
+  it('no envía si el último consecutivo agotó el rango autorizado', async () => {
+    const { service, request, client, numbering, history } = setup();
+    history.lastIssuedNumber.mockResolvedValue(10);
+    numbering.allocateResolutionNumber.mockResolvedValue({ prefix: 'FVJ', number: 1, toNumber: 10, formNumber: 'res' } as never);
+    await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toThrow('agotó');
+    expect(client.createInvoice).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+  });
+
+  it('no numera ni envía si no puede consultar el último consecutivo', async () => {
+    const { service, request, client, numbering, history } = setup();
+    history.lastIssuedNumber.mockRejectedValue(new Error('Historial no disponible'));
+    await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toThrow('Historial no disponible');
+    expect(client.createInvoice).not.toHaveBeenCalled();
+    expect(numbering.commitResolutionNumber).not.toHaveBeenCalled();
+  });
+
+  it('un fallo de actualización tardía no convierte un documento aceptado en un error de emisión', async () => {
+    const { service, request, client, numbering } = setup();
+    client.createInvoice.mockResolvedValue({ success: true, number: 25 } as never);
+    numbering.commitResolutionNumber.mockResolvedValueOnce(undefined as never).mockRejectedValueOnce(new Error('Contador no disponible'));
+    await expect(service.createAndSendInvoice(request, 'company-1')).resolves.toMatchObject({ success: true });
+    expect(client.createInvoice).toHaveBeenCalledTimes(1);
+    expect(numbering.commitResolutionNumber).toHaveBeenLastCalledWith('company-1', JarvisResolutionKind.ELECTRONIC_INVOICE, 25, 'FVJ');
   });
 });

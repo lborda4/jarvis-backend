@@ -6,6 +6,7 @@ import type {
 export type JarvisInvoicePdfParty = PurchaseInvoiceDownloadPartyDto;
 
 export type JarvisInvoicePdfData = PurchaseInvoiceDownloadDto & {
+  invoiceAppearance?: import('./invoice-appearance').InvoiceAppearance;
   recipientCopyEmails?: string[];
   issuerTaxProfile?: import('../helpers/jarvis-issuer-tax-profile.helper').JarvisIssuerTaxProfile;
   attachment?: import('../helpers/jarvis-invoice-attachment.helper').InvoiceAttachmentMetadata;

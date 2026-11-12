@@ -1,3 +1,4 @@
+import { checkInvoiceNoteEligibility } from './helpers/jarvis-invoice-note-eligibility.helper';
 import { JarvisRadianEventsRepository } from './repositories/jarvis-radian-events.repository';
 import type { JarvisRadianEvent } from './entities/jarvis-radian-event.entity';
 import type { RadianEventResult } from './nextpyme/nextpyme-radian-result';
@@ -21,6 +22,19 @@ export class JarvisRadianService {
     private readonly client: NextPymeApiClient,
     private readonly events: JarvisRadianEventsRepository,
   ) {}
+
+  async noteEligibility(companyId: string, cufe: string) {
+    if (typeof cufe !== 'string' || !/^[a-f0-9]{96}$/i.test(cufe.trim()))
+      throw new BadRequestException('El CUFE no es válido.');
+    const integration = await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.JARVIS)
+      ?? await this.integrations.findByCompanyAndProvider(companyId, IntegrationProvider.SIIGO);
+    if (!integration || (integration.subscriptionStatus != null && integration.subscriptionStatus !== SubscriptionStatus.ACTIVE))
+      throw new ForbiddenException('Esta función requiere una integración activa.');
+    const company = await this.companies.findById(companyId);
+    const token = company?.nextPymeToken?.trim();
+    if (!token) throw new BadRequestException('La configuración de la empresa no está completa.');
+    return checkInvoiceNoteEligibility(this.client, cufe.trim().toLowerCase(), token);
+  }
 
   async lookup(companyId: string, cufe: string) {
     if (typeof cufe !== 'string' || !/^[a-f0-9]{96}$/i.test(cufe.trim()))

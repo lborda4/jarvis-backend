@@ -1,5 +1,13 @@
 import type { CreateJarvisInvoiceRequestDto } from './dto/create-jarvis-invoice.dto';
 
+export const REPORT_TAX_FILTERS = [
+  { value: 'iva', label: 'IVA' },
+  { value: 'otherTaxes', label: 'Otros impuestos' },
+  { value: 'retefuente', label: 'Retefuente' },
+  { value: 'reteIca', label: 'ReteICA' },
+  { value: 'reteIva', label: 'ReteIVA' },
+] as const
+
 export const REPORT_TYPES = [
   'sales',
   'customers',
@@ -18,6 +26,7 @@ export interface ReportQuery {
   customer?: string;
   seller?: string;
   product?: string;
+  tax?: string;
   kind?: string;
   currency?: string;
   page?: string;
@@ -32,6 +41,7 @@ export interface ReportFilters {
   customer: string;
   seller: string;
   product: string;
+  tax?: string;
   kind: string;
   currency: string;
   page: number;

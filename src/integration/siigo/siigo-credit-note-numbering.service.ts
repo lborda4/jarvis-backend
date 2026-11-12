@@ -74,7 +74,7 @@ export class SiigoCreditNoteNumberingService {
       ...credentials,
       credit_note: {
         ...current,
-        nextConsecutive: usedNumber + 1,
+        nextConsecutive: Math.max(current.nextConsecutive ?? current.fromNumber, usedNumber + 1),
       },
     };
     await this.integrationsRepository.save(integration);

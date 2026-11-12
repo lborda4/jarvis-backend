@@ -1,3 +1,4 @@
+import { checkInvoiceNoteEligibility } from './helpers/jarvis-invoice-note-eligibility.helper';
 import { resolveInvoicePayments } from './helpers/jarvis-invoice-payments.helper';
 import { loadDraftAttachment } from './helpers/jarvis-invoice-attachment.helper';
 import { resolveInvoiceSellers } from './helpers/jarvis-invoice-sellers.helper';
@@ -98,6 +99,16 @@ export class JarvisInvoiceSendService {
     const isSaleInvoice = kind === JarvisResolutionKind.ELECTRONIC_INVOICE;
     const documentLabel = isDebitNote ? "nota débito" : isSupportCreditNote ? "nota de ajuste" : isNote ? "nota crédito" : isSupport ? "documento soporte" : "factura de venta";
     const sellers = kind === JarvisResolutionKind.ELECTRONIC_INVOICE ? await resolveInvoiceSellers(this.dataSource, companyId, request.sellerIds) : [];
+    if (isSaleInvoice || (isNote && !isSupportCreditNote)) {
+      const today = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date());
+      request = {
+        ...request, issueDate: today,
+        ...(isSaleInvoice && request.payment && (request.payment.payment_form_id ?? 1) === 1
+          ? { payment: { ...request.payment, due_date: today } } : {}),
+      };
+    }
     const issueDate = request.issueDate?.trim();
     const customerIdentification = normalizeJarvisDocumentNumber(
       request.customerIdentification ?? '',
@@ -198,6 +209,10 @@ export class JarvisInvoiceSendService {
       throw new BadRequestException(
         `Configura el token de NextPyme de esta empresa antes de emitir ${documentLabel}.`,
       );
+    }
+    if (isNote && !isSupportCreditNote) {
+      const eligibility = await checkInvoiceNoteEligibility(this.nextPymeApiClient, request.billingReference!.uuid, companyToken);
+      if (!eligibility.allowed) throw new BadRequestException(eligibility.blockReason!);
     }
     const credentials: JarvisCredentials = jarvisIntegration
       ? normalizeJarvisCredentials(jarvisIntegration.credentials)
@@ -384,6 +399,14 @@ export class JarvisInvoiceSendService {
                   kind,
                 );
 
+          const lastIssued = await this.invoiceHistory.lastIssuedNumber(companyId, kind, allocated.prefix);
+          if (explicitCreditNumber && allocated.number <= lastIssued)
+            throw new BadRequestException('El consecutivo indicado ya fue utilizado en este prefijo. Usa un número mayor al último enviado.');
+          if (!explicitCreditNumber) allocated.number = Math.max(allocated.number, lastIssued + 1);
+          if (!Number.isSafeInteger(allocated.number) || allocated.number < 1 ||
+              ('toNumber' in allocated && typeof allocated.toNumber === 'number' && allocated.number > allocated.toNumber))
+            throw new BadRequestException('Se agotó el rango de numeración del prefijo. Revisa la resolución configurada.');
+
           if (!explicitCreditNumber) {
             if (usesSiigoCreditNote) {
               await this.siigoCreditNoteNumberingService.commitNumber(
@@ -395,6 +418,7 @@ export class JarvisInvoiceSendService {
                 companyId,
                 kind,
                 allocated.number,
+                allocated.prefix,
               );
             }
           }
@@ -702,21 +726,15 @@ export class JarvisInvoiceSendService {
             this.logger.error('No se pudo registrar la factura aceptada ' + createdConsecutive, historyError);
           }
 
-          if (
-            !explicitCreditNumber &&
-            createdNumber !== numbering.number
-          ) {
-            if (usesSiigoCreditNote) {
-              await this.siigoCreditNoteNumberingService.commitNumber(
-                companyId,
-                createdNumber,
-              );
-            } else {
-              await this.jarvisSetupService.commitResolutionNumber(
-                companyId,
-                kind,
-                createdNumber,
-              );
+          if (!explicitCreditNumber && createdNumber !== numbering.number) {
+            // La respuesta puede llegar después de que otro envío haya reservado un número mayor.
+            try {
+              await withPostgresAdvisoryLock(this.dataSource, resolutionLockKey, async () => {
+                if (usesSiigoCreditNote) await this.siigoCreditNoteNumberingService.commitNumber(companyId, createdNumber);
+                else await this.jarvisSetupService.commitResolutionNumber(companyId, kind, createdNumber, numbering.prefix);
+              });
+            } catch (numberingError) {
+              this.logger.error('No se pudo actualizar el contador del documento ya aceptado ' + createdConsecutive, numberingError);
             }
           }
 

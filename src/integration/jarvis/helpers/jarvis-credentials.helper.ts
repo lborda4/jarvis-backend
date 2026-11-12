@@ -3,6 +3,7 @@ import {
   JarvisCredentials,
   JarvisDianResolution,
 } from '../../interfaces/integration-credentials.interface';
+import { normalizeInvoiceAppearance } from '../pdf/invoice-appearance';
 import { CompanyPersonType } from '../../../company/enums/company-person-type.enum';
 import { JarvisResolutionKind } from '../enums/jarvis-resolution-kind.enum';
 import { JarvisTaxRegime } from '../enums/jarvis-tax-regime.enum';
@@ -134,6 +135,7 @@ export function normalizeJarvisCredentials(
   ).trim();
 
   return {
+    ...(raw.invoice_appearance ? { invoice_appearance: normalizeInvoiceAppearance(raw.invoice_appearance as object) } : {}),
     business_name: readString(raw, 'business_name', 'businessName'),
     ica_rate: Number.isFinite(Number(raw.ica_rate)) && Number(raw.ica_rate) >= 0 ? Number(raw.ica_rate) : 0,
     person_type: Object.values(CompanyPersonType).includes(raw.person_type as CompanyPersonType)

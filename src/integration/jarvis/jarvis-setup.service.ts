@@ -660,18 +660,8 @@ export class JarvisSetupService {
             ? ensureJarvisDebitNoteResolution(current)
             : ensureJarvisSupportCreditNoteResolution(current);
       if (!current?.prefix?.trim()) {
-        integration.credentials = {
-          ...credentials,
-          resolutions: {
-            ...credentials.resolutions,
-            ...(kind === JarvisResolutionKind.CREDIT_NOTE
-              ? { credit_note: numbering }
-              : kind === JarvisResolutionKind.DEBIT_NOTE
-                ? { debit_note: numbering }
-                : { support_credit_note: numbering }),
-          },
-        };
-        await this.integrationsRepository.save(integration);
+        const key = kind === JarvisResolutionKind.CREDIT_NOTE ? 'credit_note' : kind === JarvisResolutionKind.DEBIT_NOTE ? 'debit_note' : 'support_credit_note';
+        await this.integrationsRepository.advanceJarvisResolutionNumber(trimmedCompanyId, key, numbering);
       }
 
       const number = getJarvisResolutionNextConsecutive(numbering);
@@ -734,10 +724,11 @@ export class JarvisSetupService {
     companyId: string,
     kind: JarvisResolutionKind,
     usedNumber: number,
+    expectedPrefix?: string,
   ): Promise<void> {
     const trimmedCompanyId = companyId?.trim();
 
-    if (!trimmedCompanyId) {
+    if (!trimmedCompanyId || !Number.isSafeInteger(usedNumber) || usedNumber < 1 || !Number.isSafeInteger(usedNumber + 1)) {
       return;
     }
 
@@ -771,24 +762,17 @@ export class JarvisSetupService {
       return;
     }
 
-    const nextConsecutive = usedNumber + 1;
+    if (expectedPrefix && current.prefix.trim() !== expectedPrefix.trim())
+      throw new BadRequestException('El prefijo cambió durante la reserva del consecutivo. Revisa la resolución e intenta nuevamente.');
+    const nextConsecutive = Math.max(current.nextConsecutive ?? current.fromNumber, usedNumber + 1);
     const updated: JarvisDianResolution = {
       ...current,
       nextConsecutive,
       configuredAt: current.configuredAt ?? new Date().toISOString(),
     };
 
-    integration.credentials = {
-      ...credentials,
-      resolutions: {
-        ...credentials.resolutions,
-        ...(kind === JarvisResolutionKind.DEBIT_NOTE ? { debit_note: updated } : kind === JarvisResolutionKind.CREDIT_NOTE ? { credit_note: updated } : kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? { support_credit_note: updated } : kind === JarvisResolutionKind.SUPPORT_DOCUMENT
-          ? { support_document: updated }
-          : { electronic_invoice: updated }),
-      },
-    };
-
-    await this.integrationsRepository.save(integration);
+    const key = kind === JarvisResolutionKind.DEBIT_NOTE ? 'debit_note' : kind === JarvisResolutionKind.CREDIT_NOTE ? 'credit_note' : kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? 'support_credit_note' : kind === JarvisResolutionKind.SUPPORT_DOCUMENT ? 'support_document' : 'electronic_invoice';
+    await this.integrationsRepository.advanceJarvisResolutionNumber(trimmedCompanyId, key, updated);
   }
 
   async getCredentialsStatus(
