@@ -88,6 +88,8 @@ function build(overrides: any = {}) {
     db as any,
     {
       requireCompanyToken: jest.fn().mockResolvedValue('private-token'),
+      getPayrollLawDeductions: jest.fn().mockResolvedValue([{ id: 31, name: 'Salud' }, { id: 51, name: 'Pension' }, { id: 91, name: 'Fondo' }]),
+      getPayrollDisabilityTypes: jest.fn().mockResolvedValue([{ id: 17, code: '03', name: 'Profesional' }]),
       getPayrollOvertimeSurcharges: jest.fn().mockResolvedValue([{ id: 19, name: 'Hora Extra Diurna', code: '1' }]),
       getPayrollWorkerCatalogs: jest.fn().mockResolvedValue({
         workerTypes: [{ id: 1 }],
@@ -283,7 +285,7 @@ describe('nómina: persistencia y transmisión', () => {
     const { service, api } = build({
       state: {
         ...state,
-        lines: [{ ...state.lines[0], concept: 'disability' }],
+        lines: [{ ...state.lines[0], concept: 'unsupported_concept' }],
       },
     });
     await expect(service.send(company, actor, 'document-a')).rejects.toThrow(
@@ -348,4 +350,51 @@ describe('envío de horas extra diurnas con catálogo', () => {
     await expect(service.send(company, actor, 'document-a')).rejects.toThrow('recargo');
     expect(api.payrollRequest).not.toHaveBeenCalled();
   });
+});
+
+describe('envío de incapacidades con catálogo', () => {
+  const disability = { id: 'disability', concept: 'disability', kind: 'accrued', quantity: '3', amount: '100', startDate: '2026-10-08', endDate: '2026-10-10', type: 17 };
+  it('envía el ID seleccionado de la tabla maestra, conservando el importe', async () => {
+    const { service, api } = build({ state: { ...state, lines: [...state.lines, disability] } });
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ accrued: expect.objectContaining({ work_disabilities: [{ start_date: '2026-10-08', end_date: '2026-10-10', quantity: 3, type: 17, payment: '100.00' }] }) }), 'private-token');
+  });
+  it('rechaza números ajenos al catálogo antes de transmitir', async () => {
+    const { service, api } = build({ state: { ...state, lines: [...state.lines, { ...disability, type: 3 }] } });
+    await expect(service.send(company, actor, 'document-a')).rejects.toThrow('tabla maestra');
+    expect(api.payrollRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('validación de deducciones contra catálogo', () => {
+  const line = { id: 'fund', concept: 'solidarity', kind: 'deduction', quantity: '1', amount: '10.25', typeLawDeductionsId: 91 };
+  it('transmite solidaridad con el ID de NextPyme', async () => {
+    const { service, api } = build({ state: { ...state, lines: [...state.lines, line] } });
+    await service.send(company, actor, 'document-a');
+    expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ deductions: expect.objectContaining({ fondossp_type_law_deductions_id: 91, fondosp_deduction_SP: '10.25' }) }), 'private-token');
+  });
+  it('impide transmitir una deducción con un ID ajeno al catálogo', async () => {
+    const { service, api } = build({ state: { ...state, lines: [...state.lines, { ...line, typeLawDeductionsId: 999 }] } });
+    await expect(service.send(company, actor, 'document-a')).rejects.toThrow('catálogo');
+    expect(api.payrollRequest).not.toHaveBeenCalled();
+  });
+});
+
+it('transmite las tres deducciones estructuradas sin perder valores', async () => {
+  const lines = [...state.lines,
+    { id: 'union', concept: 'labor_union', kind: 'deduction', quantity: '1', amount: '10', percentage: '2' },
+    { id: 'sanction', concept: 'sanctions', kind: 'deduction', quantity: '1', amount: '20', privateSanction: '20' },
+    { id: 'loan', concept: 'loan', kind: 'deduction', quantity: '1', amount: '30', description: 'Cuota de libranza' },
+  ];
+  const { service, api } = build({ state: { ...state, lines } });
+  await service.send(company, actor, 'document-a');
+  expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ deductions: { deductions_total: '60.00', labor_union: [{ percentage: 2, deduction: 10 }], sanctions: [{ private_sanction: 20 }], orders: [{ description: 'Cuota de libranza', deduction: 30 }] } }), 'private-token');
+});
+
+it('transmite pagos a terceros, anticipos, otras deducciones y escalares con total calculado', async () => {
+  const keys = ['third_party_payment_deduction', 'advance', 'other_deduction', 'voluntary', 'withholding', 'afc', 'cooperative', 'garnishment', 'supplementary_plan', 'education', 'refund_deduction', 'debt'];
+  const lines = keys.map(concept => ({ id: concept, concept, kind: 'deduction', quantity: '1', amount: '10.25' }));
+  const { service, api } = build({ state: { ...state, lines: [...state.lines, ...lines] } });
+  await service.send(company, actor, 'document-a');
+  expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ deductions: expect.objectContaining({ deductions_total: '123.00', voluntary_pension: 10.25, tax_liens: 10.25, debt: 10.25, advances: [{ advance: 10.25 }], other_deductions: [{ other_deduction: 10.25 }] }) }), 'private-token');
 });

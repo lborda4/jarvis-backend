@@ -1,4 +1,4 @@
-import { extendPayrollNoveltyConcepts } from './payroll-novelty-concepts';
+import { extendPayrollNoveltyConcepts, withPayrollAdditionalDeductions } from './payroll-novelty-concepts';
 import { PayrollService } from './payroll.service';
 const salary = { code:'salary', kind:'accrued', name:'Salario', active:true };
 const custom = { code:'internal_bonus', kind:'accrued', category:'commissions', name:'Bono personalizado', active:true };
@@ -33,4 +33,19 @@ describe('Conceptos configurados para añadir novedades',()=>{
     expect(JSON.parse(write[1][6]).concepts).toEqual([salary,custom]);
     expect(JSON.parse(write[1][4]).lines[1].mapping).toBe('commissions');
   });
+});
+
+it('ofrece los conceptos nuevos en configuraciones previas sin reactivar los deshabilitados', () => {
+  const result = withPayrollAdditionalDeductions({ concepts: [{ code: 'labor_union', kind: 'deduction', active: false }] });
+  expect(result.concepts.find(row => row.code === 'labor_union')?.active).toBe(false);
+  expect(result.concepts.find(row => row.code === 'sanctions')?.active).toBe(true);
+  expect(extendPayrollNoveltyConcepts({ concepts: [] }, undefined, [{ concept: 'sanctions', kind: 'deduction' }]).concepts).toEqual([expect.objectContaining({ code: 'sanctions', kind: 'deduction' })]);
+  expect(() => extendPayrollNoveltyConcepts({ concepts: [] }, { concepts: [{ code: 'labor_union', kind: 'deduction', active: false }] }, [{ concept: 'labor_union', kind: 'deduction' }])).toThrow();
+});
+
+it('incorpora las nuevas deducciones de valor sin reactivar conceptos deshabilitados', () => {
+  const result = withPayrollAdditionalDeductions({ concepts: [{ code: 'afc', kind: 'deduction', active: false }] });
+  expect(result.concepts.find(item => item.code === 'afc')?.active).toBe(false);
+  for (const code of ['third_party_payment_deduction', 'advance', 'other_deduction', 'voluntary', 'withholding', 'cooperative', 'garnishment', 'supplementary_plan', 'education', 'refund_deduction', 'debt'])
+    expect(result.concepts).toContainEqual(expect.objectContaining({ code, kind: 'deduction', active: true }));
 });

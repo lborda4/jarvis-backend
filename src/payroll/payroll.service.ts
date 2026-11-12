@@ -3,7 +3,7 @@ import { ensurePayrollNumbering, PAYROLL_PREFIX } from './payroll-numbering';
 import { resolvePayrollContractId } from '../integration/jarvis/helpers/payroll-contract-types.helper';
 import { employeePaymentType, employeeBankFields, employeeBankErrors } from './payroll-employee-payment';
 import type { PayrollWorker } from './payroll-domain';
-import { extendPayrollNoveltyConcepts } from './payroll-novelty-concepts';
+import { extendPayrollNoveltyConcepts, withPayrollAdditionalDeductions } from './payroll-novelty-concepts';
 import { isPayrollEmployeeActive } from './payroll-employee-status';
 import { payrollEmploymentDays, payrollWorkedTime } from './payroll-employment';
 import { payrollPaymentColumns, payrollPaymentPresets, payrollPaymentMaster, type PayrollPaymentMethod } from './payroll-payment-methods';
@@ -111,7 +111,33 @@ export class PayrollService {
   overtimeSurcharges(company: string) {
     return this.catalogs.getPayrollOvertimeSurcharges(company);
   }
+  disabilityTypes(company: string) {
+    return this.catalogs.getPayrollDisabilityTypes(company);
+  }
+  lawDeductions(company: string) {
+    return this.catalogs.getPayrollLawDeductions(company);
+  }
+  private async validateLawDeductionMaster(company: string, state: import('./payroll-domain').PayrollInput) {
+    const keys = ['eps', 'pension', 'solidarity', 'subsistence'];
+    const lines = state.lines.filter(line => keys.includes(line.mapping ?? line.concept));
+    if (!lines.length) return;
+    const rows = await this.catalogs.getPayrollLawDeductions(company);
+    for (const line of lines) {
+      const key = line.mapping ?? line.concept;
+      const id = line.typeLawDeductionsId ?? (key === 'eps' ? state.epsTypeLawDeductionsId : key === 'pension' ? state.pensionTypeLawDeductionsId : undefined);
+      if (!rows.some(row => row.id === id))
+        throw new BadRequestException('Selecciona un tipo de deducción de ley del catálogo de NextPyme. Abre la novedad y vuelve a guardarla.');
+    }
+  }
+  private async validateDisabilityMaster(company: string, state: { lines: import('./payroll-domain').PayrollLine[] }) {
+    const lines = state.lines.filter(line => (line.mapping ?? line.concept) === 'disability');
+    if (!lines.length) return;
+    const rows = await this.catalogs.getPayrollDisabilityTypes(company);
+    if (lines.some(line => !rows.some(row => row.id === line.type)))
+      throw new BadRequestException('Selecciona un tipo de incapacidad de la tabla maestra de NextPyme. Abre la novedad y vuelve a guardarla.');
+  }
   private async validateDayOvertimeMaster(company: string, state: { lines: import('./payroll-domain').PayrollLine[] }) {
+    if (!state.lines.some(line => ['overtime_day', 'overtime_night'].includes(line.mapping ?? line.concept))) return;
     const rows = await this.catalogs.getPayrollOvertimeSurcharges(company);
     for (const code of ['overtime_day', 'overtime_night'] as const) {
       const lines = state.lines.filter((line) => (line.mapping ?? line.concept) === code);
@@ -152,7 +178,7 @@ export class PayrollService {
         active: isPayrollEmployeeActive(e.data.retirementDate),
       })),
       positions,
-      parameters,
+      parameters: parameters.map(row => ({ ...row, data: withPayrollAdditionalDeductions(row.data) })),
       settings: settings[0]?.settings ?? {
         environment: 2,
         prefix: PAYROLL_PREFIX,
@@ -689,6 +715,8 @@ export class PayrollService {
             : concept.code,
         };
       });
+      await this.validateLawDeductionMaster(company, state);
+      await this.validateDisabilityMaster(company, state);
       await this.validateDayOvertimeMaster(company, state);
       const [saved] = await m.query(
         `INSERT INTO jarvis_payroll_documents(id,company_id,employee_id,original_id,state,employee_snapshot,parameter_snapshot,accrued,deductions,net) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
@@ -806,6 +834,8 @@ export class PayrollService {
             predecessor_issue_date: original.state.issueDate,
           };
         }
+        await this.validateLawDeductionMaster(company, d.state);
+        await this.validateDisabilityMaster(company, d.state);
         await this.validateDayOvertimeMaster(company, d.state);
         const payload = buildPayrollPayload(
           d.state,

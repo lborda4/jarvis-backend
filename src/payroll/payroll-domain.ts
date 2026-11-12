@@ -41,11 +41,115 @@ export interface PayrollLine {
   startTime?: string;
   endTime?: string;
   overtimeSurchargeId?: number;
+  type?: number;
   formula?: string;
   manual?: boolean;
   mapping?: string;
   typeLawDeductionsId?: number;
+  description?: string;
+  publicSanction?: string;
+  privateSanction?: string;
 }
+export function payrollStructuredDeductionKind(key: string) {
+  if (key === 'loan' || key === 'orders') return 'orders'
+  if (key === 'labor_union' || key === 'sanctions') return key
+  return undefined
+}
+
+export function payrollStructuredDeductionErrors(line: PayrollLine): string[] {
+  const kind = payrollStructuredDeductionKind(line.mapping ?? line.concept)
+  if (!kind) return []
+  const errors: string[] = []
+  try {
+    if (line.kind !== 'deduction') errors.push('La naturaleza de la deducción es incorrecta.')
+    if (kind === 'labor_union' && (cents(line.percentage ?? '') > 10000n)) errors.push('El porcentaje sindical debe estar entre 0 y 100.')
+    if (kind === 'orders' && !line.description?.trim()) errors.push('Ingresa la descripción de la libranza.')
+    if (kind === 'sanctions') {
+      const total = cents(line.publicSanction || '0') + cents(line.privateSanction || '0')
+      if (total <= 0n) errors.push('Ingresa el valor de la sanción pública o privada.')
+      if (total !== cents(line.amount)) errors.push('El total de sanciones debe coincidir con sus valores público y privado.')
+    }
+  } catch {
+    errors.push(kind === 'labor_union' ? 'Ingresa un porcentaje sindical entre 0 y 100 con máximo dos decimales.' : 'Revisa los valores de la deducción.')
+  }
+  return errors
+}
+
+export function buildPayrollStructuredDeductions(lines: PayrollLine[]) {
+  const result: Record<string, Array<Record<string, string | number>>> = {}
+  for (const line of lines) {
+    const kind = payrollStructuredDeductionKind(line.mapping ?? line.concept)
+    if (!kind) continue
+    const errors = payrollStructuredDeductionErrors(line)
+    if (errors.length) throw new Error(errors.join(' '))
+    const payment = Number(money(cents(line.amount)))
+    const row: Record<string, string | number> = kind === 'labor_union'
+      ? { percentage: Number(line.percentage), deduction: payment }
+      : kind === 'orders' ? { description: line.description!.trim(), deduction: payment }
+      : {
+          ...(line.publicSanction ? { public_sanction: Number(money(cents(line.publicSanction))) } : {}),
+          ...(line.privateSanction ? { private_sanction: Number(money(cents(line.privateSanction))) } : {}),
+        }
+    ;(result[kind] ??= []).push(row)
+  }
+  return result
+}
+
+
+export function payrollArrayDeductionKind(key: string) {
+  if (key === 'third_party_payments' || key === 'third_party_payment_deduction') return 'third_party_payments'
+  if (key === 'advance' || key === 'advances') return 'advances'
+  if (key === 'other_deduction' || key === 'other_deductions') return 'other_deductions'
+  return undefined
+}
+
+export function payrollScalarDeductionField(key: string) {
+  const fields: Record<string, string> = {
+    voluntary: 'voluntary_pension', voluntary_pension: 'voluntary_pension',
+    withholding: 'withholding_at_source', withholding_at_source: 'withholding_at_source',
+    garnishment: 'tax_liens', tax_liens: 'tax_liens', refund_deduction: 'refund', refund: 'refund',
+    afc: 'afc', cooperative: 'cooperative', supplementary_plan: 'supplementary_plan', education: 'education', debt: 'debt',
+  }
+  return Object.prototype.hasOwnProperty.call(fields, key) ? fields[key] : undefined
+}
+
+export function payrollValueDeductionErrors(line: PayrollLine): string[] {
+  if (line.kind !== 'deduction') return []
+  const key = line.mapping ?? line.concept
+  if (!payrollArrayDeductionKind(key) && !payrollScalarDeductionField(key)) return []
+  try {
+    cents(line.amount)
+    if (payrollArrayDeductionKind(key) === 'other_deductions' && line.description !== undefined && typeof line.description !== 'string')
+      return ['Revisa la descripción de la deducción.']
+    return []
+  } catch { return ['Ingresa un valor de deducción válido con máximo dos decimales.'] }
+}
+
+export function buildPayrollValueDeductions(lines: PayrollLine[]) {
+  const result: Record<string, number | Array<Record<string, string | number>>> = {}
+  const scalarAmounts: Record<string, bigint> = {}
+  for (const line of lines) {
+    if (line.kind !== 'deduction') continue
+    const key = line.mapping ?? line.concept
+    const array = payrollArrayDeductionKind(key)
+    const scalar = payrollScalarDeductionField(key)
+    if (!array && !scalar) continue
+    const errors = payrollValueDeductionErrors(line)
+    if (errors.length) throw new Error(errors.join(' '))
+    const amount = cents(line.amount)
+    if (array) {
+      const field = array === 'third_party_payments' ? 'third_party_payment' : array === 'advances' ? 'advance' : 'other_deduction'
+      const row: Record<string, string | number> = { [field]: Number(money(amount)) }
+      if (array === 'other_deductions' && line.description?.trim()) row.description_deduction = line.description.trim()
+      const bucket = (result[array] ??= []) as Array<Record<string, string | number>>
+      bucket.push(row)
+    } else scalarAmounts[scalar!] = (scalarAmounts[scalar!] ?? 0n) + amount
+  }
+  for (const [field, amount] of Object.entries(scalarAmounts)) result[field] = Number(money(amount))
+  return result
+}
+
+
 export interface PayrollInput {
   period: string;
   startDate: string;
@@ -93,8 +197,18 @@ export const VERIFIED_CONCEPTS = [
   'transportation_allowance',
   'eps',
   'pension',
+  'solidarity',
+  'subsistence',
+  'labor_union',
+  'sanctions',
+  'loan',
+  'orders',
+  'third_party_payment_deduction', 'third_party_payments', 'advance', 'advances', 'other_deduction', 'other_deductions',
+  'voluntary', 'voluntary_pension', 'withholding', 'withholding_at_source', 'garnishment', 'tax_liens',
+  'afc', 'cooperative', 'supplementary_plan', 'education', 'refund_deduction', 'refund', 'debt',
   'overtime_day',
   'overtime_night',
+  'disability',
 ];
 export function totals(lines: PayrollLine[]) {
   let accrued = 0n,
@@ -168,7 +282,7 @@ export function validatePayroll(
       errors.push('Hay conceptos pendientes de integración con NextPyme.');
     if (
       state.lines.some((l: PayrollLine) =>
-        ['eps', 'pension'].includes(l.mapping ?? l.concept)
+        (['eps', 'pension', 'solidarity', 'subsistence'].includes(l.mapping ?? l.concept) || Boolean(payrollStructuredDeductionKind(l.mapping ?? l.concept)) || Boolean(payrollArrayDeductionKind(l.mapping ?? l.concept)) || Boolean(payrollScalarDeductionField(l.mapping ?? l.concept)))
           ? l.kind !== 'deduction'
           : VERIFIED_CONCEPTS.includes(l.mapping ?? l.concept) &&
             l.kind !== 'accrued',
@@ -177,17 +291,27 @@ export function validatePayroll(
       errors.push('La naturaleza de un concepto es incorrecta.');
     for (const line of state.lines as PayrollLine[]) {
       errors.push(...dayOvertimeErrors(line, state.period));
+      errors.push(...payrollStructuredDeductionErrors(line));
+      errors.push(...payrollValueDeductionErrors(line));
+      if ((line.mapping ?? line.concept) === 'disability') {
+        if (!Number.isSafeInteger(line.type) || line.type! < 1)
+          errors.push('Selecciona el tipo de incapacidad de NextPyme.');
+        if (!validDate(line.startDate ?? '') || !validDate(line.endDate ?? '') || line.startDate! > line.endDate! || line.startDate?.slice(0, 7) !== state.period || line.endDate?.slice(0, 7) !== state.period)
+          errors.push('Revisa las fechas de la incapacidad dentro del mes de la nómina.');
+        if (!Number.isSafeInteger(Number(line.quantity)) || Number(line.quantity) <= 0 || Number(line.quantity) > 31)
+          errors.push('Revisa los días de incapacidad.');
+      }
       try {
         if (cents(line.quantity) < 0n) errors.push('Cantidad inválida.');
         if (line.percentage !== undefined && cents(line.percentage) > 10000n)
           errors.push('Porcentaje fuera de rango.');
         const deduction = line.mapping ?? line.concept;
-        if (transmission && ['eps', 'pension'].includes(deduction)) {
+        if (transmission && ['eps', 'pension', 'solidarity', 'subsistence'].includes(deduction)) {
           const id =
             line.typeLawDeductionsId ??
             (deduction === 'eps'
               ? state.epsTypeLawDeductionsId
-              : state.pensionTypeLawDeductionsId);
+              : deduction === 'pension' ? state.pensionTypeLawDeductionsId : undefined);
           if (!Number.isSafeInteger(id) || id! < 1)
             errors.push(
               `Completa el código de deducción legal de ${deduction} en NextPyme.`,
@@ -276,34 +400,40 @@ export function buildPayrollPayload(
   const errors = validatePayroll(state, worker, true);
   if (errors.length) throw new Error(errors.join(' '));
   const amounts: Record<string, bigint> = {};
-  const lawIds: Record<string, number | undefined> = {
-    eps: state.epsTypeLawDeductionsId,
-    pension: state.pensionTypeLawDeductionsId,
+  const lawIds: Record<string, number | undefined> = {};
+  const lawFields = {
+    eps: ['eps_type_law_deductions_id', 'eps_deduction'],
+    pension: ['pension_type_law_deductions_id', 'pension_deduction'],
+    solidarity: ['fondossp_type_law_deductions_id', 'fondosp_deduction_SP'],
+    subsistence: ['fondossp_sub_type_law_deductions_id', 'fondosp_deduction_sub'],
   };
   for (const line of state.lines) {
     const key = line.mapping ?? line.concept;
     amounts[key] = (amounts[key] ?? 0n) + cents(line.amount);
-    if (line.typeLawDeductionsId !== undefined) {
-      if (lawIds[key] !== undefined && lawIds[key] !== line.typeLawDeductionsId)
+    const selectedLawId = line.typeLawDeductionsId ?? (key === 'eps' ? state.epsTypeLawDeductionsId : key === 'pension' ? state.pensionTypeLawDeductionsId : undefined);
+    if (key in lawFields && selectedLawId !== undefined) {
+      if (lawIds[key] !== undefined && lawIds[key] !== selectedLawId)
         throw new Error(
           'No mezcles códigos de deducción legal para el mismo concepto.',
         );
-      lawIds[key] = line.typeLawDeductionsId;
+      lawIds[key] = selectedLawId;
     }
   }
   const total = totals(state.lines);
-  const deductions: Record<string, string | number> = {
+  const deductions: Record<string, string | number | Array<Record<string, string | number>>> = {
     deductions_total: total.deductions,
+    ...buildPayrollStructuredDeductions(state.lines),
+    ...buildPayrollValueDeductions(state.lines),
   };
-  for (const key of ['eps', 'pension']) {
+  for (const [key, [idField, amountField]] of Object.entries(lawFields)) {
     if (amounts[key] === undefined) continue;
     const id = lawIds[key];
     if (!Number.isSafeInteger(id) || id! < 1)
       throw new Error(
         `Completa el código de deducción legal de ${key} en NextPyme.`,
       );
-    deductions[`${key}_deduction`] = money(amounts[key]);
-    deductions[`${key}_type_law_deductions_id`] = id!;
+    deductions[amountField] = money(amounts[key]);
+    deductions[idField] = id!;
   }
   const overtimeMap = new Map<string, Array<{ start_time: string; end_time: string; quantity: number; percentage: number; payment: string }>>();
   for (const line of state.lines) {
@@ -320,7 +450,11 @@ export function buildPayrollPayload(
     });
     overtimeMap.set(definition.bodyKey, bucket);
   }
-  const accruedPayload: Record<string, string | number | Array<{ start_time: string; end_time: string; quantity: number; percentage: number; payment: string }>> = {
+  const disabilities = state.lines.filter(line => (line.mapping ?? line.concept) === 'disability').map(line => ({
+    start_date: line.startDate!, end_date: line.endDate!, quantity: Number(line.quantity),
+    type: line.type!, payment: money(cents(line.amount)),
+  }));
+  const accruedPayload: Record<string, string | number | Array<{ start_time: string; end_time: string; quantity: number; percentage: number; payment: string }> | typeof disabilities> = {
     salary: money(amounts.salary ?? 0n),
     worked_days: Number(state.workedDays),
     accrued_total: total.accrued,
@@ -328,6 +462,7 @@ export function buildPayrollPayload(
   if (amounts.transportation_allowance !== undefined) {
     accruedPayload.transportation_allowance = money(amounts.transportation_allowance);
   }
+  if (disabilities.length) accruedPayload.work_disabilities = disabilities;
   for (const [key, rows] of overtimeMap.entries()) {
     accruedPayload[key] = rows;
   }

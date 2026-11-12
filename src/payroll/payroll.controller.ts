@@ -35,6 +35,12 @@ export class PayrollController {
   @Get('overtime-surcharges') overtimeSurcharges(@CurrentUser() u: AuthenticatedUser) {
     return this.service.overtimeSurcharges(getAuthenticatedCompanyId(u));
   }
+  @Get('disability-types') disabilityTypes(@CurrentUser() u: AuthenticatedUser) {
+    return this.service.disabilityTypes(getAuthenticatedCompanyId(u));
+  }
+  @Get('law-deductions') lawDeductions(@CurrentUser() u: AuthenticatedUser) {
+    return this.service.lawDeductions(getAuthenticatedCompanyId(u));
+  }
   @Get('bootstrap') bootstrap(@CurrentUser() u: AuthenticatedUser) {
     return this.service.bootstrap(getAuthenticatedCompanyId(u));
   }

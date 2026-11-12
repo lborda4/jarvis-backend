@@ -319,3 +319,88 @@ describe('Horas extra diurnas', () => {
     expect(() => buildPayrollPayload({ ...state, lines: [...state.lines, { ...overtime, ...patch }] }, worker, 1, 'SETP')).toThrow();
   });
 });
+
+describe('incapacidades homologadas', () => {
+  const disability = { id: 'disability', concept: 'disability', kind: 'accrued' as const, quantity: '3', amount: '12345.67', startDate: '2021-07-08', endDate: '2021-07-10', type: 17 };
+  it('conserva fechas, cantidad, ID maestro y pago en work_disabilities', () => {
+    const payload = buildPayrollPayload({ ...state, lines: [...state.lines, disability] }, worker, 1, 'NI');
+    expect(payload.accrued.work_disabilities).toEqual([{ start_date: '2021-07-08', end_date: '2021-07-10', quantity: 3, type: 17, payment: '12345.67' }]);
+  });
+  it.each([{ type: undefined }, { type: 0 }, { type: 1.5 }, { startDate: '' }, { endDate: '2021-07-01' }, { startDate: '2021-06-30' }, { quantity: '0' }, { quantity: '1.5' }])('rechaza una incapacidad incompleta: %j', patch => {
+    expect(() => buildPayrollPayload({ ...state, lines: [...state.lines, { ...disability, ...patch }] }, worker, 1, 'NI')).toThrow();
+  });
+  it('homologa también un concepto interno mapeado a incapacidad', () => {
+    const payload = buildPayrollPayload({ ...state, lines: [...state.lines, { ...disability, concept: 'internal_disability', mapping: 'disability' }] }, worker, 1, 'NI');
+    expect(payload.accrued.work_disabilities).toEqual([expect.objectContaining({ type: 17 })]);
+  });
+});
+
+describe('deducciones de ley homologadas', () => {
+  const deduction = (concept: string, id: number, amount = '10.25') => ({ id: concept, concept, kind: 'deduction' as const, quantity: '1', amount, typeLawDeductionsId: id });
+  const lines = [state.lines[0], deduction('eps', 31), deduction('pension', 51), deduction('solidarity', 91), deduction('subsistence', 92)];
+  it('envía exactamente los ocho campos legales y el total, sin porcentajes manuales', () => {
+    expect(buildPayrollPayload({ ...state, lines }, worker, 1, 'NI').deductions).toEqual({
+      eps_type_law_deductions_id: 31, eps_deduction: '10.25', pension_type_law_deductions_id: 51, pension_deduction: '10.25',
+      fondossp_type_law_deductions_id: 91, fondosp_deduction_SP: '10.25', fondossp_sub_type_law_deductions_id: 92, fondosp_deduction_sub: '10.25', deductions_total: '41.00',
+    });
+  });
+  it('omite fondos no elegidos y conserva deducciones en cero con tipo explícito', () => {
+    const result = buildPayrollPayload({ ...state, lines: [state.lines[0], deduction('eps', 31, '0'), deduction('pension', 51, '0')] }, worker, 1, 'NI').deductions;
+    expect(result).toEqual({ eps_type_law_deductions_id: 31, eps_deduction: '0.00', pension_type_law_deductions_id: 51, pension_deduction: '0.00', deductions_total: '0.00' });
+  });
+  it('rechaza dos IDs distintos para el mismo concepto', () => {
+    expect(() => buildPayrollPayload({ ...state, lines: [...lines, deduction('eps', 32)] }, worker, 1, 'NI')).toThrow('mezcles');
+  });
+  it.each(['eps', 'pension', 'solidarity', 'subsistence'])('rechaza %s sin ID y sin fallback', concept => {
+    const line = { ...deduction(concept, 1), typeLawDeductionsId: undefined };
+    expect(() => buildPayrollPayload({ ...state, epsTypeLawDeductionsId: undefined, pensionTypeLawDeductionsId: undefined, lines: [state.lines[0], line] }, worker, 1, 'NI')).toThrow();
+  });
+  it('acepta cambiar la selección de EPS aunque el borrador conserve el ID anterior', () => {
+    expect(buildPayrollPayload({ ...state, lines: [state.lines[0], deduction('eps', 31)] }, worker, 1, 'NI').deductions.eps_type_law_deductions_id).toBe(31);
+  });
+});
+
+describe('sindicatos, sanciones y libranzas', () => {
+  const union = { id: 'union', concept: 'labor_union', kind: 'deduction' as const, quantity: '1', amount: '10.25', percentage: '2.5' };
+  const sanction = { id: 'sanction', concept: 'sanctions', kind: 'deduction' as const, quantity: '1', amount: '30.30', publicSanction: '10.10', privateSanction: '20.20' };
+  const order = { id: 'order', concept: 'loan', kind: 'deduction' as const, quantity: '1', amount: '50.25', description: '  Crédito de vivienda  ' };
+  it('conserva las filas de cada arreglo y sus valores, y suma el total una sola vez', () => {
+    const payload = buildPayrollPayload({ ...state, lines: [state.lines[0], union, sanction, order, { ...order, id: 'order2', description: 'Otro crédito' }] }, worker, 1, 'NI');
+    expect(payload.deductions).toEqual({ deductions_total: '141.05', labor_union: [{ percentage: 2.5, deduction: 10.25 }], sanctions: [{ public_sanction: 10.1, private_sanction: 20.2 }], orders: [{ description: 'Crédito de vivienda', deduction: 50.25 }, { description: 'Otro crédito', deduction: 50.25 }] });
+  });
+  it.each(['publicSanction', 'privateSanction'])('permite una sola sanción: %s', field => {
+    const line = { ...sanction, amount: '10', publicSanction: '', privateSanction: '', [field]: '10' };
+    const result = buildPayrollPayload({ ...state, lines: [state.lines[0], line] }, worker, 1, 'NI').deductions;
+    expect(result.sanctions).toEqual([field === 'publicSanction' ? { public_sanction: 10 } : { private_sanction: 10 }]);
+    expect(result).not.toHaveProperty('orders');
+    expect(result).not.toHaveProperty('labor_union');
+  });
+  it.each([{ ...union, percentage: '' }, { ...union, percentage: '101' }, { ...union, percentage: '-1' }, { ...order, description: '  ' }, { ...sanction, amount: '10' }, { ...sanction, publicSanction: '-10' }, { ...sanction, amount: '0', publicSanction: '', privateSanction: '' }])('bloquea datos incompletos o inconsistentes: %j', line => {
+    expect(() => buildPayrollPayload({ ...state, lines: [state.lines[0], line] }, worker, 1, 'NI')).toThrow();
+  });
+});
+
+describe('deducciones por valor', () => {
+  const keys = ['third_party_payment_deduction', 'advance', 'other_deduction', 'voluntary', 'withholding', 'afc', 'cooperative', 'garnishment', 'supplementary_plan', 'education', 'refund_deduction', 'debt'];
+  const lines = keys.map(concept => ({ id: concept, concept, kind: 'deduction' as const, quantity: '1', amount: '10.25', ...(concept === 'other_deduction' ? { description: '  Cuota especial  ' } : {}) }));
+  it('transmite los arreglos, escalares y total del período con los nombres exactos', () => {
+    expect(buildPayrollPayload({ ...state, lines: [state.lines[0], ...lines] }, worker, 1, 'NI').deductions).toEqual({
+      third_party_payments: [{ third_party_payment: 10.25 }], advances: [{ advance: 10.25 }], other_deductions: [{ other_deduction: 10.25, description_deduction: 'Cuota especial' }],
+      voluntary_pension: 10.25, withholding_at_source: 10.25, afc: 10.25, cooperative: 10.25, tax_liens: 10.25, supplementary_plan: 10.25, education: 10.25, refund: 10.25, debt: 10.25, deductions_total: '123.00',
+    });
+  });
+  it('conserva varias filas, omite descripción vacía y suma escalares sin duplicar', () => {
+    const chosen = [
+      { ...lines[2], description: '' }, { ...lines[2], id: 'other2', description: 'Otra cuota' },
+      { ...lines[3], amount: '0.10' }, { ...lines[3], id: 'voluntary2', amount: '0.20' },
+    ];
+    expect(buildPayrollPayload({ ...state, lines: [state.lines[0], ...chosen] }, worker, 1, 'NI').deductions).toEqual({ other_deductions: [{ other_deduction: 10.25 }, { other_deduction: 10.25, description_deduction: 'Otra cuota' }], voluntary_pension: 0.3, deductions_total: '20.80' });
+  });
+  it.each(['-1', '1.234', 'abc'])('rechaza importes inválidos %s antes de transmitir', amount => {
+    expect(() => buildPayrollPayload({ ...state, lines: [state.lines[0], { ...lines[0], amount }] }, worker, 1, 'NI')).toThrow();
+  });
+  it('acepta alias externos en conceptos internos de deducción', () => {
+    const chosen = [{ ...lines[0], concept: 'internal_third', mapping: 'third_party_payments' }, { ...lines[1], concept: 'internal_advance', mapping: 'advances' }, { ...lines[10], concept: 'internal_refund', mapping: 'refund' }];
+    expect(buildPayrollPayload({ ...state, lines: [state.lines[0], ...chosen] }, worker, 1, 'NI').deductions).toEqual({ third_party_payments: [{ third_party_payment: 10.25 }], advances: [{ advance: 10.25 }], refund: 10.25, deductions_total: '30.75' });
+  });
+});

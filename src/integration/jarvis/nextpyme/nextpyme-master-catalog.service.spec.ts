@@ -1,6 +1,29 @@
 import { NextPymeMasterCatalogService } from './nextpyme-master-catalog.service';
 
 describe('NextPyme company catalogs', () => {
+  it('consulta deducciones de ley por empresa y excluye tipos eliminados o inactivos', async () => {
+    const { service, client } = setup();
+    client.fetchMasterTable.mockResolvedValue([{ id: 31, name: 'Salud', code: '3' }, { id: 32, name: 'Inactivo', state: false }, { id: 33, name: 'Eliminado', deleted_at: '2026-01-01' }]);
+    expect(await service.getPayrollLawDeductions('a')).toEqual([{ id: 31, name: 'Salud', code: '3' }]);
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('type_law_deductions', 'token-a');
+    await service.getPayrollLawDeductions('b');
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('type_law_deductions', 'token-b');
+    client.fetchMasterTable.mockResolvedValue([]);
+    await expect(service.getPayrollLawDeductions('empty')).rejects.toThrow('deducción de ley');
+    client.fetchMasterTable.mockResolvedValue([{ id: 9, name: 'Fondo' }]);
+    expect(await service.getPayrollLawDeductions('empty')).toEqual([{ id: 9, name: 'Fondo' }]);
+  });
+  it('consulta type_disabilities con el token de cada empresa y permite reintentar si está vacío', async () => {
+    const { service, client } = setup();
+    expect(await service.getPayrollDisabilityTypes('a')).toEqual([{ id: 1, name: 'token-a' }]);
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('type_disabilities', 'token-a');
+    await service.getPayrollDisabilityTypes('b');
+    expect(client.fetchMasterTable).toHaveBeenCalledWith('type_disabilities', 'token-b');
+    client.fetchMasterTable.mockResolvedValue([]);
+    await expect(service.getPayrollDisabilityTypes('empty')).rejects.toThrow('tipos de incapacidad');
+    client.fetchMasterTable.mockResolvedValue([{ id: 3, name: 'Profesional', code: '03' }]);
+    expect(await service.getPayrollDisabilityTypes('empty')).toEqual([{ id: 3, name: 'Profesional', code: '03' }]);
+  });
   it('carga recargos con el token de la empresa y rechaza una tabla vacía', async () => {
     const { service, client } = setup();
     await service.getPayrollOvertimeSurcharges('a');

@@ -78,6 +78,19 @@ export class NextPymeMasterCatalogService {
     return rows;
   }
 
+  async getPayrollDisabilityTypes(companyId: string) {
+    const rows = await this.getTable('type_disabilities', await this.requireCompanyToken(companyId));
+    if (!rows.length) throw new ServiceUnavailableException('No se pudieron cargar los tipos de incapacidad de NextPyme. Intenta nuevamente.');
+    return rows;
+  }
+
+  async getPayrollLawDeductions(companyId: string) {
+    const rows = await this.getTable('type_law_deductions', await this.requireCompanyToken(companyId));
+    const active = rows.filter(row => row.state !== false && row.state !== 0 && row.state !== '0' && row.state !== 'false' && !row.deleted_at);
+    if (!active.length) throw new ServiceUnavailableException('No se pudieron cargar los tipos de deducción de ley de NextPyme. Intenta nuevamente.');
+    return active;
+  }
+
   getElectronicInvoiceTypeId(): number {
     return ELECTRONIC_INVOICE_TYPE_ID;
   }
