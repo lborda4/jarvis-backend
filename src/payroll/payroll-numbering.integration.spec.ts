@@ -142,11 +142,11 @@ integration('numeración automática de nómina en PostgreSQL aislado', () => {
       `UPDATE jarvis_payroll_settings SET settings=settings || '{"enabled":true,"syncedEnvironment":2}'::jsonb`,
     );
   });
-  it('persiste SETP y 1 sin solicitar campos de numeración y no permite cambiarlos desde configuración', async () => {
+  it('persiste NI y 1 sin solicitar campos de numeración y no permite cambiarlos desde configuración', async () => {
     expect(
       ((await service().bootstrap(company)).settings as { prefix: string })
         .prefix,
-    ).toBe('SETP');
+    ).toBe('NI');
     expect(await counter()).toBe('1');
     await service().saveSettings(company, 'actor', {
       environment: 2,
@@ -157,7 +157,7 @@ integration('numeración automática de nómina en PostgreSQL aislado', () => {
     expect(
       ((await service().bootstrap(company)).settings as { prefix: string })
         .prefix,
-    ).toBe('SETP');
+    ).toBe('NI');
     expect(await counter()).toBe('1');
   });
   it('reserva números únicos en seis envíos simultáneos, persiste el siguiente y continúa tras reiniciar el servicio', async () => {
@@ -174,7 +174,7 @@ integration('numeración automática de nómina en PostgreSQL aislado', () => {
       '5',
       '6',
     ]);
-    expect(rows.every((row) => row.prefix === 'SETP')).toBe(true);
+    expect(rows.every((row) => row.prefix === 'NI')).toBe(true);
     expect(await counter()).toBe('7');
     await service().send(company, 'actor', await draft());
     expect(await counter()).toBe('8');
@@ -209,7 +209,7 @@ integration('numeración automática de nómina en PostgreSQL aislado', () => {
     expect(requests).toHaveLength(2);
     expect(
       requests.every(
-        (row) => row.request.prefix === 'SETP' && row.request.consecutive === 1,
+        (row) => row.request.prefix === 'NI' && row.request.consecutive === 1,
       ),
     ).toBe(true);
     const uncertain = await draft();

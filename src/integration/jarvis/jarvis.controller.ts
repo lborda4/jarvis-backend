@@ -1,3 +1,6 @@
+import { ConflictException } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { withBillingOperation } from './helpers/jarvis-billing-operation';
 import { JarvisDashboardService } from './jarvis-dashboard.service';
 import { JarvisRadianService } from './jarvis-radian.service';
 import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
@@ -22,7 +25,7 @@ import { ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../../auth/interfaces/jwt-payload.interface';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { getAuthenticatedCompanyId } from '../../auth/helpers/authenticated-company.helper';
-import { JarvisCredentialsStatusResponseDto } from './dto/jarvis-credentials-status.dto';
+import { JarvisCredentialsStatusResponseDto, JarvisSubscriptionStatusDto } from './dto/jarvis-credentials-status.dto';
 import {
   CreateJarvisSupportDocumentRequestDto,
   CreateJarvisSupportDocumentResponseDto,
@@ -84,6 +87,7 @@ export class JarvisController {
   }
 
   constructor(
+    private readonly billingDataSource: DataSource,
     private readonly dashboardService: JarvisDashboardService,
     private readonly radian: JarvisRadianService,
     private readonly invoicePdf: JarvisInvoicePdfService,
@@ -142,6 +146,12 @@ export class JarvisController {
     );
   }
 
+  @Get('subscription/status')
+  @ApiOperation({ summary: 'Consultar el cupo de JARVIS sin consultar resoluciones ni catálogos externos.' })
+  getSubscriptionStatus(@CurrentUser() user: AuthenticatedUser): Promise<JarvisSubscriptionStatusDto> {
+    return this.jarvisSetupService.getSubscriptionStatus(getAuthenticatedCompanyId(user));
+  }
+
   @Get('credentials/status')
   @ApiOperation({
     summary: 'Estado de configuración Jarvis',
@@ -195,10 +205,13 @@ export class JarvisController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() request: SaveJarvisResolutionRequestDto,
   ): Promise<SaveJarvisResolutionResponseDto> {
-    return this.jarvisSetupService.saveResolution(
-      request,
-      getAuthenticatedCompanyId(user),
-    );
+    const companyId = getAuthenticatedCompanyId(user);
+    return withBillingOperation(this.billingDataSource, companyId, 'configure', async () => {
+      const [state] = await this.billingDataSource.query('SELECT configuration FROM jarvis_billing_environments WHERE company_id=$1', [companyId]);
+      if (state?.configuration?.pending || (request.kind === JarvisResolutionKind.ELECTRONIC_INVOICE && state?.configuration?.current === 2))
+        throw new ConflictException('Completa el cambio a producción desde Pruebas/producción facturación antes de cambiar la resolución.');
+      return this.jarvisSetupService.saveResolution(request, companyId);
+    });
   }
 
   @Get('catalogs/credit-note-discrepancy-responses')

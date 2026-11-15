@@ -1,3 +1,4 @@
+import { withBillingOperation } from './helpers/jarvis-billing-operation';
 import { checkInvoiceNoteEligibility } from './helpers/jarvis-invoice-note-eligibility.helper';
 import { resolveInvoicePayments } from './helpers/jarvis-invoice-payments.helper';
 import { loadDraftAttachment } from './helpers/jarvis-invoice-attachment.helper';
@@ -89,6 +90,10 @@ export class JarvisInvoiceSendService {
     companyId: string,
     kind = JarvisResolutionKind.ELECTRONIC_INVOICE,
   ): Promise<CreateJarvisInvoiceResponseDto> {
+    return withBillingOperation(this.dataSource, companyId, 'send', () => this.performCreateAndSendInvoice(request, companyId, kind));
+  }
+
+  private async performCreateAndSendInvoice(request: CreateJarvisInvoiceRequestDto, companyId: string, kind: JarvisResolutionKind): Promise<CreateJarvisInvoiceResponseDto> {
     const isDebitNote = kind === JarvisResolutionKind.DEBIT_NOTE;
     const isSupportCreditNote = kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE;
     const isNote =

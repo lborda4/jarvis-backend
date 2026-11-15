@@ -7,7 +7,7 @@ import { attachmentMetadata } from './helpers/jarvis-invoice-attachment.helper';
 export interface SalesInvoiceHistoryQuery { search?: string; number?: string; from?: string; to?: string; page?: string; }
 type InvoiceAdjustmentStatus = 'NONE' | 'CREDIT_NOTE' | 'DEBIT_NOTE' | 'CREDIT_AND_DEBIT';
 interface AdjustmentInvoice { status: 'SENT' | 'SAVED'; prefix: string; number: string; cufe: string | null; }
-interface IssuedAdjustment { kind: string; referenceUuid: string | null; referenceNumber: string | null; }
+interface IssuedAdjustment { id: string; prefix: string; number: string; kind: string; referenceUuid: string | null; referenceNumber: string | null; }
 
 @Injectable()
 export class JarvisInvoiceHistoryService {
@@ -110,7 +110,7 @@ export class JarvisInvoiceHistoryService {
     const cufes = [...new Set(sent.map(item => uuid(item.cufe)).filter(Boolean))];
     const numbers = [...new Set(sent.filter(item => !uuid(item.cufe)).map(invoiceNumber).filter(Boolean))];
     const notes: IssuedAdjustment[] = cufes.length || numbers.length ? await this.repository.query(
-      `SELECT document_kind AS kind,
+      `SELECT id, prefix, number, document_kind AS kind,
         source_request->'billingReference'->>'uuid' AS "referenceUuid",
         source_request->'billingReference'->>'number' AS "referenceNumber"
       FROM jarvis_sales_invoices
@@ -133,7 +133,12 @@ export class JarvisInvoiceHistoryService {
       const flag = item.status !== 'SENT' ? 0
         : referenceUuid ? byUuid.get(referenceUuid) ?? 0 : byNumber.get(invoiceNumber(item)) ?? 0;
       const adjustmentStatus: InvoiceAdjustmentStatus = flag === 3 ? 'CREDIT_AND_DEBIT' : flag === 1 ? 'CREDIT_NOTE' : flag === 2 ? 'DEBIT_NOTE' : 'NONE';
-      return { ...item, adjustmentStatus };
+      const relatedCreditNotes = item.status !== 'SENT' ? [] : notes.filter(note =>
+        note.kind === JarvisResolutionKind.CREDIT_NOTE && note.id &&
+        (referenceUuid ? uuid(note.referenceUuid) === referenceUuid
+          : note.referenceNumber?.trim().toUpperCase() === invoiceNumber(item)),
+      ).map(note => ({ id: note.id, prefix: note.prefix, number: note.number }));
+      return { ...item, adjustmentStatus, ...(relatedCreditNotes.length ? { relatedCreditNotes } : {}) };
     });
   }
 

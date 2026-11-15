@@ -75,17 +75,17 @@ export function payrollStructuredDeductionErrors(line: PayrollLine): string[] {
   return errors
 }
 
-export function buildPayrollStructuredDeductions(lines: PayrollLine[]) {
+export function buildPayrollStructuredDeductions(lines: PayrollLine[], validate = true) {
   const result: Record<string, Array<Record<string, string | number>>> = {}
   for (const line of lines) {
     const kind = payrollStructuredDeductionKind(line.mapping ?? line.concept)
     if (!kind) continue
-    const errors = payrollStructuredDeductionErrors(line)
+    const errors = validate ? payrollStructuredDeductionErrors(line) : []
     if (errors.length) throw new Error(errors.join(' '))
     const payment = Number(money(cents(line.amount)))
     const row: Record<string, string | number> = kind === 'labor_union'
       ? { percentage: Number(line.percentage), deduction: payment }
-      : kind === 'orders' ? { description: line.description!.trim(), deduction: payment }
+      : kind === 'orders' ? { description: line.description?.trim() ?? '', deduction: payment }
       : {
           ...(line.publicSanction ? { public_sanction: Number(money(cents(line.publicSanction))) } : {}),
           ...(line.privateSanction ? { private_sanction: Number(money(cents(line.privateSanction))) } : {}),
@@ -125,7 +125,7 @@ export function payrollValueDeductionErrors(line: PayrollLine): string[] {
   } catch { return ['Ingresa un valor de deducción válido con máximo dos decimales.'] }
 }
 
-export function buildPayrollValueDeductions(lines: PayrollLine[]) {
+export function buildPayrollValueDeductions(lines: PayrollLine[], validate = true) {
   const result: Record<string, number | Array<Record<string, string | number>>> = {}
   const scalarAmounts: Record<string, bigint> = {}
   for (const line of lines) {
@@ -134,7 +134,7 @@ export function buildPayrollValueDeductions(lines: PayrollLine[]) {
     const array = payrollArrayDeductionKind(key)
     const scalar = payrollScalarDeductionField(key)
     if (!array && !scalar) continue
-    const errors = payrollValueDeductionErrors(line)
+    const errors = validate ? payrollValueDeductionErrors(line) : []
     if (errors.length) throw new Error(errors.join(' '))
     const amount = cents(line.amount)
     if (array) {
@@ -170,6 +170,7 @@ export interface PayrollInput {
 export interface PayrollWorker {
   firstName: string;
   surname: string;
+  email?: string;
   secondName?: string;
   secondSurname?: string;
   identification: string;
@@ -396,11 +397,14 @@ export function buildPayrollPayload(
     predecessor_cune: string;
     predecessor_issue_date: string;
   },
+  options: { validation?: 'local' | 'provider'; now?: Date } = {},
 ) {
-  const errors = validatePayroll(state, worker, true);
+  const validate = options.validation !== 'provider';
+  const errors = validate ? validatePayroll(state, worker, true) : [];
   if (errors.length) throw new Error(errors.join(' '));
-  const amounts: Record<string, bigint> = {};
+  const amounts: Record<string, bigint> = Object.create(null);
   const lawIds: Record<string, number | undefined> = {};
+  const lawSelections: Record<string, Set<number>> = {};
   const lawFields = {
     eps: ['eps_type_law_deductions_id', 'eps_deduction'],
     pension: ['pension_type_law_deductions_id', 'pension_deduction'],
@@ -411,29 +415,31 @@ export function buildPayrollPayload(
     const key = line.mapping ?? line.concept;
     amounts[key] = (amounts[key] ?? 0n) + cents(line.amount);
     const selectedLawId = line.typeLawDeductionsId ?? (key === 'eps' ? state.epsTypeLawDeductionsId : key === 'pension' ? state.pensionTypeLawDeductionsId : undefined);
-    if (key in lawFields && selectedLawId !== undefined) {
-      if (lawIds[key] !== undefined && lawIds[key] !== selectedLawId)
+    if (Object.prototype.hasOwnProperty.call(lawFields, key) && selectedLawId !== undefined) {
+      if (validate && lawIds[key] !== undefined && lawIds[key] !== selectedLawId)
         throw new Error(
           'No mezcles códigos de deducción legal para el mismo concepto.',
         );
       lawIds[key] = selectedLawId;
+      (lawSelections[key] ??= new Set()).add(selectedLawId);
     }
   }
   const total = totals(state.lines);
-  const deductions: Record<string, string | number | Array<Record<string, string | number>>> = {
+  const deductions: Record<string, string | number | number[] | Array<Record<string, string | number>>> = {
     deductions_total: total.deductions,
-    ...buildPayrollStructuredDeductions(state.lines),
-    ...buildPayrollValueDeductions(state.lines),
+    ...buildPayrollStructuredDeductions(state.lines, validate),
+    ...buildPayrollValueDeductions(state.lines, validate),
   };
   for (const [key, [idField, amountField]] of Object.entries(lawFields)) {
     if (amounts[key] === undefined) continue;
     const id = lawIds[key];
-    if (!Number.isSafeInteger(id) || id! < 1)
+    if (validate && (!Number.isSafeInteger(id) || id! < 1))
       throw new Error(
         `Completa el código de deducción legal de ${key} en NextPyme.`,
       );
     deductions[amountField] = money(amounts[key]);
-    deductions[idField] = id!;
+    // Preserve conflicting selections for provider validation instead of silently choosing one.
+    deductions[idField] = !validate && lawSelections[key]?.size > 1 ? [...lawSelections[key]] : id!;
   }
   const overtimeMap = new Map<string, Array<{ start_time: string; end_time: string; quantity: number; percentage: number; payment: string }>>();
   for (const line of state.lines) {
@@ -466,7 +472,26 @@ export function buildPayrollPayload(
   for (const [key, rows] of overtimeMap.entries()) {
     accruedPayload[key] = rows;
   }
+  if (!validate) {
+    for (const line of state.lines) {
+      const key = line.mapping ?? line.concept;
+      if (VERIFIED_CONCEPTS.includes(key)) continue;
+      const target = line.kind === 'deduction' ? deductions : accruedPayload;
+      if (!Object.prototype.hasOwnProperty.call(target, key))
+        Object.defineProperty(target, key, { value: money(amounts[key]), enumerable: true });
+    }
+  }
+  let workedTime: number | string | null;
+  try { workedTime = payrollWorkedTime(state.endDate, worker); }
+  catch (error) {
+    if (validate) throw error;
+    workedTime = state.workedTime ?? null;
+  }
   return {
+    date: state.issueDate,
+    time: new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).format(options.now ?? new Date()),
     type_document_id: predecessor ? 10 : PAYROLL_TYPE_DOCUMENT_ID,
     ...(predecessor ? { type_note: state.noteType, predecessor } : {}),
     consecutive: number,
@@ -477,19 +502,21 @@ export function buildPayrollPayload(
     novelty: { novelty: false, uuidnov: predecessor ? null : '' },
     sendmail: false,
     sendmailtome: false,
-    worker_code: worker.workerCode!.trim(),
+    worker_code: worker.workerCode?.trim() ?? '',
     payroll_period_id: state.payrollPeriodId!,
-    payment_dates: state.paymentDates!.map((payment_date) => ({
+    payment_dates: (state.paymentDates ?? []).map((payment_date) => ({
       payment_date,
     })),
     period: {
       admision_date: worker.admittanceDate,
       settlement_start_date: state.startDate,
       settlement_end_date: state.endDate,
-      worked_time: payrollWorkedTime(state.endDate, worker),
+      worked_time: workedTime,
       issue_date: state.issueDate,
     },
     worker: {
+      worker_code: worker.workerCode?.trim() ?? '',
+      ...(worker.email?.trim() ? { email: worker.email.trim() } : {}),
       type_worker_id: worker.typeWorkerId,
       sub_type_worker_id: worker.subTypeWorkerId,
       payroll_type_document_identification_id: worker.documentTypeId,

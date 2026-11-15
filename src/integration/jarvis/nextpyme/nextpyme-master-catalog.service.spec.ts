@@ -120,8 +120,79 @@ describe('NextPyme company catalogs', () => {
       companies as any,
       integrations as any,
     );
-    return { service, client, integrations };
+    return { service, client, integrations, companies };
   }
+
+  it('reutiliza resoluciones por 24 horas y agrupa consultas simultáneas de una empresa', async () => {
+    const { service, client } = setup();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      const results = await Promise.all([service.listResolutions('a'), service.listResolutions('a'), service.listResolutions('a')]);
+      expect(results[0]).toEqual(results[2]);
+      await service.listResolutions('a');
+      expect(client.listResolutions).toHaveBeenCalledTimes(1);
+      now.mockReturnValue(1000 + 24 * 60 * 60 * 1000 - 1);
+      await service.listResolutions('a');
+      expect(client.listResolutions).toHaveBeenCalledTimes(1);
+      now.mockReturnValue(1000 + 24 * 60 * 60 * 1000);
+      await service.listResolutions('a');
+      expect(client.listResolutions).toHaveBeenCalledTimes(2);
+    } finally { now.mockRestore(); }
+  });
+
+  it('invalida una sola empresa y permite una consulta explícita actualizada', async () => {
+    const { service, client } = setup();
+    await service.listResolutions('a');
+    await service.listResolutions('b');
+    service.invalidateResolutionsCache('a');
+    await service.listResolutions('b');
+    await service.listResolutions('a');
+    expect(client.listResolutions).toHaveBeenCalledTimes(3);
+    await service.listResolutions('a', { force: true });
+    expect(client.listResolutions).toHaveBeenCalledTimes(4);
+  });
+
+  it('no reutiliza resoluciones si cambian el token, IDSoftware o ambiente ni si se revoca el token', async () => {
+    const { service, client, companies, integrations } = setup();
+    await service.listResolutions('a');
+    companies.findById.mockResolvedValue({ nextPymeToken: 'rotated-token' });
+    await service.listResolutions('a');
+    expect(client.listResolutions).toHaveBeenLastCalledWith('software-a', 'rotated-token');
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { id_software: 'new-software' } });
+    await service.listResolutions('a');
+    expect(client.listResolutions).toHaveBeenLastCalledWith('new-software', 'rotated-token');
+    client.usesTestResolutionEndpoint.mockReturnValue(true);
+    await service.listResolutions('a');
+    expect(client.listResolutions).toHaveBeenLastCalledWith('', 'rotated-token');
+    companies.findById.mockResolvedValue({ nextPymeToken: null });
+    await expect(service.listResolutions('a')).rejects.toThrow('token de NextPyme');
+    expect(client.listResolutions).toHaveBeenCalledTimes(4);
+  });
+
+  it('no guarda fallos en caché y permite reintentar', async () => {
+    const { service, client } = setup();
+    client.listResolutions.mockRejectedValueOnce(new Error('offline'));
+    await expect(service.listResolutions('a')).rejects.toThrow('offline');
+    await service.listResolutions('a');
+    await service.listResolutions('a');
+    expect(client.listResolutions).toHaveBeenCalledTimes(2);
+  });
+
+  it('una respuesta anterior a una invalidación no sobrescribe las nuevas resoluciones', async () => {
+    const { service, client } = setup();
+    let resolveOld!: (value: any[]) => void;
+    const pending = new Promise<any[]>(resolve => { resolveOld = resolve; });
+    client.listResolutions.mockReturnValueOnce(pending);
+    const old = service.listResolutions('a');
+    // Wait until credential validation has completed and the request is in flight.
+    await new Promise(resolve => setImmediate(resolve));
+    service.invalidateResolutionsCache('a');
+    const current = await service.listResolutions('a');
+    resolveOld([{ prefix: 'old', resolution: 'old' }]);
+    await old;
+    expect(await service.listResolutions('a')).toEqual(current);
+    expect(client.listResolutions).toHaveBeenCalledTimes(2);
+  });
 
   it('consults production resolutions with each company IDSoftware', async () => {
     const { service, client } = setup();

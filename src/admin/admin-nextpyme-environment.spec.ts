@@ -1,3 +1,4 @@
+jest.mock('../integration/jarvis/helpers/jarvis-billing-operation', () => ({ withBillingOperation: (_db: unknown, _company: string, _kind: string, work: () => Promise<unknown>) => work() }));
 import { BadGatewayException } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { Company } from '../company/entities/company.entity';
@@ -22,6 +23,7 @@ function setup() {
     save: jest.fn(async (value) => value),
   };
   const dataSource = {
+    query: jest.fn().mockResolvedValue([]),
     transaction: jest.fn(async (callback) => callback({
       getRepository: (entity) => entity === Company ? companies : otherRepository,
     })),

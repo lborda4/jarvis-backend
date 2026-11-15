@@ -1,5 +1,11 @@
+import { payrollPayloadRequiredErrors } from './payroll-payload-required';
+import { payrollIssuerErrors } from './payroll-issuer';
+import { payrollSubmissionWorker } from './payroll-submission-worker';
+import { payrollDefaultLawDeductions, payrollRequiredDeductionErrors } from './payroll-required-deductions';
+import { consolidatePayrollMonth, monthlyRevisions, assertMonthlyRevisions } from './payroll-monthly';
+import { payrollLawOptionsForConcept } from './payroll-law-deduction-options';
 import { dayOvertimeMaster, isDayOvertime } from './payroll-overtime';
-import { ensurePayrollNumbering, PAYROLL_PREFIX } from './payroll-numbering';
+import { ensurePayrollNumbering, PAYROLL_PREFIX, PAYROLL_NOTE_PREFIX, PAYROLL_RANGE_TO } from './payroll-numbering';
 import { resolvePayrollContractId } from '../integration/jarvis/helpers/payroll-contract-types.helper';
 import { employeePaymentType, employeeBankFields, employeeBankErrors } from './payroll-employee-payment';
 import type { PayrollWorker } from './payroll-domain';
@@ -8,9 +14,11 @@ import { isPayrollEmployeeActive } from './payroll-employee-status';
 import { payrollEmploymentDays, payrollWorkedTime } from './payroll-employment';
 import { payrollPaymentColumns, payrollPaymentPresets, payrollPaymentMaster, type PayrollPaymentMethod } from './payroll-payment-methods';
 import {
+  HttpException,
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -22,9 +30,9 @@ import { IntegrationProvider } from '../integration/enums/integration-provider.e
 import { ElectronicDocumentType } from '../electronic-document/enums/electronic-document-type.enum';
 import { NextPymeMasterCatalogService } from '../integration/jarvis/nextpyme/nextpyme-master-catalog.service';
 import { NextPymeApiClient } from '../integration/jarvis/nextpyme/nextpyme-api.client';
+import { payrollSubmissionErrors } from './payroll-submission-errors';
 import { parseDianValidationResult } from '../integration/jarvis/nextpyme/nextpyme-dian-validation.helper';
 import {
-  PAYROLL_TYPE_DOCUMENT_ID,
   buildPayrollPayload,
   cents,
   totals,
@@ -37,8 +45,38 @@ import type { CreatePayrollPeriodRequest } from './payroll-period';
 import { payrollCune, payrollFiles } from './payroll-response';
 import { collectRecords } from '../integration/jarvis/nextpyme/nextpyme-record-scan.helper';
 
+interface PayrollSendLogContext {
+  company: string;
+  document?: string;
+  employee?: string;
+  month?: string;
+  stage: string;
+  token?: string;
+  httpStatus?: number;
+  providerCode?: string;
+  providerMessage?: string;
+}
+
 @Injectable()
 export class PayrollService {
+  private readonly logger = new Logger(PayrollService.name);
+
+  private logSubmissionError(error: unknown, context: PayrollSendLogContext) {
+    const { token, ...details } = context;
+    const provider = axios.isAxiosError(error) ? error : undefined;
+    const authorization = provider?.config?.headers?.Authorization;
+    const secrets = [token, typeof authorization === 'string' ? authorization.replace(/^Bearer\s+/i, '').trim() : undefined];
+    const messages = payrollSubmissionErrors(error instanceof HttpException ? error.getResponse() : provider?.response?.data);
+    let entry = JSON.stringify({
+      ...details,
+      httpStatus: provider?.response?.status ?? context.httpStatus ?? (error instanceof HttpException ? error.getStatus() : undefined),
+      code: provider?.code ?? context.providerCode,
+      message: messages.join(' | ') || provider?.message || (error instanceof Error ? error.message : 'Error inesperado al enviar la nómina.'),
+    });
+    for (const secret of secrets) if (secret) entry = entry.split(secret).join('[REDACTED]');
+    this.logger.error(`[payroll] ERROR ${entry.replace(/Bearer\s+[^\s"\\]+/gi, 'Bearer [REDACTED]')}`);
+  }
+
   constructor(
     private readonly db: DataSource,
     private readonly catalogs: NextPymeMasterCatalogService,
@@ -125,7 +163,7 @@ export class PayrollService {
     for (const line of lines) {
       const key = line.mapping ?? line.concept;
       const id = line.typeLawDeductionsId ?? (key === 'eps' ? state.epsTypeLawDeductionsId : key === 'pension' ? state.pensionTypeLawDeductionsId : undefined);
-      if (!rows.some(row => row.id === id))
+      if (!payrollLawOptionsForConcept(rows, key).some(row => row.id === id))
         throw new BadRequestException('Selecciona un tipo de deducción de ley del catálogo de NextPyme. Abre la novedad y vuelve a guardarla.');
     }
   }
@@ -321,9 +359,7 @@ export class PayrollService {
       return { deleted: true };
     });
   }
-  async saveParameters(company: string, actor: string, data: any, replaceCurrent = false) {
-    // Los cambios de configuración rigen desde hoy; los documentos conservan su snapshot.
-    if (replaceCurrent) data = { ...data, validFrom: new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota' }).format(new Date()) };
+  async saveParameters(company: string, actor: string, data: any) {
     if (!validDate(data?.validFrom))
       throw new BadRequestException('Fecha de vigencia inválida.');
     for (const field of ['monthlyDays', 'monthlyHours', 'weeklyHours'])
@@ -381,10 +417,10 @@ export class PayrollService {
     return this.db
       .transaction(async (m) => {
         const [saved] = await m.query(
-          `INSERT INTO jarvis_payroll_parameters(id,company_id,valid_from,data) VALUES($1,$2,$3,$4) ${replaceCurrent ? 'ON CONFLICT(company_id,valid_from) DO UPDATE SET data=EXCLUDED.data' : ''} RETURNING id`,
+          `INSERT INTO jarvis_payroll_parameters(id,company_id,valid_from,data) VALUES($1,$2,$3,$4) RETURNING id`,
           [id, company, data.validFrom, JSON.stringify(data)],
         );
-        await this.audit(m, company, actor, replaceCurrent ? 'PARAMETERS_SAVED' : 'PARAMETERS_CREATED', saved.id);
+        await this.audit(m, company, actor, 'PARAMETERS_CREATED', saved.id);
         return { id: saved.id };
       })
       .catch((e) => {
@@ -401,7 +437,7 @@ export class PayrollService {
     return this.db.transaction(async (m) => {
       await ensurePayrollNumbering(m, company);
       await m.query(
-        `INSERT INTO jarvis_payroll_settings(company_id,settings) VALUES($1,$2) ON CONFLICT(company_id) DO UPDATE SET settings=EXCLUDED.settings || jsonb_build_object('syncedEnvironment',jarvis_payroll_settings.settings->'syncedEnvironment'),updated_at=now()`,
+        `INSERT INTO jarvis_payroll_settings(company_id,settings) VALUES($1,$2) ON CONFLICT(company_id) DO UPDATE SET settings=EXCLUDED.settings,updated_at=now()`,
         [
           company,
           JSON.stringify({
@@ -415,32 +451,27 @@ export class PayrollService {
       return { saved: true };
     });
   }
-  async configureEnvironment(company: string, actor: string) {
-    const { settings } = await this.bootstrap(company);
-    const token = await this.catalogs.requireCompanyToken(company);
-    const result = await this.api.payrollRequest(
-      'config/environment',
-      { type_document_id: PAYROLL_TYPE_DOCUMENT_ID, payroll_type_environment_id: settings.environment },
-      token,
-      'PUT',
-    );
-    if (!result || (result as any).success === false)
-      throw new BadRequestException(
-        'NextPyme no confirmó el ambiente de nómina.',
-      );
-    await this.db.query(
-      `UPDATE jarvis_payroll_settings SET settings=settings || jsonb_build_object('syncedEnvironment',$2::int) WHERE company_id=$1 AND (settings->>'environment')::int=$2`,
-      [company, settings.environment],
-    );
-    await this.audit(this.db.manager, company, actor, 'ENVIRONMENT_CONFIGURED');
-    return result;
-  }
   async list(company: string, period?: string) {
-    return this.db.query(
-      `SELECT id, employee_id AS "employeeId", original_id AS "originalId", state, employee_snapshot AS employee, status, number, prefix, cune, accrued, deductions, net, updated_at AS "updatedAt", (status='DRAFT' AND sent_at IS NULL AND number IS NULL AND cune IS NULL AND NOT EXISTS (SELECT 1 FROM jarvis_payroll_transmissions t WHERE t.company_id=$1 AND t.document_id=jarvis_payroll_documents.id)) AS "canDelete" FROM jarvis_payroll_documents WHERE company_id=$1 AND ($2::text IS NULL OR state->>'period'=$2) ORDER BY state->>'startDate' DESC,created_at DESC LIMIT 1000`,
+    const rows = await this.db.query(
+      `SELECT id, md5((state - 'monthlyDocumentId' - 'monthlyConsolidation')::text || employee_snapshot::text || parameter_snapshot::text) AS "sourceVersion", employee_id AS "employeeId", original_id AS "originalId", state, employee_snapshot AS employee, status, number, prefix, cune, accrued, deductions, net, updated_at AS "updatedAt", (SELECT jsonb_build_object('error',t.error,'validation',t.validation,'response',t.response) FROM jarvis_payroll_transmissions t WHERE t.company_id=$1 AND t.document_id=jarvis_payroll_documents.id AND jarvis_payroll_documents.status IN ('REJECTED','UNCERTAIN') ORDER BY t.created_at DESC LIMIT 1) AS "lastResult", (status='DRAFT' AND sent_at IS NULL AND number IS NULL AND cune IS NULL AND NOT EXISTS (SELECT 1 FROM jarvis_payroll_transmissions t WHERE t.company_id=$1 AND t.document_id=jarvis_payroll_documents.id)) AS "canDelete" FROM jarvis_payroll_documents WHERE company_id=$1 AND (state #>> '{monthlyConsolidation,generated}') IS DISTINCT FROM 'true' AND ($2::text IS NULL OR state->>'period'=$2) ORDER BY state->>'startDate' DESC,created_at DESC LIMIT 1000`,
       [company, period || null],
     );
+    const monthlyIds = [...new Set(rows.flatMap((row: any) => row.state?.monthlyDocumentId ? [row.state?.monthlyDocumentId] : row.state?.monthlyConsolidation ? [row.id] : []))];
+    const monthlyRows = monthlyIds.length ? await this.db.query(
+      `SELECT d.id,d.status,d.cune,d.number,d.prefix,(SELECT jsonb_build_object('error',t.error,'validation',t.validation,'response',t.response) FROM jarvis_payroll_transmissions t WHERE t.company_id=$1 AND t.document_id=d.id ORDER BY t.created_at DESC LIMIT 1) AS "lastResult" FROM jarvis_payroll_documents d WHERE d.company_id=$1 AND d.id=ANY($2::uuid[])`, [company, monthlyIds]) : [];
+    const monthlyById = new Map<string, any>(monthlyRows.map((row: any) => [row.id, row]));
+    return rows.map(({ lastResult, ...row }) => {
+      const monthly = !row.originalId ? monthlyById.get(row.state?.monthlyDocumentId ?? (row.state?.monthlyConsolidation ? row.id : '')) : undefined;
+      const sourceStatus = row.status;
+      if (monthly) { row.status = monthly.status; row.canDelete = false; lastResult = monthly.lastResult; }
+      const failed = ['REJECTED', 'UNCERTAIN'].includes(row.status);
+      const messages = failed ? payrollSubmissionErrors(lastResult) : [];
+      return { ...row, sourceStatus, monthlySubmission: monthly ? { id: monthly.id, status: monthly.status, cune: monthly.cune, number: monthly.number, prefix: monthly.prefix } : undefined, submissionErrors: !failed ? [] : messages.length ? messages : [row.status === 'UNCERTAIN'
+        ? 'No se confirmó el envío. Verifica el resultado antes de reenviar.'
+        : 'El envío no fue aceptado. Revisa los datos de la nómina.'] };
+    });
   }
+
   async deleteDocument(company: string, actor: string, id: string) {
     return this.db.transaction(async (manager) => {
       // Serialize with send/save so deletion cannot race an outgoing document.
@@ -452,6 +483,7 @@ export class PayrollService {
         [company, id],
       );
       if (!document) throw new NotFoundException('La nómina no existe.');
+      if (document.state?.monthlyDocumentId || document.state?.monthlyConsolidation) throw new ConflictException('El período ya pertenece a un consolidado mensual y conserva su historial.');
       if (document.status !== 'DRAFT' || document.sent_at || document.number != null || document.cune) {
         throw new ConflictException('Solo puedes eliminar borradores que nunca se hayan enviado.');
       }
@@ -598,7 +630,9 @@ export class PayrollService {
     id: string,
     state: any,
     manager?: EntityManager,
+    options: { validation?: 'local' | 'provider' } = {},
   ) {
+    const validate = options.validation !== 'provider';
     if (!state || JSON.stringify(state).length > 200000)
       throw new BadRequestException('Nómina inválida.');
     if (state.payrollGroupId) {
@@ -619,6 +653,9 @@ export class PayrollService {
           'Las fechas deben coincidir con la periodicidad de la nómina.',
         );
     }
+    state = { ...state };
+    delete state.monthlyDocumentId;
+    delete state.monthlyConsolidation;
     const save = async (m: EntityManager) => {
       await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `payroll:${company}`,
@@ -627,6 +664,14 @@ export class PayrollService {
         'SELECT * FROM jarvis_payroll_documents WHERE company_id=$1 AND id=$2 FOR UPDATE',
         [company, id],
       );
+      if (existing?.state.monthlyConsolidation?.generated) throw new ConflictException('Corrige las quincenas de origen y vuelve a enviar desde el resumen mensual.');
+      if (!state.originalId) {
+        await this.assertMonthlyEditable(m, company, state.employeeId, state.period);
+        if (existing?.employee_id && (existing.employee_id !== state.employeeId || existing.state.period !== state.period)) await this.assertMonthlyEditable(m, company, existing.employee_id, existing.state.period);
+        if ((existing?.state.monthlyDocumentId || existing?.state.monthlyConsolidation) && (existing.employee_id !== state.employeeId || existing.state.period !== state.period)) throw new ConflictException('No se puede mover a otro empleado o mes un período que ya pertenece a una consolidación.');
+        if (existing?.state.monthlyDocumentId) state.monthlyDocumentId = existing.state.monthlyDocumentId;
+        if (existing?.state.monthlyConsolidation) state.monthlyConsolidation = existing.state.monthlyConsolidation;
+      }
       if (existing && !['DRAFT', 'REJECTED'].includes(existing.status))
         throw new ConflictException('Esta nómina no admite cambios directos.');
       if (
@@ -656,7 +701,8 @@ export class PayrollService {
           : employee
             ? { ...employee.data, active: isPayrollEmployeeActive(employee.data.retirementDate) }
             : null;
-      const errors = validatePayroll(state, worker);
+      if (!worker) throw new NotFoundException('El empleado no pertenece a esta empresa.');
+      const errors = validate ? validatePayroll(state, worker) : [];
       if (errors.length) throw new BadRequestException(errors.join(' '));
       const [parameter] = await m.query(
         'SELECT data FROM jarvis_payroll_parameters WHERE company_id=$1 AND valid_from <= $2 ORDER BY valid_from DESC LIMIT 1',
@@ -685,7 +731,8 @@ export class PayrollService {
       }
       // Conserva los datos históricos del documento y toma solo el código persistido del empleado.
       if (worker && employee?.data.workerCode) worker = { ...worker, workerCode: employee.data.workerCode };
-      state.workedTime = String(payrollWorkedTime(state.endDate, worker));
+      try { state.workedTime = String(payrollWorkedTime(state.endDate, worker)); }
+      catch (error) { if (validate) throw error; }
       const total = totals(state.lines);
       // Once edited, preserve parameters already captured for the document.
       let snapshot =
@@ -698,12 +745,14 @@ export class PayrollService {
           "SELECT data FROM jarvis_payroll_parameters WHERE company_id=$1 AND valid_from <= (now() AT TIME ZONE 'America/Bogota')::date ORDER BY valid_from DESC LIMIT 1",
           [company],
         );
-        snapshot = extendPayrollNoveltyConcepts(snapshot, configured?.data, state.lines);
+        try { snapshot = extendPayrollNoveltyConcepts(snapshot, configured?.data, state.lines); }
+        catch (error) { if (validate) throw error; }
       }
       state.lines = state.lines.map((line: any) => {
         const concept = snapshot.concepts?.find(
           (c: any) => c.code === line.concept && c.kind === line.kind,
         );
+        if (!concept && !validate) return line;
         if (!concept)
           throw new BadRequestException(
             'El concepto no pertenece a los parámetros de esta nómina.',
@@ -715,9 +764,11 @@ export class PayrollService {
             : concept.code,
         };
       });
-      await this.validateLawDeductionMaster(company, state);
-      await this.validateDisabilityMaster(company, state);
-      await this.validateDayOvertimeMaster(company, state);
+      if (validate) {
+        await this.validateLawDeductionMaster(company, state);
+        await this.validateDisabilityMaster(company, state);
+        await this.validateDayOvertimeMaster(company, state);
+      }
       const [saved] = await m.query(
         `INSERT INTO jarvis_payroll_documents(id,company_id,employee_id,original_id,state,employee_snapshot,parameter_snapshot,accrued,deductions,net) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,employee_id=EXCLUDED.employee_id,employee_snapshot=EXCLUDED.employee_snapshot,parameter_snapshot=EXCLUDED.parameter_snapshot,accrued=EXCLUDED.accrued,deductions=EXCLUDED.deductions,net=EXCLUDED.net,status='DRAFT',cune=NULL,updated_at=now() WHERE jarvis_payroll_documents.company_id=EXCLUDED.company_id RETURNING id`,
@@ -746,22 +797,169 @@ export class PayrollService {
       throw e;
     });
   }
-  private async resolveWorkerPayment(company: string, worker: PayrollWorker): Promise<PayrollWorker> {
-    const { paymentMethods } = await this.catalogs.getPayrollWorkerCatalogs(company);
-    return { ...worker, paymentMethodType: employeePaymentType(worker.paymentMethodId, paymentMethods) };
+  private async resolveSubmissionWorker(company: string, snapshot: PayrollWorker, current: Partial<PayrollWorker> & { contractType?: string }): Promise<PayrollWorker> {
+    const worker = payrollSubmissionWorker(snapshot, current);
+    const { paymentMethods, contractTypes } = await this.catalogs.getPayrollWorkerCatalogs(company);
+    if (!paymentMethods?.some(method => method.id === worker.paymentMethodId))
+      throw new BadRequestException('Selecciona un método de pago vigente en el empleado.');
+    const paymentMethodType = employeePaymentType(worker.paymentMethodId, paymentMethods);
+    const resolved = { ...worker, paymentMethodType,
+      ...(worker.contractType ? { typeContractId: resolvePayrollContractId(worker.contractType, contractTypes) } : {}),
+      ...(paymentMethodType === 'cash' ? employeeBankFields(worker, 'cash') : {}),
+    };
+    return resolved;
   }
   async validate(company: string, id: string) {
     const d = await this.get(company, id);
-    const { settings, employees } = await this.bootstrap(company);
+    d.state = payrollDefaultLawDeductions(d.state);
+    const { employees } = await this.bootstrap(company);
     const currentEmployee = employees.find((employee: { id: string }) => employee.id === d.employee_id);
-    const paymentWorker = await this.resolveWorkerPayment(company, d.employee_snapshot as PayrollWorker);
-    const errors = validatePayroll(d.state, { ...paymentWorker, workerCode: currentEmployee?.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true);
-    if (!settings.enabled)
-      errors.push('Habilita la transmisión en configuración de nómina.');
+    const paymentWorker = await this.resolveSubmissionWorker(company, d.employee_snapshot as PayrollWorker, currentEmployee ?? {});
+    const errors = [...validatePayroll(d.state, { ...paymentWorker, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) }, true), ...payrollRequiredDeductionErrors(d.state)];
     return { errors, valid: errors.length === 0 };
   }
+  private async assertMonthlyEditable(m: EntityManager, company: string, employee: string, month: string) {
+    const [monthly] = await m.query(
+      "SELECT id,status FROM jarvis_payroll_documents WHERE company_id=$1 AND employee_id=$2 AND state->>'period'=$3 AND state ? 'monthlyConsolidation' FOR UPDATE",
+      [company, employee, month],
+    );
+    if (monthly && ['ACCEPTED', 'PROCESSING', 'UNCERTAIN'].includes(monthly.status))
+      throw new ConflictException('Este mes ya se envió o está pendiente de confirmación para el empleado. Revisa el resultado mensual; las correcciones de un documento aceptado requieren una nota de ajuste.');
+  }
+
+  async sendDocument(company: string, actor: string, id: string) {
+    try {
+      const document = await this.get(company, id);
+      if (!document.original_id && !document.state.monthlyConsolidation)
+        throw new BadRequestException('Envía la nómina desde el resumen mensual para consolidar todos los períodos del empleado.');
+    } catch (error) {
+      this.logSubmissionError(error, { company, document: id, stage: 'VALIDATE_DOCUMENT' });
+      throw error;
+    }
+    return this.send(company, actor, id);
+  }
+
+  async sendMonthlyEmployee(company: string, actor: string, month: string, employee: string, expected: unknown) {
+    const context = { company, employee, month, stage: 'CONSOLIDATE_MONTH' };
+    this.logger.log(`[payroll] PREPARE_MONTH ${JSON.stringify(context)}`);
+    let prepared: Awaited<ReturnType<PayrollService['get']>>;
+    try {
+      prepared = await this.prepareMonthlyEmployee(company, actor, month, employee, expected);
+    } catch (error) {
+      this.logSubmissionError(error, context);
+      throw error;
+    }
+    if (['ACCEPTED', 'PROCESSING', 'UNCERTAIN'].includes(prepared.status)) return prepared;
+    return this.send(company, actor, prepared.id);
+  }
+
+  private async prepareMonthlyEmployee(company: string, actor: string, month: string, employee: string, expected: unknown) {
+    try { payrollPeriodBounds(month, 'MONTHLY'); } catch { throw new BadRequestException('Selecciona un mes válido.'); }
+    const loaded = await this.db.query(
+      "SELECT *, md5((state - 'monthlyDocumentId' - 'monthlyConsolidation')::text || employee_snapshot::text || parameter_snapshot::text) AS \"sourceVersion\" FROM jarvis_payroll_documents WHERE company_id=$1 AND employee_id=$2 AND original_id IS NULL AND state->>'period'=$3 AND (state #>> '{monthlyConsolidation,generated}') IS DISTINCT FROM 'true' ORDER BY id",
+      [company, employee, month],
+    );
+    if (!loaded.length) throw new NotFoundException('No hay períodos de este empleado en el mes seleccionado.');
+    // payroll_period_id describes payment frequency; reporting still covers the complete month.
+    const frequency = loaded.every((row: any) => row.state.periodicity === 'MONTHLY' ||
+      (row.state.startDate.endsWith('-01') && Number(row.state.endDate.slice(-2)) >= 28)) ? 'Mensual' : 'Quincenal';
+    const periodId = await this.catalogs.getPayrollPeriodId(company, frequency);
+    const id = await this.db.transaction(async m => {
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payroll:${company}`]);
+      const rows = await m.query(
+        "SELECT *, md5((state - 'monthlyDocumentId' - 'monthlyConsolidation')::text || employee_snapshot::text || parameter_snapshot::text) AS \"sourceVersion\" FROM jarvis_payroll_documents WHERE company_id=$1 AND employee_id=$2 AND original_id IS NULL AND state->>'period'=$3 ORDER BY id FOR UPDATE",
+        [company, employee, month],
+      );
+      const existing = rows.find((row: any) => row.state.monthlyConsolidation);
+      // Idempotent: an accepted/in-flight monthly document is never transmitted twice.
+      if (existing && ['ACCEPTED', 'PROCESSING', 'UNCERTAIN'].includes(existing.status)) return existing.id;
+      const sources = rows.filter((row: any) => !row.state.monthlyConsolidation?.generated);
+      try { assertMonthlyRevisions(sources, expected); } catch (error) { throw new ConflictException((error as Error).message); }
+      if (sources.some((row: any) => !row.state.monthlyConsolidation &&
+        (!['DRAFT', 'REJECTED'].includes(row.status) || row.sent_at || row.number != null || row.cune)))
+        throw new ConflictException('Hay períodos enviados individualmente en este mes. Verifica esos envíos antes de consolidar para evitar duplicados.');
+      const [current] = await m.query('SELECT data,active FROM jarvis_payroll_employees WHERE company_id=$1 AND id=$2', [company, employee]);
+      if (!current) throw new NotFoundException('El empleado no pertenece a esta empresa.');
+      const enriched = sources.map((row: any) => ({ ...row, employee_snapshot: { ...payrollSubmissionWorker(row.employee_snapshot, current.data),
+        retirementDate: current.data.retirementDate || row.employee_snapshot.retirementDate,
+      } }));
+      let consolidated: ReturnType<typeof consolidatePayrollMonth>;
+      try {
+        consolidated = consolidatePayrollMonth(month, enriched, periodId, new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota' }).format(new Date()));
+      } catch (error) { throw new BadRequestException((error as Error).message); }
+      const bounds = payrollPeriodBounds(month, 'MONTHLY');
+      const fullMonth = sources.length === 1 && sources[0].state.startDate === bounds.startDate && sources[0].state.endDate === bounds.endDate;
+      const monthlyId = existing?.id ?? (fullMonth ? sources[0].id : randomUUID());
+      const marker = { month, generated: monthlyId !== sources[0].id || sources.length > 1, revisions: monthlyRevisions(sources) };
+      const state = { ...consolidated.state,
+        ...(!marker.generated ? { payrollGroupId: sources[0].state.payrollGroupId, payrollName: sources[0].state.payrollName ?? consolidated.state.payrollName } : {}),
+        monthlyConsolidation: marker };
+      const [saved] = await m.query(
+        `INSERT INTO jarvis_payroll_documents(id,company_id,employee_id,state,employee_snapshot,parameter_snapshot,accrued,deductions,net) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,employee_snapshot=EXCLUDED.employee_snapshot,parameter_snapshot=EXCLUDED.parameter_snapshot,accrued=EXCLUDED.accrued,deductions=EXCLUDED.deductions,net=EXCLUDED.net,status='DRAFT',updated_at=now()
+         WHERE jarvis_payroll_documents.company_id=EXCLUDED.company_id AND jarvis_payroll_documents.status IN ('DRAFT','REJECTED') RETURNING id,updated_at,md5((state - 'monthlyDocumentId' - 'monthlyConsolidation')::text || employee_snapshot::text || parameter_snapshot::text) AS "sourceVersion"`,
+        [monthlyId, company, employee, JSON.stringify(state), JSON.stringify(consolidated.worker), JSON.stringify(consolidated.parameters), consolidated.accrued, consolidated.deductions, consolidated.net],
+      );
+      if (!saved) throw new ConflictException('El mes ya tiene un envío en curso. Actualiza el resumen.');
+      if (!marker.generated) {
+        marker.revisions = monthlyRevisions([{ ...sources[0], updated_at: saved.updated_at, sourceVersion: saved.sourceVersion }]);
+        await m.query("UPDATE jarvis_payroll_documents SET state=jsonb_set(state,'{monthlyConsolidation}',$3::jsonb) WHERE company_id=$1 AND id=$2", [company, monthlyId, JSON.stringify(marker)]);
+      } else {
+        await m.query("UPDATE jarvis_payroll_documents SET state=jsonb_set(state,'{monthlyDocumentId}',to_jsonb($3::text)) WHERE company_id=$1 AND id=ANY($2::uuid[])", [company, sources.map((row: any) => row.id), monthlyId]);
+      }
+      await this.audit(m, company, actor, 'PAYROLL_MONTH_CONSOLIDATED', monthlyId);
+      return monthlyId;
+    });
+    return this.get(company, id);
+  }
+
+  private async verifyMonthlySources(m: EntityManager, company: string, document: any) {
+    const marker = document.state.monthlyConsolidation;
+    if (!marker) return;
+    const rows = await m.query(
+      "SELECT *, md5((state - 'monthlyDocumentId' - 'monthlyConsolidation')::text || employee_snapshot::text || parameter_snapshot::text) AS \"sourceVersion\" FROM jarvis_payroll_documents WHERE company_id=$1 AND employee_id=$2 AND original_id IS NULL AND state->>'period'=$3 AND (state #>> '{monthlyConsolidation,generated}') IS DISTINCT FROM 'true' ORDER BY id FOR UPDATE",
+      [company, document.employee_id, marker.month],
+    );
+    try { assertMonthlyRevisions(rows, marker.revisions); } catch (error) { throw new ConflictException((error as Error).message); }
+  }
+
+
   async send(company: string, actor: string, id: string) {
+    let started = false;
+    const context: PayrollSendLogContext = { company, document: id, stage: 'COMPANY_TOKEN' };
+    this.logger.log(`[payroll] PREPARE ${JSON.stringify(context)}`);
+    try {
+      return await this.performSend(company, actor, id, () => { started = true; }, context);
+    } catch (error) {
+      this.logSubmissionError(error, context);
+      // Preflight failures also belong to this employee. Never overwrite an in-flight/accepted document.
+      try {
+        if (!started) await this.db.transaction(async m => {
+          await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payroll:${company}`]);
+          const [document] = await m.query('SELECT * FROM jarvis_payroll_documents WHERE company_id=$1 AND id=$2 FOR UPDATE', [company, id]);
+          if (!document || !['DRAFT', 'REJECTED'].includes(document.status)) return;
+          const message = error instanceof HttpException ? payrollSubmissionErrors(error.getResponse()).join(' | ') || error.message : 'No se pudo preparar el envío. Revisa la configuración y la conexión con el proveedor.';
+          await m.query("UPDATE jarvis_payroll_documents SET status='REJECTED',updated_at=now() WHERE company_id=$1 AND id=$2", [company, id]);
+          await m.query('INSERT INTO jarvis_payroll_transmissions(id,company_id,document_id,request,error,completed_at) VALUES($1,$2,$3,$4,$5,now())',
+            [randomUUID(), company, id, JSON.stringify({ operation: 'PREPARE' }), message]);
+        });
+      } catch (persistenceError) {
+        this.logSubmissionError(persistenceError, { ...context, stage: 'SAVE_PREPARATION_ERROR' });
+      }
+      throw error;
+    }
+  }
+  private async performSend(company: string, actor: string, id: string, onStarted: () => void, context: PayrollSendLogContext) {
     const token = await this.catalogs.requireCompanyToken(company);
+    context.token = token;
+    context.stage = 'ISSUER_CONFIGURATION';
+    const [issuer, companyRows] = await Promise.all([
+      this.api.getPayrollIssuerConfiguration(token),
+      this.db.query('SELECT nit FROM companies WHERE id=$1', [company]),
+    ]);
+    const issuerErrors = payrollIssuerErrors(companyRows[0]?.nit, issuer);
+    if (issuerErrors.length) throw new BadRequestException(issuerErrors.join(' | '));
+    context.stage = 'PROVIDER_PLAN';
     const info = await this.api.payrollPlanInfo(token);
     const balance = collectRecords(info, { parseJsonStrings: true }).find(
       (r) => r.docs_left_absolut !== undefined,
@@ -774,6 +972,7 @@ export class PayrollService {
       throw new BadRequestException(
         'No hay documentos disponibles en el paquete de NextPyme.',
       );
+    context.stage = 'JARVIS_QUOTA';
     const prepared = await this.plans.withJarvisQuotaLock(company, async () => {
       await this.plans.assertCanCreateDocuments({
         companyId: company,
@@ -781,6 +980,7 @@ export class PayrollService {
         documentType: ElectronicDocumentType.PURCHASE_INVOICE,
         quantity: 1,
       });
+      context.stage = 'LOAD_DOCUMENT';
       return this.db.transaction(async (m) => {
         await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
           `payroll:${company}`,
@@ -790,33 +990,36 @@ export class PayrollService {
           [company, id],
         );
         if (!d) throw new NotFoundException();
+        d.state = payrollDefaultLawDeductions(d.state);
+        context.employee = d.employee_id;
+        context.month = d.state.period;
         if (!['DRAFT', 'REJECTED'].includes(d.status))
           throw new ConflictException(
             'La nómina ya se envió o tiene un envío pendiente de confirmación.',
           );
+        context.stage = 'MONTHLY_SOURCES';
+        await this.verifyMonthlySources(m, company, d);
+        context.stage = 'NUMBERING';
         await ensurePayrollNumbering(m, company);
+        context.stage = 'LOAD_SETTINGS';
         const [s] = await m.query(
           'SELECT * FROM jarvis_payroll_settings WHERE company_id=$1 FOR UPDATE',
           [company],
         );
-        if (!s?.settings.enabled)
-          throw new BadRequestException('Habilita la transmisión de nómina.');
-        if (s.settings.syncedEnvironment !== s.settings.environment)
-          throw new BadRequestException(
-            'Sincroniza el ambiente de nómina con NextPyme antes de enviar.',
-          );
+        context.stage = 'LOAD_WORKER';
         const [currentEmployee] = await m.query(
           'SELECT data,active FROM jarvis_payroll_employees WHERE company_id=$1 AND id=$2',
           [company, d.employee_id],
         );
-        if (!currentEmployee || !isPayrollEmployeeActive(currentEmployee.data?.retirementDate))
-          throw new BadRequestException('El empleado está inactivo.');
-        const paymentWorker = await this.resolveWorkerPayment(company, d.employee_snapshot as PayrollWorker);
-        const worker = { ...paymentWorker, workerCode: currentEmployee.data.workerCode, active: isPayrollEmployeeActive(d.employee_snapshot.retirementDate) };
-        const errors = validatePayroll(d.state, worker, true);
-        if (errors.length) throw new BadRequestException(errors.join(' '));
-        const number = d.number ?? Number(s.next_number);
-        if (!Number.isSafeInteger(Number(number)) || Number(number) < 1)
+        if (!currentEmployee) throw new NotFoundException('El empleado no pertenece a esta empresa.');
+        const worker = await this.resolveSubmissionWorker(company, d.employee_snapshot, currentEmployee.data);
+        const required = [...payrollRequiredDeductionErrors(d.state), ...employeeBankErrors(worker)];
+        if (!worker.address?.trim()) required.push('Completa la dirección del empleado.');
+        if (!Number.isSafeInteger(worker.municipalityId) || worker.municipalityId! < 1) required.push('Selecciona la ciudad del empleado.');
+        if (!Number.isSafeInteger(worker.typeContractId) || worker.typeContractId! < 1) required.push('Selecciona el tipo de contrato del empleado.');
+        if (required.length) throw new BadRequestException([...new Set(required)].join(' '));
+        const number = d.number ?? Number(d.original_id ? s.next_note_number : s.next_number);
+        if (!Number.isSafeInteger(Number(number)) || Number(number) < 1 || Number(number) > PAYROLL_RANGE_TO)
           throw new BadRequestException('Consecutivo fuera de rango.');
         let predecessor: any;
         if (d.original_id) {
@@ -834,16 +1037,23 @@ export class PayrollService {
             predecessor_issue_date: original.state.issueDate,
           };
         }
-        await this.validateLawDeductionMaster(company, d.state);
-        await this.validateDisabilityMaster(company, d.state);
-        await this.validateDayOvertimeMaster(company, d.state);
+        context.stage = 'BUILD_PAYLOAD';
+        const defaultPrefix = d.original_id ? PAYROLL_NOTE_PREFIX : PAYROLL_PREFIX;
+        const savedPrefix = d.number != null ? d.prefix ?? defaultPrefix : defaultPrefix;
+        // Replace the old default only when the provider has not assigned a CUNE.
+        const prefix = savedPrefix === 'SETP' && !d.cune ? defaultPrefix : savedPrefix;
         const payload = buildPayrollPayload(
           d.state,
           worker,
           Number(number),
-          d.number != null ? d.prefix ?? s.settings.prefix : PAYROLL_PREFIX,
+          prefix,
           predecessor,
+          { validation: 'provider' },
         );
+        context.stage = 'VALIDATE_PAYLOAD';
+        const payloadErrors = payrollPayloadRequiredErrors(payload);
+        if (payloadErrors.length) throw new BadRequestException(payloadErrors.join(' | '));
+        context.stage = 'SAVE_REQUEST';
         const transmission = randomUUID();
         await m.query(
           'INSERT INTO jarvis_payroll_transmissions(id,company_id,document_id,request) VALUES($1,$2,$3,$4)',
@@ -855,13 +1065,17 @@ export class PayrollService {
         );
         if (d.number == null)
           await m.query(
-            'UPDATE jarvis_payroll_settings SET next_number=next_number+1 WHERE company_id=$1',
+            d.original_id
+              ? 'UPDATE jarvis_payroll_settings SET next_note_number=next_note_number+1 WHERE company_id=$1'
+              : 'UPDATE jarvis_payroll_settings SET next_number=next_number+1 WHERE company_id=$1',
             [company],
           );
         await this.audit(m, company, actor, 'PAYROLL_SEND_STARTED', id);
         return { payload, transmission, adjustment: !!d.original_id };
       });
     });
+    onStarted();
+    context.stage = 'PROVIDER_REQUEST';
     let response: unknown;
     try {
       response = await this.api.payrollRequest(
@@ -878,27 +1092,50 @@ export class PayrollService {
             JSON.stringify(providerError).split(token).join('[REDACTED]'),
           )
         : null;
+      const httpStatus = axios.isAxiosError(error) ? error.response?.status : undefined;
+      context.httpStatus = httpStatus;
+      context.providerCode = axios.isAxiosError(error) ? error.code : undefined;
+      context.providerMessage = payrollSubmissionErrors(safeError).join(' | ') || (error instanceof Error ? error.message : undefined);
+      const duplicate = /procesado anteriormente|already processed|regla:\s*90/i.test(JSON.stringify(safeError));
+      const rejected = [400, 422].includes(httpStatus ?? 0) && !payrollCune(safeError) && !duplicate;
+      const messages = payrollSubmissionErrors(safeError);
+      const message = messages.join(' | ') || (rejected ? 'El proveedor rechazó los datos de la nómina.' : 'No se confirmó el resultado del proveedor; verifica el envío antes de reenviar.');
+      // Record the provider failure even if saving its result subsequently fails.
+      this.logSubmissionError(error, context);
+      context.stage = 'SAVE_PROVIDER_ERROR';
       await this.db.transaction(async (m) => {
         await m.query(
-          "UPDATE jarvis_payroll_documents SET status='UNCERTAIN',updated_at=now() WHERE company_id=$1 AND id=$2",
+          rejected ? "UPDATE jarvis_payroll_documents SET status='REJECTED',updated_at=now() WHERE company_id=$1 AND id=$2" : "UPDATE jarvis_payroll_documents SET status='UNCERTAIN',updated_at=now() WHERE company_id=$1 AND id=$2",
           [company, id],
         );
         await m.query(
-          "UPDATE jarvis_payroll_transmissions SET response=$3,error='No se confirmó el resultado del proveedor; no reenviar automáticamente.',completed_at=now() WHERE company_id=$1 AND id=$2",
-          [company, prepared.transmission, JSON.stringify(safeError)],
+          'UPDATE jarvis_payroll_transmissions SET response=$3,error=$4,completed_at=now() WHERE company_id=$1 AND id=$2',
+          [company, prepared.transmission, JSON.stringify(safeError), message],
         );
       });
+      context.stage = 'PROVIDER_REQUEST';
+      if (rejected) throw new BadRequestException(message);
       throw new ServiceUnavailableException(
         'No se confirmó el envío. Se conservó la solicitud para verificar el resultado antes de reenviar.',
       );
     }
+    context.stage = 'PROVIDER_RESULT';
     const validation = parseDianValidationResult(response);
     const status =
       validation?.isValid === true
         ? 'ACCEPTED'
-        : validation?.isValid === false
+        : validation?.isValid === false || ((response as any)?.success === false && !payrollCune(response) && !/procesado anteriormente|already processed|regla:\s*90/i.test(JSON.stringify(response)))
           ? 'REJECTED'
           : 'UNCERTAIN';
+    if (status === 'ACCEPTED') {
+      this.logger.log(`[payroll] ACCEPTED company=${company} document=${id} employee=${context.employee} month=${context.month}`);
+    } else {
+      const messages = payrollSubmissionErrors({ response, validation });
+      this.logSubmissionError(new Error(messages.join(' | ') || (status === 'REJECTED'
+        ? 'NextPyme o DIAN rechazó la nómina.'
+        : 'NextPyme no confirmó la aceptación; verifica el resultado antes de reenviar.')), { ...context, stage: status });
+    }
+    context.stage = 'SAVE_RESULT';
     await this.db.transaction(async (m) => {
       await m.query(
         'UPDATE jarvis_payroll_transmissions SET response=$3,validation=$4,completed_at=now() WHERE company_id=$1 AND id=$2',
@@ -915,6 +1152,7 @@ export class PayrollService {
       );
       await this.audit(m, company, actor, `PAYROLL_${status}`, id);
     });
+    context.stage = 'LOAD_RESULT';
     return this.get(company, id);
   }
 

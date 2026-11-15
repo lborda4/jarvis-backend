@@ -1,3 +1,7 @@
+import { AdminPayrollNumberingController } from './admin-payroll-numbering.controller';
+import { AdminPayrollNumberingService } from './admin-payroll-numbering.service';
+import { AdminBillingEnvironmentController } from './admin-billing-environment.controller';
+import { AdminBillingEnvironmentService } from './admin-billing-environment.service';
 import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { CompanyModule } from '../company/company.module';
@@ -17,7 +21,7 @@ import { RutParserService } from './rut-parser.service';
     forwardRef(() => JarvisModule),
     forwardRef(() => PlanModule),
   ],
-  controllers: [AdminController],
-  providers: [AdminService, AdminGuard, RutParserService],
+  controllers: [AdminController, AdminBillingEnvironmentController, AdminPayrollNumberingController],
+  providers: [AdminService, AdminGuard, RutParserService, AdminBillingEnvironmentService, AdminPayrollNumberingService],
 })
 export class AdminModule {}

@@ -72,9 +72,31 @@ const state: PayrollInput = {
   ],
 };
 
+describe('serialización para validación de NextPyme', () => {
+  it('construye el JSON con datos faltantes sin validar campos de transmisión localmente', () => {
+    const incomplete = { ...worker, workerCode: undefined, address: undefined, municipalityId: undefined, typeContractId: undefined, admittanceDate: '' };
+    const payload = buildPayrollPayload({ ...state, lines: [], paymentDates: undefined }, incomplete, 1, 'SETP', undefined, { validation: 'provider' });
+    expect(payload).toMatchObject({ worker_code: '', payment_dates: [], accrued: { salary: '0.00', accrued_total: '0.00' },
+      worker: { address: undefined, municipality_id: undefined, type_contract_id: undefined }, period: { admision_date: '', worked_time: state.workedTime } });
+    expect(() => JSON.stringify(payload)).not.toThrow();
+  });
+
+  it('conserva valores de deducciones para que el proveedor valide porcentajes y descripciones', () => {
+    const lines = [state.lines[0],
+      { id: 'union', concept: 'labor_union', kind: 'deduction' as const, quantity: '1', amount: '10', percentage: '150' },
+      { id: 'loan', concept: 'loan', kind: 'deduction' as const, quantity: '1', amount: '10' },
+      { id: 'sanction', concept: 'sanctions', kind: 'deduction' as const, quantity: '1', amount: '10', privateSanction: '0' },
+    ];
+    const payload = buildPayrollPayload({ ...state, lines }, worker, 1, 'SETP', undefined, { validation: 'provider' });
+    expect(payload.deductions).toMatchObject({ labor_union: [{ percentage: 150, deduction: 10 }], orders: [{ description: '', deduction: 10 }], sanctions: [{ private_sanction: 0 }], deductions_total: '30.00' });
+  });
+});
+
 describe('contrato de envío de nómina NextPyme', () => {
   it('usa los nombres y la estructura del curl y calcula los totales reales', () => {
     expect(buildPayrollPayload(state, { ...worker, highRiskPension: true }, 1, 'NI')).toEqual({
+      date: state.issueDate,
+      time: expect.stringMatching(/^\d{2}:\d{2}:\d{2}$/),
       notes: state.notes,
       period: {
         issue_date: '2021-07-28',
@@ -85,6 +107,7 @@ describe('contrato de envío de nómina NextPyme', () => {
       },
       prefix: 'NI',
       worker: {
+        worker_code: 'EMP001',
         salary: '1500000.00',
         address: worker.address,
         surname: 'PEREZ',

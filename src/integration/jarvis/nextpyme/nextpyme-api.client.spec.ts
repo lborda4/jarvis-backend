@@ -875,3 +875,124 @@ describe('NextPymeApiClient debit-note', () => {
     await expect(client.createDebitNote({}, 'company-token')).rejects.toThrow();
   });
 });
+
+describe('logs completos del envío de nómina a NextPyme', () => {
+  let spy: jest.SpyInstance;
+  beforeEach(() => { spy = jest.spyOn(console, 'log').mockImplementation(() => undefined); });
+  afterEach(() => { spy.mockRestore(); });
+
+  it('imprime el body antes del POST y la respuesta plana después, con URL y HTTP', async () => {
+    const { client, httpService } = buildClient({ 'nextPyme.baseUrl': 'https://api.nextpyme.plus/api/ubl2.1/' });
+    const payload = { type_document_id: 9, consecutive: 1, accrued: { salary: '1000.00' }, notes: 'a'.repeat(6000) };
+    const response = { success: true, ResponseDian: { IsValid: 'true' }, xml: 'x'.repeat(6000) };
+    httpService.request.mockImplementation(() => {
+      expect(spy).toHaveBeenCalledWith('[NextPyme payroll] POST https://api.nextpyme.plus/api/ubl2.1/payroll - Body antes de enviar:', JSON.stringify(payload, null, 2));
+      return of({ status: 200, data: response });
+    });
+    expect(await client.payrollRequest('payroll', payload, 'company-token')).toEqual(response);
+    expect(spy).toHaveBeenCalledWith('[NextPyme payroll] Respuesta pura HTTP 200:', JSON.stringify(response, null, 2));
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('company-token');
+    expect(httpService.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('muestra el texto de NextPyme directamente y oculta el token si viene en la respuesta', async () => {
+    const { client, httpService } = buildClient();
+    httpService.request.mockReturnValue(of({ status: 200, data: 'Respuesta de NextPyme\nBearer private-token' }));
+    await client.payrollRequest('payroll', { note: 'private-token' }, 'private-token');
+    expect(spy).toHaveBeenCalledWith('[NextPyme payroll] Respuesta pura HTTP 200:', 'Respuesta de NextPyme\nBearer [REDACTED]');
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('private-token');
+  });
+
+  it('registra íntegro el body de error HTTP sin imprimir cabeceras ni el token', async () => {
+    const { client, httpService } = buildClient();
+    const data = { message: 'Rechazado', errors: { deductions: ['Campo requerido'] }, echoed_token: 'private-token' };
+    const error = { isAxiosError: true, response: { status: 422, data }, config: { headers: { Authorization: 'Bearer private-token' } } };
+    httpService.request.mockReturnValue(throwError(() => error));
+    await expect(client.payrollRequest('payroll', {}, 'private-token')).rejects.toBe(error);
+    expect(spy).toHaveBeenCalledWith('[NextPyme payroll] Respuesta pura de error HTTP 422:', JSON.stringify({ ...data, echoed_token: '[REDACTED]' }, null, 2));
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('private-token');
+    expect(httpService.request).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('lectura segura de configuración de nómina', () => {
+  it('usa el token de la empresa y solo devuelve los indicadores necesarios', async () => {
+    const { client, httpService } = buildClient();
+    httpService.get.mockReturnValue(of({ status: 200, data: { success: true, data: {
+      identification_number: '900123456', payroll_type_environment_id: '1',
+      software: { identifier_payroll: 'payroll-software', pin_payroll: 'private-pin', pin: 'invoice-pin' },
+      smtp: { mail_password: 'smtp-secret' },
+    } } }));
+    const result = await client.getPayrollIssuerConfiguration(' company-token ');
+    expect(result).toEqual({ identificationNumber: '900123456', payrollEnvironment: 1, payrollSoftwareConfigured: true, payrollPinConfigured: true });
+    expect(JSON.stringify(result)).not.toMatch(/private-pin|invoice-pin|smtp-secret/);
+    expect(httpService.get).toHaveBeenCalledWith('https://nextpyme.example/config/company', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-token' }) }));
+  });
+  it('no confunde el software y el ambiente de facturación con los de nómina', async () => {
+    const { client, httpService } = buildClient();
+    httpService.get.mockReturnValue(of({ status: 200, data: { data: { identification_number: '900123456', type_environment_id: 1, software: { identifier: 'invoice-only', pin: 'invoice-pin' } } } }));
+    expect(await client.getPayrollIssuerConfiguration('company-token')).toMatchObject({ payrollEnvironment: null, payrollSoftwareConfigured: false, payrollPinConfigured: false });
+  });
+  it('rechaza errores de lectura sin exponer credenciales', async () => {
+    const { client, httpService } = buildClient();
+    await expect(client.getPayrollIssuerConfiguration(' ')).rejects.toThrow('token');
+    expect(httpService.get).not.toHaveBeenCalled();
+    httpService.get.mockReturnValue(throwError(() => new Error('Bearer private-token')));
+    await expect(client.getPayrollIssuerConfiguration('private-token')).rejects.toThrow('No fue posible verificar la configuración de nómina');
+  });
+});
+
+describe('Ambiente de pruebas de facturaci\u00f3n', () => {
+  it('usa type_environment_id 2 sin modificar n\u00f3mina ni POS', async () => {
+    const { client, httpService } = buildClient({ 'nextPyme.baseUrl': 'https://api.nextpyme.plus/api/ubl2.1/' });
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: true } }));
+    await client.configureBillingEnvironment(2, 'company-token');
+    expect(httpService.put).toHaveBeenCalledWith('https://api.nextpyme.plus/api/ubl2.1/config/environment', { type_environment_id: 2 }, expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-token' }) }));
+  });
+});
+
+describe('Registro de rangos de n\u00f3mina en NextPyme', () => {
+  it('consulta reports/resolutions incluso en producci\u00f3n y lee NI/NA sin exigir campos de factura', async () => {
+    const { client, httpService } = buildClient({ 'nextPyme.baseUrl': 'https://nextpyme.example', 'app.environment': 'production' });
+    httpService.get.mockReturnValue(of({ status: 200, data: { data: [
+      { type_document_id: 9, prefix: 'NI', from: 1, to: 99999999, next_consecutive: 'NI15', number: 14 },
+      { type_document_id: 10, prefix: 'NA', from: 1, to: 99999999, number: 3 },
+      { type_document_id: 1, prefix: 'FV', number: 2 },
+    ] } }));
+    expect(await client.getConfiguredPayrollResolutions('company-token')).toEqual([
+      { typeDocumentId: 9, prefix: 'NI', from: 1, to: 99999999, nextConsecutive: 15 },
+      { typeDocumentId: 10, prefix: 'NA', from: 1, to: 99999999, nextConsecutive: 3 },
+    ]);
+    expect(httpService.get).toHaveBeenCalledWith('https://nextpyme.example/reports/resolutions', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-token' }) }));
+    expect(httpService.post).not.toHaveBeenCalled();
+  });
+  it('env\u00eda solo tipo, prefijo y rango sin inventar clave t\u00e9cnica ni fechas', async () => {
+    const { client, httpService } = buildClient({ 'nextPyme.baseUrl': 'https://nextpyme.example' });
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: true } }));
+    const range = { type_document_id: 10 as const, prefix: 'NA' as const, from: 1, to: 99999999 };
+    await client.configurePayrollResolution(range, 'company-token');
+    expect(httpService.put).toHaveBeenCalledWith('https://nextpyme.example/config/resolution', range, expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer company-token' }) }));
+  });
+  it('no trata una respuesta ilegible como una lista vac\u00eda ni expone tokens', async () => {
+    const { client, httpService } = buildClient();
+    httpService.get.mockReturnValue(of({ status: 200, data: { message: 'private-token' } }));
+    await expect(client.getConfiguredPayrollResolutions('private-token')).rejects.toThrow('No se pudieron consultar');
+    await expect(client.getConfiguredPayrollResolutions(' ')).rejects.toThrow('token');
+    httpService.put.mockReturnValue(of({ status: 200, data: { success: false, message: 'private-token' } }));
+    await expect(client.configurePayrollResolution({ type_document_id: 9, prefix: 'NI', from: 1, to: 99999999 }, 'private-token')).rejects.toThrow('rango NI');
+  });
+});
+
+it('reutiliza solo los campos de configuraci\u00f3n devueltos por la b\u00fasqueda de n\u00f3mina', async () => {
+  const { client, httpService } = buildClient();
+  const configuration = { resolution: 'NOMINA', resolution_date: '2026-01-01', technical_key: '', date_from: '2026-01-01', date_to: '2030-12-31', generated_to_date: 14 };
+  httpService.get.mockReturnValue(of({ status: 200, data: { data: [{ ...configuration, id: 16003, type_document_id: 9, prefix: 'NI', from: 1, to: 99999999, next_consecutive: 'NI15', number: 14, unexpected: 'omit' }] } }));
+  const [found] = await client.getConfiguredPayrollResolutions('company-token');
+  expect(found.configuration).toEqual(configuration);
+  httpService.put.mockReturnValue(of({ status: 200, data: { success: true } }));
+  const body = { ...found.configuration, type_document_id: 9 as const, prefix: 'NI' as const, from: found.from, to: found.to };
+  await client.configurePayrollResolution(body, 'company-token');
+  expect(httpService.put.mock.calls[0][1]).toEqual({ ...configuration, type_document_id: 9, prefix: 'NI', from: 1, to: 99999999 });
+  expect(httpService.put.mock.calls[0][1]).not.toHaveProperty('id');
+  expect(httpService.put.mock.calls[0][1]).not.toHaveProperty('number');
+});

@@ -21,6 +21,15 @@ import {
 } from './nextpyme-record-scan.helper';
 import { parseDianValidationResult } from './nextpyme-dian-validation.helper';
 
+export type NextPymePayrollResolutionPayload = {
+  type_document_id: 9 | 10; prefix: 'NI' | 'NA'; from: number; to: number;
+} & Partial<Pick<NextPymeConfigResolutionPayload, 'resolution' | 'resolution_date' | 'technical_key' | 'date_from' | 'date_to' | 'generated_to_date'>>;
+
+export interface NextPymePayrollResolution {
+  configuration?: Partial<Pick<NextPymeConfigResolutionPayload, 'resolution' | 'resolution_date' | 'technical_key' | 'date_from' | 'date_to' | 'generated_to_date'>>;
+  typeDocumentId: number; prefix: string; from: number; to: number; nextConsecutive: number | null;
+}
+
 export interface NextPymeMasterRow {
   id: number;
   name: string;
@@ -399,8 +408,40 @@ export class NextPymeApiClient {
     }
   }
 
+  /** Read only: never return software PINs, tokens, SMTP data or raw company configuration. */
+  async getPayrollIssuerConfiguration(companyToken: string): Promise<import('../../../payroll/payroll-issuer').PayrollIssuerConfiguration> {
+    const token = this.requireToken(companyToken);
+    try {
+      const response = await firstValueFrom(this.httpService.get<{
+        success?: boolean;
+        data?: { identification_number?: unknown; payroll_type_environment_id?: unknown;
+          software?: { identifier_payroll?: unknown; pin_payroll?: unknown } };
+      }>(`${this.getBaseUrl()}/config/company`, {
+        headers: this.buildAuthHeaders(token), timeout: 30000, validateStatus: () => true,
+      }));
+      if (response.status < 200 || response.status >= 300 || response.data?.success === false || !response.data?.data)
+        throw new Error('configuration unavailable');
+      const data = response.data.data;
+      const present = (value: unknown) => (typeof value === 'string' || typeof value === 'number') && String(value).trim().length > 0;
+      const environment = Number(data.payroll_type_environment_id);
+      return {
+        identificationNumber: present(data.identification_number) ? String(data.identification_number).trim() : null,
+        payrollEnvironment: [1, 2].includes(environment) ? environment : null,
+        payrollSoftwareConfigured: present(data.software?.identifier_payroll),
+        payrollPinConfigured: present(data.software?.pin_payroll),
+      };
+    } catch {
+      throw new BadGatewayException('No fue posible verificar la configuración de nómina de la empresa en NextPyme. Intenta nuevamente.');
+    }
+  }
+
   /** Cambia únicamente el ambiente de la empresa identificada por su token. */
   async configureProductionEnvironment(companyToken: string): Promise<void> {
+    return this.configureBillingEnvironment(1, companyToken);
+  }
+
+  async configureBillingEnvironment(environment: 1 | 2, companyToken: string): Promise<void> {
+    if (![1, 2].includes(environment)) throw new BadGatewayException('Ambiente de facturaci\u00f3n inv\u00e1lido.');
     const token = companyToken?.trim();
     if (!token) {
       throw new ServiceUnavailableException(
@@ -412,7 +453,7 @@ export class NextPymeApiClient {
       const response = await firstValueFrom(
         this.httpService.put<unknown>(
           `${this.getBaseUrl()}/config/environment`,
-          { type_environment_id: 1 },
+          { type_environment_id: environment },
           {
             headers: this.buildAuthHeaders(token),
             timeout: 30000,
@@ -423,7 +464,7 @@ export class NextPymeApiClient {
       const data = response.data as { success?: boolean } | null;
       if (response.status < 200 || response.status >= 300 || data?.success === false) {
         throw new BadGatewayException(
-          'NextPyme no permitió activar el ambiente de producción. Verifica el token de la empresa y vuelve a guardar la configuración.',
+          `NextPyme no permiti\u00f3 activar el ambiente de ${environment === 2 ? 'pruebas' : 'producci\u00f3n'}. Verifica el token de la empresa y vuelve a guardar la configuraci\u00f3n.`,
         );
       }
     } catch (error) {
@@ -432,7 +473,7 @@ export class NextPymeApiClient {
       }
       // No exponer errores Axios: pueden incluir Authorization y el token.
       throw new BadGatewayException(
-        'No fue posible activar el ambiente de producción en NextPyme. Intenta guardar la configuración nuevamente.',
+        `No fue posible activar el ambiente de ${environment === 2 ? 'pruebas' : 'producci\u00f3n'} en NextPyme. Intenta guardar la configuraci\u00f3n nuevamente.`,
       );
     }
   }
@@ -530,6 +571,52 @@ export class NextPymeApiClient {
     return ['local', 'development', 'qa'].includes(environment);
   }
 
+  /** Payroll ranges are API registrations, not DIAN invoice numbering-range authorizations. */
+  async getConfiguredPayrollResolutions(companyToken: string): Promise<NextPymePayrollResolution[]> {
+    const token = companyToken?.trim();
+    if (!token) throw new ServiceUnavailableException('Configura el token de NextPyme de la empresa.');
+    try {
+      const response = await firstValueFrom(this.httpService.get<unknown>(`${this.getBaseUrl()}/reports/resolutions`, {
+        headers: this.buildAuthHeaders(token), timeout: 20000, validateStatus: () => true,
+      }));
+      const root = response.data as { success?: boolean; data?: unknown };
+      const rows = Array.isArray(response.data) ? response.data : root?.data;
+      if (response.status < 200 || response.status >= 300 || root?.success === false || !Array.isArray(rows))
+        throw new Error('Invalid response');
+      return rows.filter(row => row && typeof row === 'object' && [9, 10].includes(Number(row.type_document_id ?? row.type_document?.id)))
+        .map(row => {
+          const prefix = String(row.prefix ?? '').trim();
+          const nextText = row.next_consecutive == null ? '' : String(row.next_consecutive).trim();
+          const suffix = nextText.startsWith(prefix) ? nextText.slice(prefix.length) : nextText;
+          const next = nextText ? (/^\d+$/.test(suffix) ? Number(suffix) : NaN) : Number(row.number);
+          const configuration: NonNullable<NextPymePayrollResolution['configuration']> = {};
+          for (const key of ['resolution', 'resolution_date', 'technical_key', 'date_from', 'date_to'] as const) {
+            if (typeof row[key] === 'string') configuration[key] = row[key];
+          }
+          if (row.generated_to_date != null && Number.isSafeInteger(Number(row.generated_to_date)) && Number(row.generated_to_date) >= 0)
+            configuration.generated_to_date = Number(row.generated_to_date);
+          return { ...(Object.keys(configuration).length ? { configuration } : {}), typeDocumentId: Number(row.type_document_id ?? row.type_document?.id), prefix,
+            from: Number(row.from), to: Number(row.to), nextConsecutive: Number.isSafeInteger(next) && next > 0 ? next : null };
+        });
+    } catch {
+      throw new BadGatewayException('No se pudieron consultar las resoluciones de nómina registradas en NextPyme. Reintenta la consulta.');
+    }
+  }
+
+  async configurePayrollResolution(payload: NextPymePayrollResolutionPayload, companyToken: string): Promise<void> {
+    const token = companyToken?.trim();
+    if (!token) throw new ServiceUnavailableException('Configura el token de NextPyme de la empresa.');
+    try {
+      const response = await firstValueFrom(this.httpService.put<unknown>(`${this.getBaseUrl()}/config/resolution`, payload, {
+        headers: this.buildAuthHeaders(token), timeout: 30000, validateStatus: () => true,
+      }));
+      if (response.status < 200 || response.status >= 300 || (response.data as { success?: boolean })?.success === false)
+        throw new Error('Registration failed');
+    } catch {
+      throw new BadGatewayException(`NextPyme no permitió registrar el rango ${payload.prefix}. Vuelve a consultar su configuración.`);
+    }
+  }
+
   async listResolutions(
     idSoftware: string,
     companyToken?: string,
@@ -625,7 +712,7 @@ export class NextPymeApiClient {
         responseJson,
       );
 
-      if (response.status < 200 || response.status >= 300) {
+      if (response.status < 200 || response.status >= 300 || (response.data as { success?: boolean })?.success === false) {
         const detail = this.extractErrorMessage(response.data);
         throw new BadGatewayException(
           detail ||
@@ -1560,12 +1647,15 @@ export class NextPymeApiClient {
   }
 
   /** Payroll requests deliberately have no automatic retry: a timeout is ambiguous. */
-  async payrollRequest(endpoint: 'payroll' | 'payroll-adjust-note' | 'config/environment', body: unknown, token: string, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
+  async payrollRequest(endpoint: 'payroll' | 'payroll-adjust-note', body: unknown, token: string, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
     token = this.requireToken(token);
     const url = `${this.getBaseUrl()}/${endpoint}`;
+    const plainLog = (value: unknown): string =>
+      (typeof value === 'string' ? value : JSON.stringify(value ?? null, null, 2))
+        .split(token).join('[REDACTED]');
     console.log(
       `[NextPyme ${endpoint}] ${method} ${url} - Body antes de enviar:`,
-      JSON.stringify(body, null, 2),
+      plainLog(body),
     );
     try {
       const response = await firstValueFrom(this.httpService.request({
@@ -1574,19 +1664,19 @@ export class NextPymeApiClient {
       }));
       console.log(
         `[NextPyme ${endpoint}] Respuesta pura HTTP ${response.status}:`,
-        JSON.stringify(response.data, null, 2),
+        plainLog(response.data),
       );
       return JSON.parse(JSON.stringify(response.data ?? null).split(token).join('[REDACTED]'));
     } catch (error) {
       if (axios.isAxiosError(error) && error.response) {
         console.log(
           `[NextPyme ${endpoint}] Respuesta pura de error HTTP ${error.response.status}:`,
-          JSON.stringify(error.response.data, null, 2),
+          plainLog(error.response.data),
         );
       } else {
         console.log(
           `[NextPyme ${endpoint}] Error sin respuesta de NextPyme:`,
-          error instanceof Error ? error.message : String(error),
+          plainLog(error instanceof Error ? error.message : String(error)),
         );
       }
       throw error;

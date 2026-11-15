@@ -1,3 +1,4 @@
+import { withBillingOperation } from '../integration/jarvis/helpers/jarvis-billing-operation';
 import { UpdateAdminPlanRequestDto } from './dto/admin-plan.dto';
 import { billingMonthsFromCycle, companyTrackingDueDate, normalizeCompanyTracking, trackingToday } from './company-tracking';
 import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
@@ -555,11 +556,16 @@ export class AdminService {
     }
 
     const nextPymeToken = request.nextPymeToken?.trim() || null;
-    if (nextPymeToken) {
-      await this.nextPymeApiClient.configureProductionEnvironment(nextPymeToken);
-    }
-    company.nextPymeToken = nextPymeToken;
-    const saved = await this.companiesRepository.save(company);
+    const saved = await withBillingOperation(this.dataSource, companyId, 'configure', async () => {
+      const [state] = await this.dataSource.query('SELECT configuration FROM jarvis_billing_environments WHERE company_id=$1', [companyId]);
+      const selectedEnvironment = state?.configuration?.pending ? state.configuration.target : state?.configuration?.current;
+      if (nextPymeToken) {
+        if (selectedEnvironment === 2) await this.nextPymeApiClient.configureBillingEnvironment(2, nextPymeToken);
+        else await this.nextPymeApiClient.configureProductionEnvironment(nextPymeToken);
+      }
+      company.nextPymeToken = nextPymeToken;
+      return this.companiesRepository.save(company);
+    });
 
     return {
       company: this.mapCompany(saved),

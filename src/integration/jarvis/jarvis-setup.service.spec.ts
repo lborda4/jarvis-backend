@@ -60,15 +60,42 @@ function buildService(overrides: {
       overrides.listResolutions ?? jest.fn().mockResolvedValue([]),
   };
 
+  const planSubscriptionService = { getSubscription: jest.fn().mockResolvedValue({ status: 'ACTIVE', documentsUsed: 2, documentLimit: 100, remaining: 98 }) };
   const service = new JarvisSetupService(
     integrationsRepository as any,
-    {} as any, // planSubscriptionService
+    planSubscriptionService as any,
     nextPymeApiClient as any,
     nextPymeMasterCatalogService as any,
   );
 
-  return { service, integrationsRepository, nextPymeApiClient, nextPymeMasterCatalogService };
+  return { service, integrationsRepository, nextPymeApiClient, nextPymeMasterCatalogService, planSubscriptionService };
 }
+
+describe('consulta independiente del cupo de JARVIS', () => {
+  it('consulta solo la suscripción de la empresa activa sin resoluciones ni catálogos', async () => {
+    const { service, planSubscriptionService, nextPymeMasterCatalogService, integrationsRepository } = buildService({});
+    expect(await service.getSubscriptionStatus(' company-1 ')).toEqual({ status: 'ACTIVE', documentsUsed: 2, documentLimit: 100, remaining: 98 });
+    expect(planSubscriptionService.getSubscription).toHaveBeenCalledWith('company-1', 'JARVIS');
+    expect(nextPymeMasterCatalogService.listResolutions).not.toHaveBeenCalled();
+    expect(nextPymeMasterCatalogService.requireCompanyToken).not.toHaveBeenCalled();
+    expect(integrationsRepository.findByCompanyAndProvider).not.toHaveBeenCalled();
+    await expect(service.getSubscriptionStatus(' ')).rejects.toThrow('empresa activa');
+    expect(planSubscriptionService.getSubscription).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalida resoluciones después de guardar en NextPyme y consulta datos actuales al guardar', async () => {
+    const { service, nextPymeMasterCatalogService } = buildService({});
+    await service.saveResolution(buildRequest(), 'company-1');
+    expect(nextPymeMasterCatalogService.listResolutions).toHaveBeenCalledWith('company-1', { force: true });
+    expect(nextPymeMasterCatalogService.invalidateResolutionsCache).toHaveBeenCalledWith('company-1');
+  });
+
+  it('conserva la caché cuando NextPyme rechaza el cambio de resolución', async () => {
+    const { service, nextPymeMasterCatalogService } = buildService({ putConfigResolution: jest.fn().mockRejectedValue(new Error('Rejected')) });
+    await expect(service.saveResolution(buildRequest(), 'company-1')).rejects.toThrow('Rejected');
+    expect(nextPymeMasterCatalogService.invalidateResolutionsCache).not.toHaveBeenCalled();
+  });
+});
 
 function buildRequest(
   overrides: Partial<SaveJarvisResolutionRequestDto> = {},

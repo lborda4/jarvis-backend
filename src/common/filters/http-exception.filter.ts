@@ -48,6 +48,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
 
     if (exception instanceof HttpException) {
+      if (/^\/integrations\/jarvis\/payroll(?:\/|\?|$)/.test(request.url)) {
+        // Guards, parameter validation and missing routes fail before PayrollService can log them.
+        const detail = JSON.stringify(message).replace(/Bearer\s+[^\s"\\]+/gi, 'Bearer [REDACTED]');
+        this.logger.error(`[payroll] HTTP ${status} ${request.method} ${request.url.split('?')[0]} message=${detail}`);
+      }
       const res = exception.getResponse();
       if (typeof res === 'object' && res !== null && 'error' in res) {
         body.error = String((res as Record<string, unknown>).error);

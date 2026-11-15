@@ -10,7 +10,9 @@ import {
   NextPymeResolution,
 } from './nextpyme-api.client';
 
-const CACHE_TTL_MS = 60 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const RESOLUTIONS_CACHE_TTL_MS = CACHE_TTL_MS;
+const MAX_RESOLUTION_CACHE_ENTRIES = 100;
 const SUPPORT_DOCUMENT_TYPE_ID = 11;
 const ELECTRONIC_INVOICE_TYPE_ID = 1;
 const DEFAULT_MUNICIPALITY_ID = 149; // Bogotá, D.C.
@@ -26,6 +28,8 @@ interface CacheEntry<T> {
 
 @Injectable()
 export class NextPymeMasterCatalogService {
+  private readonly resolutionsCache = new Map<string, CacheEntry<NextPymeResolution[]> & { credentials: string }>();
+  private readonly resolutionsInFlight = new Map<string, { credentials: string; promise: Promise<NextPymeResolution[]> }>();
   private readonly cache = new Map<string, CacheEntry<NextPymeMasterRow[]>>();
   private readonly tableInFlight = new Map<
     string,
@@ -84,6 +88,12 @@ export class NextPymeMasterCatalogService {
     return rows;
   }
 
+  async getPayrollPeriodId(companyId: string, frequency: 'Mensual' | 'Quincenal') {
+    const rows = await this.getTable('payroll_periods', await this.requireCompanyToken(companyId));
+    const row = rows.find(row => row.name?.trim().toLocaleLowerCase('es') === frequency.toLocaleLowerCase('es') && row.state !== false && row.state !== 0 && row.state !== '0' && row.state !== 'false' && !row.deleted_at);
+    if (!row) throw new ServiceUnavailableException('No se pudo consultar el período de nómina de NextPyme. Intenta nuevamente.');
+    return row.id;
+  }
   async getPayrollLawDeductions(companyId: string) {
     const rows = await this.getTable('type_law_deductions', await this.requireCompanyToken(companyId));
     const active = rows.filter(row => row.state !== false && row.state !== 0 && row.state !== '0' && row.state !== 'false' && !row.deleted_at);
@@ -95,16 +105,40 @@ export class NextPymeMasterCatalogService {
     return ELECTRONIC_INVOICE_TYPE_ID;
   }
 
-  async listResolutions(companyId?: string): Promise<NextPymeResolution[]> {
-    if (this.nextPymeApiClient.usesTestResolutionEndpoint()) {
-      const token = await this.requireCompanyToken(companyId);
-      return this.nextPymeApiClient.listResolutions('', token);
-    }
+  invalidateResolutionsCache(companyId: string): void {
+    this.resolutionsCache.delete(companyId.trim());
+    this.resolutionsInFlight.delete(companyId.trim());
+  }
+
+  async listResolutions(companyId?: string, options?: { force?: boolean }): Promise<NextPymeResolution[]> {
+    const testEnvironment = this.nextPymeApiClient.usesTestResolutionEndpoint();
+    // Validate current credentials before reading cached company data.
     const [idSoftware, token] = await Promise.all([
-      this.requireIdSoftware(companyId),
+      testEnvironment ? Promise.resolve('') : this.requireIdSoftware(companyId),
       this.requireCompanyToken(companyId),
     ]);
-    return this.nextPymeApiClient.listResolutions(idSoftware, token);
+    const company = companyId!.trim();
+    const credentials = JSON.stringify([testEnvironment, idSoftware, token]);
+    const cached = this.resolutionsCache.get(company);
+    if (!options?.force && cached?.credentials === credentials && Date.now() - cached.loadedAt < RESOLUTIONS_CACHE_TTL_MS)
+      return cached.value;
+    const inFlight = this.resolutionsInFlight.get(company);
+    if (inFlight?.credentials === credentials) return inFlight.promise;
+
+    const promise = this.nextPymeApiClient.listResolutions(idSoftware, token).then(value => {
+      // An invalidation or credential change must not let an older response refill the cache.
+      if (this.resolutionsInFlight.get(company)?.promise === promise) {
+        this.resolutionsCache.delete(company);
+        this.resolutionsCache.set(company, { credentials, value, loadedAt: Date.now() });
+        while (this.resolutionsCache.size > MAX_RESOLUTION_CACHE_ENTRIES)
+          this.resolutionsCache.delete(this.resolutionsCache.keys().next().value!);
+      }
+      return value;
+    }).finally(() => {
+      if (this.resolutionsInFlight.get(company)?.promise === promise) this.resolutionsInFlight.delete(company);
+    });
+    this.resolutionsInFlight.set(company, { credentials, promise });
+    return promise;
   }
 
   private async requireIdSoftware(companyId?: string): Promise<string> {

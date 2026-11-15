@@ -74,12 +74,6 @@ export class PayrollController {
   ) {
     return this.service.deletePosition(getAuthenticatedCompanyId(u), u.userId, id);
   }
-  @Put('parameters') updateParameters(
-    @CurrentUser() u: AuthenticatedUser,
-    @Body() data: any,
-  ) {
-    return this.service.saveParameters(getAuthenticatedCompanyId(u), u.userId, data, true);
-  }
   @Post('parameters') parameters(
     @CurrentUser() u: AuthenticatedUser,
     @Body() data: any,
@@ -98,12 +92,6 @@ export class PayrollController {
       getAuthenticatedCompanyId(u),
       u.userId,
       data,
-    );
-  }
-  @Post('environment') environment(@CurrentUser() u: AuthenticatedUser) {
-    return this.service.configureEnvironment(
-      getAuthenticatedCompanyId(u),
-      u.userId,
     );
   }
   @Get('documents') list(
@@ -140,12 +128,15 @@ export class PayrollController {
     @CurrentUser() u: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() data: any,
+    @Query('validation') validation?: string,
   ) {
     return this.service.saveDocument(
       getAuthenticatedCompanyId(u),
       u.userId,
       id,
       data,
+      undefined,
+      { validation: validation === 'provider' ? 'provider' : 'local' },
     );
   }
   @Post('documents/:id/validate') validate(
@@ -154,11 +145,17 @@ export class PayrollController {
   ) {
     return this.service.validate(getAuthenticatedCompanyId(u), id);
   }
+  @Post('months/:month/employees/:id/send') sendMonthlyEmployee(
+    @CurrentUser() u: AuthenticatedUser,
+    @Param('month') month: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { sources?: unknown },
+  ) { return this.service.sendMonthlyEmployee(getAuthenticatedCompanyId(u), u.userId, month, id, body?.sources); }
   @Post('documents/:id/send') send(
     @CurrentUser() u: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.service.send(getAuthenticatedCompanyId(u), u.userId, id);
+    return this.service.sendDocument(getAuthenticatedCompanyId(u), u.userId, id);
   }
   @Post('documents/:id/status') status(
     @CurrentUser() u: AuthenticatedUser,

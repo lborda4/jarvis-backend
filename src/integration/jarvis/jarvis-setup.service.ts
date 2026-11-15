@@ -217,6 +217,7 @@ export class JarvisSetupService {
       integration = await this.integrationsRepository.save(integration);
     }
 
+    this.nextPymeMasterCatalogService.invalidateResolutionsCache(trimmedCompanyId);
     return {
       success: true,
       business_name,
@@ -497,6 +498,7 @@ export class JarvisSetupService {
       nextPymePayload,
       companyToken,
     );
+    this.nextPymeMasterCatalogService.invalidateResolutionsCache(trimmedCompanyId);
     this.logger.log(
       `[saveResolution] company=${trimmedCompanyId} kind=${request.kind} NextPyme respondió ${JSON.stringify(
         nextPymeResponse,
@@ -607,6 +609,7 @@ export class JarvisSetupService {
       },
       companyToken,
     );
+    this.nextPymeMasterCatalogService.invalidateResolutionsCache(trimmedCompanyId);
   }
 
   /**
@@ -775,6 +778,11 @@ export class JarvisSetupService {
     await this.integrationsRepository.advanceJarvisResolutionNumber(trimmedCompanyId, key, updated);
   }
 
+  async getSubscriptionStatus(companyId: string) {
+    if (!companyId?.trim()) throw new BadRequestException('No se pudo determinar la empresa activa del usuario autenticado.');
+    return this.planSubscriptionService.getSubscription(companyId.trim(), IntegrationProvider.JARVIS);
+  }
+
   async getCredentialsStatus(
     companyId: string,
   ): Promise<JarvisCredentialsStatusResponseDto> {
@@ -918,7 +926,7 @@ export class JarvisSetupService {
   ): Promise<NextPymeResolution | undefined> {
     try {
       const ranges =
-        await this.nextPymeMasterCatalogService.listResolutions(companyId);
+        await this.nextPymeMasterCatalogService.listResolutions(companyId, { force: true });
       return this.pickDianRangeForSave(
         ranges,
         prefix,

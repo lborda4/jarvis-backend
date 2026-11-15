@@ -1,3 +1,4 @@
+jest.mock('./helpers/jarvis-billing-operation', () => ({ withBillingOperation: (_db: unknown, _company: string, _kind: string, work: () => Promise<unknown>) => work() }));
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { BadGatewayException } from '@nestjs/common';
 

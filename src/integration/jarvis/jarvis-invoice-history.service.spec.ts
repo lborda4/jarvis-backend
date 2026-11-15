@@ -118,3 +118,31 @@ describe('búsqueda de referencia por consecutivo para notas', () => {
     expect(query).not.toHaveBeenCalled();
   });
 });
+
+describe('enlaces a notas crédito de la factura', () => {
+  it('incluye todas las notas crédito propias vinculadas por CUFE y conserva el prefijo', async () => {
+    const query = jest.fn().mockResolvedValueOnce([{ total: '1' }]).mockResolvedValueOnce([
+      { id: 'invoice', status: 'SENT', prefix: 'FE', number: '1', cufe: 'original' },
+    ]).mockResolvedValueOnce([
+      { id: 'nc1', kind: 'CREDIT_NOTE', prefix: 'NC', number: '1', referenceUuid: 'ORIGINAL', referenceNumber: 'FE1' },
+      { id: 'nc2', kind: 'CREDIT_NOTE', prefix: 'NC', number: 'NC2', referenceUuid: 'original', referenceNumber: 'FE1' },
+      { id: 'nd', kind: 'DEBIT_NOTE', prefix: 'ND', number: '1', referenceUuid: 'original', referenceNumber: 'FE1' },
+      { id: 'other', kind: 'CREDIT_NOTE', prefix: 'NC', number: '3', referenceUuid: 'different', referenceNumber: 'FE1' },
+    ]);
+    const result = await new JarvisInvoiceHistoryService({ query } as never).list('owner');
+    expect(result.items[0]).toMatchObject({ adjustmentStatus: 'CREDIT_AND_DEBIT', relatedCreditNotes: [
+      { id: 'nc1', prefix: 'NC', number: '1' }, { id: 'nc2', prefix: 'NC', number: 'NC2' },
+    ] });
+    expect(query.mock.calls[2][0]).toContain('SELECT id, prefix, number, document_kind AS kind');
+    expect(query.mock.calls[2][1][0]).toBe('owner');
+  });
+  it('enlaza por número completo las facturas antiguas sin CUFE', async () => {
+    const query = jest.fn().mockResolvedValueOnce([{ total: '1' }]).mockResolvedValueOnce([
+      { id: 'old', status: 'SENT', prefix: 'FE', number: 'FE1', cufe: null },
+    ]).mockResolvedValueOnce([
+      { id: 'nc', kind: 'CREDIT_NOTE', prefix: 'NC', number: '1', referenceUuid: 'original', referenceNumber: ' FE1 ' },
+    ]);
+    const result = await new JarvisInvoiceHistoryService({ query } as never).list('owner');
+    expect(result.items[0]).toMatchObject({ relatedCreditNotes: [{ id: 'nc', prefix: 'NC', number: '1' }] });
+  });
+});
