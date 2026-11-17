@@ -10,6 +10,7 @@ const RESEND_EMAILS_URL = 'https://api.resend.com/emails';
 @Injectable()
 export class ResendMailService {
   private readonly logger = new Logger(ResendMailService.name);
+  private nextPayrollSendAt = 0;
 
   constructor(
     private readonly configService: ConfigService<AppConfiguration, true>,
@@ -23,7 +24,15 @@ export class ResendMailService {
     return this.send(recipient, buildWelcomeEmail(companyName, registrationUrl));
   }
 
-  private async send(recipient: string, template: { subject: string; html: string; text: string }): Promise<boolean> {
+  async sendPayrollPayslip(recipient: string, template: { subject: string; html: string; text: string }, attachment: { filename: string; content: string }, requestKey: string): Promise<boolean> {
+    const now = Date.now();
+    const sendAt = Math.max(now, this.nextPayrollSendAt);
+    this.nextPayrollSendAt = sendAt + 250;
+    if (sendAt > now) await new Promise(resolve => setTimeout(resolve, sendAt - now));
+    return this.send(recipient, template, { attachment, requestKey });
+  }
+
+  private async send(recipient: string, template: { subject: string; html: string; text: string }, options?: { attachment: { filename: string; content: string }; requestKey: string }): Promise<boolean> {
     const apiKey = this.configService.get('passwordResetMail.apiKey', {
       infer: true,
     });
@@ -44,11 +53,13 @@ export class ResendMailService {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
+          ...(options ? { 'Idempotency-Key': options.requestKey, 'User-Agent': 'Jarvis/payroll' } : {}),
         },
         body: JSON.stringify({
           from,
           to: [recipient],
           ...template,
+          ...(options ? { attachments: [options.attachment] } : {}),
         }),
         signal: AbortSignal.timeout(10_000),
       });

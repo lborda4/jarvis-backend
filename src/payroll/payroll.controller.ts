@@ -124,6 +124,20 @@ export class PayrollController {
   ) {
     return this.service.get(getAuthenticatedCompanyId(u), id);
   }
+  @Put('documents/:originalId/adjustments/:id') prepareAdjustment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('originalId', ParseUUIDPipe) originalId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() request: unknown,
+  ) {
+    return this.service.prepareAdjustment(getAuthenticatedCompanyId(user), user.userId, originalId, id, request);
+  }
+  @Put('documents') saveBatch(
+    @CurrentUser() u: AuthenticatedUser,
+    @Body() request: unknown,
+  ) {
+    return this.service.saveDocuments(getAuthenticatedCompanyId(u), u.userId, request);
+  }
   @Put('documents/:id') save(
     @CurrentUser() u: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,

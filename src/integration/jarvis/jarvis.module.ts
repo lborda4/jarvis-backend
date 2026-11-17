@@ -5,6 +5,9 @@ import { JarvisReportsService } from './jarvis-reports.service';
 import { PayrollController } from '../../payroll/payroll.controller';
 import { PayrollService } from '../../payroll/payroll.service';
 import { PayrollGuard } from '../../payroll/payroll.guard';
+import { PayrollPayslipsService } from '../../payroll/payroll-payslips.service';
+import { PayrollPayslipsController } from '../../payroll/payroll-payslips.controller';
+import { ResendMailService } from '../../auth/services/resend-mail.service';
 import { JarvisSellersController } from './jarvis-sellers.controller';
 import { JarvisInvoiceAttachmentsController } from './jarvis-invoice-attachments.controller';
 import { JarvisInvoiceDraftsController } from './jarvis-invoice-drafts.controller';
@@ -51,11 +54,13 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
     forwardRef(() => ElectronicDocumentModule),
     TypeOrmModule.forFeature([JarvisRadianEvent, JarvisPaymentMethod, JarvisTercero, JarvisTax, JarvisSalesInvoice]),
   ],
-  controllers: [InvoiceAppearanceController, JarvisReportsController, JarvisController, JarvisSellersController, JarvisInvoiceDraftsController, JarvisInvoiceAttachmentsController, PayrollController],
+  controllers: [InvoiceAppearanceController, JarvisReportsController, JarvisController, JarvisSellersController, JarvisInvoiceDraftsController, JarvisInvoiceAttachmentsController, PayrollController, PayrollPayslipsController],
   providers: [
     InvoiceAppearanceService,
     JarvisReportsService,
     PayrollService,
+    PayrollPayslipsService,
+    ResendMailService,
     PayrollGuard,
     JarvisDashboardService,
     JarvisRadianService,

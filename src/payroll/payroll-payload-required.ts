@@ -8,6 +8,19 @@ export function payrollPayloadRequiredErrors(body: Record<string, any>): string[
   const text = (key: string) => { if (typeof value(key) !== 'string' || !value(key).trim()) fail(key); };
   const positiveId = (key: string) => { if (!Number.isSafeInteger(value(key)) || value(key) < 1) fail(key); };
   const amount = (key: string) => { try { cents(value(key)); } catch { fail(key); } };
+  if (body.type_document_id === 10) {
+    if (![1, 2].includes(body.type_note)) fail('type_note');
+    for (const key of ['predecessor.predecessor_number', 'predecessor.predecessor_cune']) text(key);
+    if (!validDate(value('predecessor.predecessor_issue_date'))) fail('predecessor.predecessor_issue_date');
+    if (body.type_note === 2) {
+      for (const key of ['consecutive', 'payroll_period_id']) positiveId(key);
+      text('prefix');
+      for (const key of ['period.admision_date', 'period.settlement_start_date', 'period.settlement_end_date', 'period.issue_date'])
+        if (!validDate(value(key))) fail(key);
+      if (!Number.isFinite(value('period.worked_time')) || value('period.worked_time') <= 0) fail('period.worked_time');
+      return [...new Set(errors)];
+    }
+  }
   for (const key of ['type_document_id', 'consecutive', 'payroll_period_id', 'worker.type_worker_id',
     'worker.sub_type_worker_id', 'worker.payroll_type_document_identification_id', 'worker.municipality_id',
     'worker.type_contract_id', 'payment.payment_method_id', 'deductions.eps_type_law_deductions_id',

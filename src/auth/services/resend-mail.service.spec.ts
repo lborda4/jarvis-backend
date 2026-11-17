@@ -102,3 +102,20 @@ describe('ResendMailService', () => {
     }
   });
 });
+
+it('envía el desprendible únicamente a su destinatario con el PDF y clave de reintento', async () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn().mockResolvedValue({ ok: true, text: jest.fn().mockResolvedValue('{}') });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  try {
+    const service = new ResendMailService(configWith({ 'passwordResetMail.apiKey': API_KEY, 'passwordResetMail.from': 'Jarvis <no-reply@jarviscol.com>' }));
+    await expect(service.sendPayrollPayslip(RECIPIENT, { subject: 'Desprendible', html: '<p>Hola</p>', text: 'Hola' }, { filename: 'desprendible.pdf', content: 'JVBERi0=' }, 'payslip-request')).resolves.toBe(true);
+    const options = fetchMock.mock.calls[0][1];
+    const body = JSON.parse(options.body);
+    expect(body.to).toEqual([RECIPIENT]);
+    expect(body).not.toHaveProperty('cc');
+    expect(body).not.toHaveProperty('bcc');
+    expect(body.attachments).toEqual([{ filename: 'desprendible.pdf', content: 'JVBERi0=' }]);
+    expect(options.headers['Idempotency-Key']).toBe('payslip-request');
+  } finally { global.fetch = originalFetch; }
+});

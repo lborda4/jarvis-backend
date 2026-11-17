@@ -1,3 +1,6 @@
+import { buildPayrollReplacementPayload, payrollReplacementTotals } from './payroll-replacement';
+import { buildPayrollDeletionPayload, payrollAdjustmentState, payrollPredecessor, payrollAdjustmentProjection } from './payroll-adjustment';
+import { duplicatePayrollNovelties } from './payroll-duplicate';
 import { payrollPayloadRequiredErrors } from './payroll-payload-required';
 import { payrollIssuerErrors } from './payroll-issuer';
 import { payrollSubmissionWorker } from './payroll-submission-worker';
@@ -23,7 +26,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import axios from 'axios';
 import { PlanSubscriptionService } from '../plan/plan-subscription.service';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
@@ -460,13 +463,16 @@ export class PayrollService {
     const monthlyRows = monthlyIds.length ? await this.db.query(
       `SELECT d.id,d.status,d.cune,d.number,d.prefix,(SELECT jsonb_build_object('error',t.error,'validation',t.validation,'response',t.response) FROM jarvis_payroll_transmissions t WHERE t.company_id=$1 AND t.document_id=d.id ORDER BY t.created_at DESC LIMIT 1) AS "lastResult" FROM jarvis_payroll_documents d WHERE d.company_id=$1 AND d.id=ANY($2::uuid[])`, [company, monthlyIds]) : [];
     const monthlyById = new Map<string, any>(monthlyRows.map((row: any) => [row.id, row]));
+    const adjustmentPeriods = [...new Set(rows.flatMap((row: any) => row.state?.period ? [row.state.period] : []))];
+    const adjustmentNotes = adjustmentPeriods.length ? await this.db.query(
+      "SELECT id,original_id,status,state,number,prefix FROM jarvis_payroll_documents WHERE company_id=$1 AND original_id IS NOT NULL AND state->>'period'=ANY($2::text[]) ORDER BY created_at DESC", [company, adjustmentPeriods]) : [];
     return rows.map(({ lastResult, ...row }) => {
       const monthly = !row.originalId ? monthlyById.get(row.state?.monthlyDocumentId ?? (row.state?.monthlyConsolidation ? row.id : '')) : undefined;
       const sourceStatus = row.status;
       if (monthly) { row.status = monthly.status; row.canDelete = false; lastResult = monthly.lastResult; }
       const failed = ['REJECTED', 'UNCERTAIN'].includes(row.status);
       const messages = failed ? payrollSubmissionErrors(lastResult) : [];
-      return { ...row, sourceStatus, monthlySubmission: monthly ? { id: monthly.id, status: monthly.status, cune: monthly.cune, number: monthly.number, prefix: monthly.prefix } : undefined, submissionErrors: !failed ? [] : messages.length ? messages : [row.status === 'UNCERTAIN'
+      return { ...row, ...(!row.originalId ? payrollAdjustmentProjection(monthly?.id ?? row.id, adjustmentNotes) : {}), sourceStatus, monthlySubmission: monthly ? { id: monthly.id, status: monthly.status, cune: monthly.cune, number: monthly.number, prefix: monthly.prefix } : undefined, submissionErrors: !failed ? [] : messages.length ? messages : [row.status === 'UNCERTAIN'
         ? 'No se confirmó el envío. Verifica el resultado antes de reenviar.'
         : 'El envío no fue aceptado. Revisa los datos de la nómina.'] };
     });
@@ -522,6 +528,8 @@ export class PayrollService {
     const errors = validatePayrollPeriod(request);
     if (errors.length) throw new BadRequestException(errors.join(' '));
     const name = request.name.trim();
+    const duplicateSources = [...(request.duplicateSources ?? [])].sort((a, b) => a.id.localeCompare(b.id));
+    const duplicationSourceKey = duplicateSources.length ? createHash('sha256').update(JSON.stringify(duplicateSources)).digest('hex') : null;
     const { startDate, endDate } = payrollPeriodBounds(
       request.period,
       request.periodicity,
@@ -541,6 +549,7 @@ export class PayrollService {
             JSON.stringify([...request.employeeIds].sort()) ||
           existing.some(
             (d: any) =>
+              (d.state.duplicationSourceKey ?? null) !== duplicationSourceKey ||
               d.state.payrollName !== name ||
               d.state.period !== request.period ||
               d.state.periodicity !== request.periodicity ||
@@ -555,6 +564,19 @@ export class PayrollService {
           key: `${startDate}|${endDate}|${id}`,
           documentIds: existing.map((d: any) => d.id),
         };
+      }
+      const sources = duplicateSources.length ? await m.query(
+        'SELECT * FROM jarvis_payroll_documents WHERE company_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR SHARE',
+        [company, duplicateSources.map(source => source.id)],
+      ) : [];
+      if (sources.length !== duplicateSources.length) throw new NotFoundException('La nómina de origen no existe o no pertenece a esta empresa.');
+      const sourcePeriod = (source: any) => JSON.stringify([source.state.startDate, source.state.endDate, source.state.payrollGroupId ?? '']);
+      if (sources.some((source: any) => source.original_id || source.state.monthlyConsolidation?.generated || sourcePeriod(source) !== sourcePeriod(sources[0])) || new Set(sources.map((source: any) => source.employee_id)).size !== sources.length)
+        throw new BadRequestException('Selecciona un único período de nómina de origen con un documento por empleado.');
+      for (const source of sources) {
+        const revision = duplicateSources.find(item => item.id === source.id)!;
+        if (new Date(source.updated_at).getTime() !== new Date(revision.updatedAt).getTime())
+          throw new ConflictException('La nómina de origen cambió. Vuelve al listado y selecciona Duplicar nuevamente.');
       }
       const employees = await m.query(
         'SELECT id,data,active FROM jarvis_payroll_employees WHERE company_id=$1 AND id=ANY($2::uuid[]) ORDER BY id',
@@ -599,6 +621,7 @@ export class PayrollService {
           ? periodWorkedDays
           : prorate(periodWorkedDays, String(employment.days), String(employment.periodDays));
         const documentId = randomUUID();
+        const source = sources.find((source: any) => source.employee_id === employee.id);
         await this.saveDocument(
           company,
           actor,
@@ -612,16 +635,89 @@ export class PayrollService {
             startDate,
             endDate,
             issueDate,
-            workedDays,
             paymentDates: [request.paymentDate],
-            lines: [],
+            ...(source ? duplicatePayrollNovelties(source.state, { startDate, endDate }) : { workedDays, lines: [] }),
+            ...(source ? { duplicatedFromDocumentId: source.id, duplicationSourceKey } : duplicationSourceKey ? { duplicationSourceKey } : {}),
           },
           m,
+          source ? { sourceConcepts: source.parameter_snapshot?.concepts ?? [] } : undefined,
         );
         documentIds.push(documentId);
       }
       await this.audit(m, company, actor, 'PAYROLL_PERIOD_CREATED', id);
       return { id, key: `${startDate}|${endDate}|${id}`, documentIds };
+    });
+  }
+  async prepareAdjustment(company: string, actor: string, originalId: string, id: string, request: any) {
+    if (!request || ![1, 2].includes(request.noteType) || !request.state || !validDate(request.state.issueDate) ||
+      !Array.isArray(request.state.lines) || request.state.lines.length > 1000 || request.state.lines.some((line: any) => !line || typeof line !== 'object') ||
+      JSON.stringify(request.state).length > 200000)
+      throw new BadRequestException('Revisa el tipo y la fecha del ajuste.');
+    await this.db.transaction(async m => {
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payroll:${company}`]);
+      const [original] = await m.query('SELECT * FROM jarvis_payroll_documents WHERE company_id=$1 AND id=$2 FOR UPDATE', [company, originalId]);
+      if (!original) throw new NotFoundException('Nómina no encontrada.');
+      payrollPredecessor(original);
+      const hash = createHash('sha256').update(JSON.stringify({ originalId, noteType: request.noteType, state: request.state })).digest('hex');
+      const [existing] = await m.query('SELECT * FROM jarvis_payroll_documents WHERE company_id=$1 AND id=$2 FOR UPDATE', [company, id]);
+      if (existing) {
+        if (existing.original_id !== originalId || existing.state.noteType !== request.noteType)
+          throw new ConflictException('El ajuste no corresponde a este documento.');
+        if (existing.state.adjustmentRequestKey === hash) return;
+        if (!['DRAFT', 'REJECTED'].includes(existing.status)) throw new ConflictException('Este ajuste ya se envió o está pendiente de confirmación.');
+        if (!request.updatedAt || new Date(request.updatedAt).getTime() !== new Date(existing.updated_at).getTime())
+          throw new ConflictException('El ajuste cambió. Vuelve a abrirlo antes de guardar.');
+      } else if (!request.originalUpdatedAt || new Date(request.originalUpdatedAt).getTime() !== new Date(original.updated_at).getTime()) {
+        throw new ConflictException('El documento cambió. Vuelve a consultarlo antes de ajustar.');
+      }
+      const children = await m.query('SELECT id,status FROM jarvis_payroll_documents WHERE company_id=$1 AND original_id=$2 FOR UPDATE', [company, originalId]);
+      if (children.some((note: any) => note.id !== id))
+        throw new ConflictException('Este documento ya tiene un ajuste. Vuelve al listado para consultar o continuar el ajuste existente.');
+      const state = payrollAdjustmentState(original, request.noteType, request.state);
+      state.adjustmentRequestKey = hash;
+      state.payrollPeriodId ??= await this.catalogs.getPayrollPeriodId(company, state.periodicity === 'MONTHLY' ? 'Mensual' : 'Quincenal');
+      if (existing) {
+        // Conservar identificadores de línea en un borrador existente para que los
+        // reintentos no generen cambios artificiales en los conceptos.
+        state.lines = request.noteType === 1 ? request.state.lines : existing.state.lines;
+      }
+      await this.saveDocument(company, actor, id, state, m, { validation: 'provider' });
+    });
+    return this.get(company, id);
+  }
+
+
+  async saveDocuments(company: string, actor: string, request: unknown) {
+    const documents = (request as { documents?: unknown } | null)?.documents;
+    if (!Array.isArray(documents) || !documents.length || documents.length > 1000 || JSON.stringify(documents).length > 10000000)
+      throw new BadRequestException('Selecciona entre 1 y 1000 documentos para guardar.');
+    const ids = new Set<string>();
+    for (const item of documents) {
+      if (!item || typeof item.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id) || ids.has(item.id) ||
+        !item.state || typeof item.state !== 'object' || Array.isArray(item.state) ||
+        typeof item.updatedAt !== 'string' || !item.updatedAt.trim() || !Number.isFinite(Date.parse(item.updatedAt)))
+        throw new BadRequestException('Los documentos y su versión de edición no son válidos.');
+      ids.add(item.id);
+    }
+    return this.db.transaction(async manager => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        'payroll:' + company,
+      ]);
+      // Validate every revision before writing; a failed document rolls back the whole batch.
+      const rows = await manager.query(
+        'SELECT id,updated_at,status FROM jarvis_payroll_documents WHERE company_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',
+        [company, [...ids]],
+      );
+      for (const item of documents) {
+        const current = rows.find((row: { id: string }) => row.id === item.id);
+        if (!current) throw new NotFoundException('Un documento ya no existe o no pertenece a esta empresa.');
+        if (!['DRAFT', 'REJECTED'].includes(current.status))
+          throw new ConflictException('Una nómina ya se envió o está pendiente de confirmación. No se guardó ningún cambio.');
+        if (new Date(current.updated_at).getTime() !== new Date(item.updatedAt).getTime())
+          throw new ConflictException('La nómina cambió desde que la abriste. No se guardó ningún cambio; tus novedades locales se conservan.');
+      }
+      for (const item of documents) await this.saveDocument(company, actor, item.id, item.state, manager);
+      return { saved: [...ids] };
     });
   }
   async saveDocument(
@@ -630,7 +726,7 @@ export class PayrollService {
     id: string,
     state: any,
     manager?: EntityManager,
-    options: { validation?: 'local' | 'provider' } = {},
+    options: { validation?: 'local' | 'provider'; sourceConcepts?: Array<{ code: string; kind: string; [key: string]: unknown }> } = {},
   ) {
     const validate = options.validation !== 'provider';
     if (!state || JSON.stringify(state).length > 200000)
@@ -727,20 +823,28 @@ export class PayrollService {
           throw new BadRequestException(
             'Selecciona una nómina aceptada para ajustar.',
           );
+        payrollPredecessor(original);
+        if (state.period !== original.state.period || state.startDate !== original.state.startDate || state.endDate !== original.state.endDate)
+          throw new BadRequestException('El ajuste debe conservar el período del documento aceptado.');
+        const related = await m.query('SELECT id,status FROM jarvis_payroll_documents WHERE company_id=$1 AND original_id=$2 FOR UPDATE', [company, original.id]);
+        if (related.some((note: any) => note.id !== id)) throw new ConflictException('Este documento ya tiene otro ajuste.');
         worker = original.employee_snapshot;
       }
       // Conserva los datos históricos del documento y toma solo el código persistido del empleado.
       if (worker && employee?.data.workerCode) worker = { ...worker, workerCode: employee.data.workerCode };
       try { state.workedTime = String(payrollWorkedTime(state.endDate, worker)); }
       catch (error) { if (validate) throw error; }
-      const total = totals(state.lines);
+      const total = state.originalId && state.noteType === 1 ? payrollReplacementTotals(state.lines) : totals(state.lines);
       // Once edited, preserve parameters already captured for the document.
       let snapshot =
         existing?.parameter_snapshot ??
         original?.parameter_snapshot ??
         parameter.data;
+      if (!existing && options.sourceConcepts?.length) {
+        snapshot = { ...snapshot, concepts: [...(snapshot.concepts ?? []), ...options.sourceConcepts.filter(concept => !snapshot.concepts?.some((current: any) => current.code === concept.code && current.kind === concept.kind))] };
+      }
       // Los conceptos nuevos configurados se incorporan al borrador sin cambiar sus bases históricas.
-      if (!state.originalId && state.lines.some((line: any) => !snapshot.concepts?.some((concept: any) => concept.code === line.concept && concept.kind === line.kind))) {
+      if ((!state.originalId || state.noteType === 1) && state.lines.some((line: any) => !snapshot.concepts?.some((concept: any) => concept.code === line.concept && concept.kind === line.kind))) {
         const [configured] = await m.query(
           "SELECT data FROM jarvis_payroll_parameters WHERE company_id=$1 AND valid_from <= (now() AT TIME ZONE 'America/Bogota')::date ORDER BY valid_from DESC LIMIT 1",
           [company],
@@ -1007,17 +1111,21 @@ export class PayrollService {
           [company],
         );
         context.stage = 'LOAD_WORKER';
-        const [currentEmployee] = await m.query(
-          'SELECT data,active FROM jarvis_payroll_employees WHERE company_id=$1 AND id=$2',
-          [company, d.employee_id],
-        );
-        if (!currentEmployee) throw new NotFoundException('El empleado no pertenece a esta empresa.');
-        const worker = await this.resolveSubmissionWorker(company, d.employee_snapshot, currentEmployee.data);
-        const required = [...payrollRequiredDeductionErrors(d.state), ...employeeBankErrors(worker)];
-        if (!worker.address?.trim()) required.push('Completa la dirección del empleado.');
-        if (!Number.isSafeInteger(worker.municipalityId) || worker.municipalityId! < 1) required.push('Selecciona la ciudad del empleado.');
-        if (!Number.isSafeInteger(worker.typeContractId) || worker.typeContractId! < 1) required.push('Selecciona el tipo de contrato del empleado.');
-        if (required.length) throw new BadRequestException([...new Set(required)].join(' '));
+        const deletion = Boolean(d.original_id && d.state.noteType === 2);
+        let worker = d.employee_snapshot;
+        if (!deletion) {
+          const [currentEmployee] = await m.query(
+            'SELECT data,active FROM jarvis_payroll_employees WHERE company_id=$1 AND id=$2',
+            [company, d.employee_id],
+          );
+          if (!currentEmployee) throw new NotFoundException('El empleado no pertenece a esta empresa.');
+          worker = await this.resolveSubmissionWorker(company, d.employee_snapshot, currentEmployee.data);
+          const required = [...payrollRequiredDeductionErrors(d.state), ...employeeBankErrors(worker)];
+          if (!worker.address?.trim()) required.push('Completa la dirección del empleado.');
+          if (!Number.isSafeInteger(worker.municipalityId) || worker.municipalityId! < 1) required.push('Selecciona la ciudad del empleado.');
+          if (!Number.isSafeInteger(worker.typeContractId) || worker.typeContractId! < 1) required.push('Selecciona el tipo de contrato del empleado.');
+          if (required.length) throw new BadRequestException([...new Set(required)].join(' '));
+        }
         const number = d.number ?? Number(d.original_id ? s.next_note_number : s.next_number);
         if (!Number.isSafeInteger(Number(number)) || Number(number) < 1 || Number(number) > PAYROLL_RANGE_TO)
           throw new BadRequestException('Consecutivo fuera de rango.');
@@ -1031,18 +1139,21 @@ export class PayrollService {
             throw new BadRequestException(
               'El documento original no tiene CUNE aceptado.',
             );
-          predecessor = {
-            predecessor_number: `${original.prefix}${original.number}`,
-            predecessor_cune: original.cune,
-            predecessor_issue_date: original.state.issueDate,
-          };
+          const related = await m.query('SELECT id,status FROM jarvis_payroll_documents WHERE company_id=$1 AND original_id=$2 FOR UPDATE', [company, original.id]);
+          if (related.some((note: any) => note.id !== id && ['ACCEPTED', 'PROCESSING', 'UNCERTAIN', 'DRAFT', 'REJECTED'].includes(note.status)))
+            throw new ConflictException('El documento ya tiene otro ajuste. Vuelve a consultar el listado.');
+          predecessor = payrollPredecessor(original);
         }
         context.stage = 'BUILD_PAYLOAD';
         const defaultPrefix = d.original_id ? PAYROLL_NOTE_PREFIX : PAYROLL_PREFIX;
         const savedPrefix = d.number != null ? d.prefix ?? defaultPrefix : defaultPrefix;
         // Replace the old default only when the provider has not assigned a CUNE.
         const prefix = savedPrefix === 'SETP' && !d.cune ? defaultPrefix : savedPrefix;
-        const payload = buildPayrollPayload(
+        const payload = deletion
+          ? buildPayrollDeletionPayload(d.state, worker, Number(number), prefix, predecessor)
+          : d.original_id && d.state.noteType === 1
+            ? buildPayrollReplacementPayload(d.state, worker, Number(number), prefix, predecessor)
+            : buildPayrollPayload(
           d.state,
           worker,
           Number(number),

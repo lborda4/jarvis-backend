@@ -7,6 +7,7 @@ export interface CreatePayrollPeriodRequest {
   periodicity: PayrollPeriodicity;
   employeeIds: string[];
   paymentDate: string;
+  duplicateSources?: Array<{ id: string; updatedAt: string }>;
 }
 export const PAYROLL_PERIODICITY_LABELS: Record<PayrollPeriodicity, string> = {
   FIRST_HALF: 'Primera quincena',
@@ -60,6 +61,13 @@ export function validatePayrollPeriod(
       )
     )
       errors.push('Hay empleados con identificación interna inválida.');
+  }
+  if (request?.duplicateSources !== undefined) {
+    const sources = request.duplicateSources;
+    if (!Array.isArray(sources) || !sources.length || sources.length > 1000 ||
+      sources.some(source => !source || typeof source.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(source.id) || typeof source.updatedAt !== 'string' || !Number.isFinite(Date.parse(source.updatedAt))) ||
+      new Set(sources.map(source => source.id)).size !== sources.length)
+      errors.push('La nómina de origen para duplicar no es válida.');
   }
   return errors;
 }

@@ -30,6 +30,8 @@ export function prorate(
   return money((base * units + reference / 2n) / reference);
 }
 export interface PayrollLine {
+  paymentNS?: string;
+  interestPayment?: string;
   id: string;
   concept: string;
   kind: 'accrued' | 'deduction';
