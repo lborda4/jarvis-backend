@@ -117,7 +117,28 @@ export class JarvisInvoicePdfService {
       ...template,
     }, company.nextPymeToken!));
     if (response.success === false) throw new BadGatewayException('El proveedor no confirmó el envío del correo.');
-    return { success: true };
+    const delivery = await this.recordEmailDelivery(companyId, id, emails);
+    return { success: true, delivery };
+  }
+
+  async recordEmailDelivery(companyId: string, id: string, recipients: string[]) {
+    const delivery = { recipients: [...new Set(recipients.map(email => email.trim().toLowerCase()).filter(Boolean))], sentAt: new Date().toISOString() };
+    if (!delivery.recipients.length) return undefined;
+    try {
+      // Append atomically so concurrent resends preserve both records.
+      await this.invoices.query(
+        `UPDATE jarvis_sales_invoices
+         SET source_request = jsonb_set(COALESCE(source_request, '{}'::jsonb), '{emailDeliveries}',
+           COALESCE(source_request->'emailDeliveries', '[]'::jsonb) || $3::jsonb)
+         WHERE company_id=$1 AND id=$2`,
+        [companyId, id, JSON.stringify([delivery])],
+      );
+      return delivery;
+    } catch {
+      // The provider already accepted the email; a log failure must not trigger another send.
+      this.logger.warn(`[companyId=${companyId}] No se pudo guardar el registro de envío de correo del documento ${id}.`);
+      return undefined;
+    }
   }
 
   async getData(companyId: string, id: string): Promise<JarvisInvoicePdfData> {
@@ -131,7 +152,7 @@ export class JarvisInvoicePdfService {
     if (!invoice.cufe) throw new BadGatewayException(`El documento aún no tiene ${code} disponible. No vuelvas a emitirlo; actualiza el listado e intenta visualizarlo después.`);
     const presentation = await this.loadPdfPresentation(companyId, invoice.documentKind);
     const logo = await this.safeLogo(companyId);
-    const withKind = { documentKind: invoice.documentKind, recipientCopyEmails: invoice.sourceRequest?.recipientCopyEmails ?? [], sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
+    const withKind = { emailDeliveries: invoice.sourceRequest?.emailDeliveries ?? [], documentKind: invoice.documentKind, recipientCopyEmails: invoice.sourceRequest?.recipientCopyEmails ?? [], sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
     const withMetadata = (data: JarvisInvoicePdfData) => ({
       ...data, ...withKind,
       ...presentation,

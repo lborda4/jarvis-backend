@@ -119,8 +119,8 @@ describe('búsqueda de referencia por consecutivo para notas', () => {
   });
 });
 
-describe('enlaces a notas crédito de la factura', () => {
-  it('incluye todas las notas crédito propias vinculadas por CUFE y conserva el prefijo', async () => {
+describe('enlaces a notas de la factura', () => {
+  it('incluye las notas crédito y débito propias vinculadas por CUFE y conserva el prefijo', async () => {
     const query = jest.fn().mockResolvedValueOnce([{ total: '1' }]).mockResolvedValueOnce([
       { id: 'invoice', status: 'SENT', prefix: 'FE', number: '1', cufe: 'original' },
     ]).mockResolvedValueOnce([
@@ -133,6 +133,7 @@ describe('enlaces a notas crédito de la factura', () => {
     expect(result.items[0]).toMatchObject({ adjustmentStatus: 'CREDIT_AND_DEBIT', relatedCreditNotes: [
       { id: 'nc1', prefix: 'NC', number: '1' }, { id: 'nc2', prefix: 'NC', number: 'NC2' },
     ] });
+    expect(result.items[0]).toMatchObject({ relatedDebitNotes: [{ id: 'nd', prefix: 'ND', number: '1' }] });
     expect(query.mock.calls[2][0]).toContain('SELECT id, prefix, number, document_kind AS kind');
     expect(query.mock.calls[2][1][0]).toBe('owner');
   });
@@ -141,8 +142,10 @@ describe('enlaces a notas crédito de la factura', () => {
       { id: 'old', status: 'SENT', prefix: 'FE', number: 'FE1', cufe: null },
     ]).mockResolvedValueOnce([
       { id: 'nc', kind: 'CREDIT_NOTE', prefix: 'NC', number: '1', referenceUuid: 'original', referenceNumber: ' FE1 ' },
+      { id: 'nd', kind: 'DEBIT_NOTE', prefix: 'ND', number: '1', referenceUuid: 'original', referenceNumber: ' FE1 ' },
+      { id: 'other', kind: 'DEBIT_NOTE', prefix: 'ND', number: '2', referenceUuid: 'other', referenceNumber: ' FE2 ' },
     ]);
     const result = await new JarvisInvoiceHistoryService({ query } as never).list('owner');
-    expect(result.items[0]).toMatchObject({ relatedCreditNotes: [{ id: 'nc', prefix: 'NC', number: '1' }] });
+    expect(result.items[0]).toMatchObject({ relatedCreditNotes: [{ id: 'nc', prefix: 'NC', number: '1' }], relatedDebitNotes: [{ id: 'nd', prefix: 'ND', number: '1' }] });
   });
 });

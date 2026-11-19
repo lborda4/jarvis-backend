@@ -22,11 +22,13 @@ describe('Cuenta contable por línea del Excel de documento soporte', () => {
     await book.xlsx.load(buffer as any);
     const sheet = book.worksheets[0];
     const headers = sheet.getRow(1).values as string[];
-    const column = headers.indexOf('Cuenta contable');
+    const column = headers.indexOf('Cuenta contable (opcional)');
     expect(column).toBeGreaterThan(0);
     expect(sheet.getCell(2, column).value).toBeNull();
-    expect(sheet.getCell(2, column).dataValidation.formulae).toEqual(['CuentasContables!$A$1:$A$2']);
-    expect(book.getWorksheet('CuentasContables')!.getCell('A1').value).toBe('61601013 - Valoraciones');
+    expect(sheet.getCell(2, column).dataValidation.formulae).toEqual(['CuentasDocumentoSoporte']);
+    expect(book.worksheets).toHaveLength(1);
+    expect(sheet.getColumn('N').hidden).toBe(true);
+    expect(sheet.getCell('N2').value).toBe('61601013 - Valoraciones');
   });
   it('preserva cuentas diferentes aunque los ítems tengan la misma descripción', () => {
     const groups = parseSupportDocumentExcel(excel(['61601013 - Nombre viejo', 513595, '']));

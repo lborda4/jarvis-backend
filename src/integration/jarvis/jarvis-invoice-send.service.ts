@@ -845,7 +845,7 @@ export class JarvisInvoiceSendService {
       token: input.token,
     });
     try {
-      await this.nextPymeApiClient.sendDocumentEmail(
+      const response = await this.nextPymeApiClient.sendDocumentEmail(
         {
           prefix,
           number: String(input.number),
@@ -858,6 +858,10 @@ export class JarvisInvoiceSendService {
         },
         input.token,
       );
+      if (response.success === false) throw new BadGatewayException('El proveedor no confirmó el envío del correo.');
+      if (input.historyId && customerEmail) {
+        await this.invoicePdf.recordEmailDelivery(input.companyId, input.historyId, [customerEmail, ...ccList.map(copy => copy.email)]);
+      }
     } catch (error) {
       this.logger.warn(
         `[companyId=${input.companyId}] ${input.documentLabel} ${prefix}${input.number} emitido, pero NextPyme no envió el correo: ${

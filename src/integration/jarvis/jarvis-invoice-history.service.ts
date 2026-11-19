@@ -133,12 +133,17 @@ export class JarvisInvoiceHistoryService {
       const flag = item.status !== 'SENT' ? 0
         : referenceUuid ? byUuid.get(referenceUuid) ?? 0 : byNumber.get(invoiceNumber(item)) ?? 0;
       const adjustmentStatus: InvoiceAdjustmentStatus = flag === 3 ? 'CREDIT_AND_DEBIT' : flag === 1 ? 'CREDIT_NOTE' : flag === 2 ? 'DEBIT_NOTE' : 'NONE';
-      const relatedCreditNotes = item.status !== 'SENT' ? [] : notes.filter(note =>
-        note.kind === JarvisResolutionKind.CREDIT_NOTE && note.id &&
+      const relatedNotes = (kind: JarvisResolutionKind) => item.status !== 'SENT' ? [] : notes.filter(note =>
+        note.kind === kind && note.id &&
         (referenceUuid ? uuid(note.referenceUuid) === referenceUuid
           : note.referenceNumber?.trim().toUpperCase() === invoiceNumber(item)),
       ).map(note => ({ id: note.id, prefix: note.prefix, number: note.number }));
-      return { ...item, adjustmentStatus, ...(relatedCreditNotes.length ? { relatedCreditNotes } : {}) };
+      const relatedCreditNotes = relatedNotes(JarvisResolutionKind.CREDIT_NOTE);
+      const relatedDebitNotes = relatedNotes(JarvisResolutionKind.DEBIT_NOTE);
+      return { ...item, adjustmentStatus,
+        ...(relatedCreditNotes.length ? { relatedCreditNotes } : {}),
+        ...(relatedDebitNotes.length ? { relatedDebitNotes } : {}),
+      };
     });
   }
 

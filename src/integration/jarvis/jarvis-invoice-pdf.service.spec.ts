@@ -5,6 +5,13 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
+  it('devuelve los envios registrados sin usar los correos configurados como prueba de envio', async () => {
+    const emailDeliveries = [{ recipients: ['original@correo.com'], sentAt: '2026-11-17T22:01:00Z' }];
+    const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { emailDeliveries, recipientCopyEmails: ['actual@correo.com'] } });
+    expect((await service.getData('company', 'id')).emailDeliveries).toEqual(emailDeliveries);
+    const old = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML });
+    expect((await old.service.getData('company', 'id')).emailDeliveries).toEqual([]);
+  });
   it('aplica las preferencias actuales de la empresa al visor y al PDF de correo', async () => {
     const appearance = { accentColor: '#123456', footerText: 'Gracias por tu compra.', showLogo: false };
     const { service, integrations } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE' });
@@ -233,6 +240,12 @@ describe('sales invoice PDF data', () => {
 });
 
 describe('reenvío de correo de documentos emitidos', () => {
+  it('no provoca otro envio si falla el registro despues de enviar el correo', async () => {
+    const { service, repository, client } = setup();
+    repository.query.mockRejectedValue(new Error('Base de datos no disponible'));
+    await expect(service.sendEmail('owner', 'id', {})).resolves.toEqual({ success: true, delivery: undefined });
+    expect(client.sendDocumentEmail).toHaveBeenCalledTimes(1);
+  });
   it('incluye las copias guardadas al emitir y evita duplicarlas con las adicionales', async () => {
     const { service, client } = setup();
     const data = await service.getData('owner', 'id');
@@ -241,7 +254,7 @@ describe('reenvío de correo de documentos emitidos', () => {
     expect(client.sendDocumentEmail).toHaveBeenCalledWith(expect.objectContaining({ alternate_email: 'cliente@correo.com', email_cc_list: [{ email: 'cc@example.com' }, { email: 'extra@example.com' }] }), 'owner-token');
   });
   function setup() {
-    const repository = { findOne: jest.fn().mockResolvedValue({ prefix: 'NDS', number: 'NDS5' }) };
+    const repository = { findOne: jest.fn().mockResolvedValue({ prefix: 'NDS', number: 'NDS5' }), query: jest.fn().mockResolvedValue([]) };
     const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'owner-token' }) };
     const client = { sendDocumentEmail: jest.fn().mockResolvedValue({ success: true }) };
     const service = new JarvisInvoicePdfService(repository as never, companies as never, client as never, {} as never, {} as never);
@@ -250,7 +263,7 @@ describe('reenvío de correo de documentos emitidos', () => {
   }
   it('envía PDF, correo registrado, copias únicas y mensaje escapado usando el token de la empresa', async () => {
     const { service, repository, client } = setup();
-    await expect(service.sendEmail('owner', 'id', { additionalEmails: ['CLIENTE@CORREO.COM', 'copia@correo.com', 'copia@correo.com'], message: '<script>alert(1)</script>' })).resolves.toEqual({ success: true });
+    await expect(service.sendEmail('owner', 'id', { additionalEmails: ['CLIENTE@CORREO.COM', 'copia@correo.com', 'copia@correo.com'], message: '<script>alert(1)</script>' })).resolves.toMatchObject({ success: true, delivery: { recipients: ['cliente@correo.com', 'copia@correo.com'], sentAt: expect.any(String) } });
     expect(repository.findOne).toHaveBeenCalledWith({ where: { companyId: 'owner', id: 'id' } });
     expect(client.sendDocumentEmail).toHaveBeenCalledWith({
       prefix: 'NDS', number: '5', alternate_email: 'cliente@correo.com',
@@ -265,6 +278,11 @@ describe('reenvío de correo de documentos emitidos', () => {
     expect(body.html_body).toContain('Empresa SAS');
     expect(body.html_body).toContain('NDS5');
     expect(body.html_body).toContain('Nota de ajuste de documento soporte');
+    const [sql, params] = repository.query.mock.calls[0];
+    expect(sql).toContain('WHERE company_id=$1 AND id=$2');
+    expect(sql).toContain("COALESCE(source_request->'emailDeliveries', '[]'::jsonb) || $3::jsonb");
+    expect(params.slice(0, 2)).toEqual(['owner', 'id']);
+    expect(JSON.parse(params[2])).toEqual([{ recipients: ['cliente@correo.com', 'copia@correo.com'], sentAt: expect.any(String) }]);
   });
   it('rechaza documentos ajenos antes de contactar al proveedor', async () => {
     const { service, repository, client } = setup();
@@ -286,10 +304,11 @@ describe('reenvío de correo de documentos emitidos', () => {
     expect(client.sendDocumentEmail).toHaveBeenCalledWith(expect.objectContaining({ alternate_email: 'nuevo@correo.com', showacceptrejectbuttons: false }), 'owner-token');
   });
   it('no confirma éxito si falla el proveedor', async () => {
-    const { service, client } = setup();
+    const { service, client, repository } = setup();
     client.sendDocumentEmail.mockRejectedValue(new Error('Proveedor no disponible'));
     await expect(service.sendEmail('owner', 'id', {})).rejects.toThrow('Proveedor no disponible');
     client.sendDocumentEmail.mockResolvedValue({ success: false });
     await expect(service.sendEmail('owner', 'id', {})).rejects.toThrow('no confirmó');
+    expect(repository.query).not.toHaveBeenCalled();
   });
 });

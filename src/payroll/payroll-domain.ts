@@ -502,7 +502,6 @@ export function buildPayrollPayload(
     head_note: state.headNote ?? '',
     foot_note: state.footNote ?? '',
     novelty: { novelty: false, uuidnov: predecessor ? null : '' },
-    sendmail: false,
     sendmailtome: false,
     worker_code: worker.workerCode?.trim() ?? '',
     payroll_period_id: state.payrollPeriodId!,

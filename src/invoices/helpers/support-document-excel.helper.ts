@@ -11,18 +11,20 @@ import {
 } from '../../common/helpers/date-normalization.helper';
 
 const REQUIRED_COLUMNS_MESSAGE =
-  'Fecha, Tipo de documento, Numero de documento, Prefijo, Consecutivo, Descripcion';
+  'Fecha, Tipo de identificación, Número de identificación, Prefijo, Consecutivo, Descripcion';
 
 
 const COLUMN_ALIASES = {
   issueDate: ['fecha', 'fecha emision'],
   supplierDocumentType: [
+    'tipo de identificacion',
     'tipo de documento',
     'tipo documento',
     'tipo doc',
     'tipo de doc',
   ],
   supplierIdentification: [
+    'numero de identificacion',
     'numero de documento',
     'numero documento',
     'nro documento',

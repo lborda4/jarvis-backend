@@ -3,267 +3,321 @@ import ExcelJS from 'exceljs';
 export const SUPPORT_DOCUMENT_TEMPLATE_FILENAME =
   'plantilla-documento-soporte.xlsx';
 
-const TEMPLATE_HEADERS = [
-  'Fecha',
-  'Tipo de documento',
-  'Numero de documento',
-  'Nombre tercero',
-  'Prefijo',
-  'Consecutivo',
-  'Cuenta contable',
-  'Descripcion',
-  'Cantidad',
-  'Valor unitario',
-  'Centro de costos',
-  'Observaciones',
+const DATA_ROWS = 500;
+const SHEET_NAME = 'Documentos soporte';
+
+const COLUMNS = [
+  {
+    header: 'Fecha',
+    width: 13,
+    required: true,
+    format: 'dd/mm/yyyy',
+    help: 'Fecha del documento en formato día/mes/año.',
+  },
+  {
+    header: 'Tipo de identificación',
+    width: 17,
+    required: true,
+    format: '@',
+    help: 'Selecciona NIT, CC, CE o PA (pasaporte).',
+  },
+  {
+    header: 'Número de identificación',
+    width: 20,
+    required: true,
+    format: '@',
+    help: 'Identificación del tercero, sin puntos ni espacios. Se conserva como texto para no perder ceros iniciales.',
+  },
+  {
+    header: 'Prefijo',
+    width: 10,
+    required: true,
+    format: '@',
+    help: 'Prefijo del documento. Repite el prefijo y consecutivo para agregar ítems al mismo documento.',
+  },
+  {
+    header: 'Consecutivo',
+    width: 13,
+    required: true,
+    format: '0',
+    help: 'Número entero positivo del documento, sin puntos ni separadores.',
+  },
+  {
+    header: 'Descripcion',
+    width: 28,
+    required: true,
+    format: '@',
+    help: 'Descripción del producto o servicio de esta fila.',
+  },
+  {
+    header: 'Cantidad',
+    width: 11,
+    required: true,
+    format: '0.##',
+    help: 'Cantidad mayor que cero. Admite decimales.',
+  },
+  {
+    header: 'Valor unitario',
+    width: 16,
+    required: true,
+    format: '#,##0.00',
+    help: 'Valor numérico mayor o igual a cero, sin símbolo de moneda.',
+  },
+  {
+    header: 'Cuenta contable',
+    width: 26,
+    required: false,
+    format: '@',
+    help: 'Selecciona una cuenta de la empresa o deja vacío para usar las sugerencias.',
+  },
+  {
+    header: 'Centro de costos',
+    width: 22,
+    required: false,
+    format: '@',
+    help: 'Selecciona un centro de costos de la empresa, si aplica. Puedes dejarlo vacío.',
+  },
+  {
+    header: 'Observaciones',
+    width: 28,
+    required: false,
+    format: '@',
+    help: 'Comentario del documento, si aplica. Puedes dejarlo vacío.',
+  },
 ] as const;
 
-const COLUMN_WIDTHS = [14, 20, 20, 30, 12, 14, 40, 32, 12, 16, 26, 38];
-
-const HEADER_FILL_COLOR = 'FF2F5233';
-const HEADER_ROW_HEIGHT = 26;
-const DATA_ROW_HEIGHT = 20;
-const THIN_BORDER: Partial<ExcelJS.Border> = {
-  style: 'thin',
-  color: { argb: 'FFD9D9D9' },
-};
-
-/** Cuántas filas de datos traen las listas desplegables (Tipo de documento,
- * Centro de costos) — un tope generoso (no "todas las filas posibles del
- * Excel") porque ExcelJS necesita un rango fijo de celdas para la
- * validación, no puede aplicarse a "toda la columna" de forma perezosa. */
-const DROPDOWN_ROWS = 500;
-
-/** Tipos de documento que acepta el desplegable — el importador también
- * reconoce CE/PA escritos a mano (ver normalizeSupportDocumentType), pero
- * NIT/CC son los únicos dos que se piden como opción fija en la plantilla. */
-const DOCUMENT_TYPE_OPTIONS = ['NIT', 'CC'];
-
-function getTodayFormatted(): string {
-  const today = new Date();
-  const day = String(today.getDate()).padStart(2, '0');
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const year = today.getFullYear();
-  return `${day}/${month}/${year}`;
-}
-
-/** Mismo formato "código - nombre" que ya usa la app en el selector de
- * centro de costos (ver formatCostCenterOptionLabel en el frontend) — así
- * el valor que cae en el Excel es reconocible para el usuario y, al volver
- * a importar, alcanza con separar por el primer " - " para recuperar el
- * código exacto sin ambigüedad. */
-function formatCostCenterLabel(costCenter: {
-  code: string;
-  name: string;
-}): string {
-  return `${costCenter.code} - ${costCenter.name}`;
-}
-
-function buildTemplateExampleRows(exampleCostCenterLabel: string): Array<Array<string | null>> {
-  const todayFormatted = getTodayFormatted();
-
-  return [
-    [
-      todayFormatted,
-      'NIT',
-      '900123456',
-      'Proveedor Ejemplo S.A.S.',
-      'DS',
-      '100',
-      null,
-      'Servicio de consultoría',
-      '1',
-      '150000',
-      exampleCostCenterLabel,
-      'Observaciones del documento soporte',
-    ],
-    [
-      todayFormatted,
-      'CC',
-      '1234567890',
-      'Juan Pérez',
-      'DS',
-      '101',
-      null,
-      'Papelería',
-      '2',
-      '25000',
-      exampleCostCenterLabel,
-      'Compra de insumos de oficina',
-    ],
-    [
-      todayFormatted,
-      'CC',
-      '1234567890',
-      'Juan Pérez',
-      'DS',
-      '101',
-      null,
-      'Transporte',
-      '1',
-      '80000',
-      exampleCostCenterLabel,
-      'Compra de insumos de oficina',
-    ],
-  ];
-}
+type TemplateHeader = (typeof COLUMNS)[number]['header'];
 
 export interface SupportDocumentTemplateCostCenter {
   code: string;
   name: string;
 }
 
-function applyListDataValidation(
-  sheet: ExcelJS.Worksheet,
-  columnIndex: number,
-  formula: string,
-  options: { errorTitle: string; error: string },
-): void {
-  const excelColumn = columnIndex + 1;
+function todayInColombia(): Date {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((value) => value.type === type)!.value);
+  return new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+}
 
-  for (let rowNumber = 2; rowNumber <= DROPDOWN_ROWS + 1; rowNumber += 1) {
-    sheet.getCell(rowNumber, excelColumn).dataValidation = {
-      type: 'list',
-      allowBlank: true,
-      formulae: [formula],
+function columnIndex(header: TemplateHeader): number {
+  return COLUMNS.findIndex((column) => column.header === header) + 1;
+}
+
+function applyValidation(
+  sheet: ExcelJS.Worksheet,
+  header: TemplateHeader,
+  validation: ExcelJS.DataValidation,
+): void {
+  const column = COLUMNS[columnIndex(header) - 1];
+  for (let row = 2; row <= DATA_ROWS + 1; row++) {
+    sheet.getCell(row, columnIndex(header)).dataValidation = {
+      allowBlank: !column.required,
+      showInputMessage: true,
+      promptTitle: column.required ? 'Obligatorio' : 'Opcional',
+      prompt: column.help,
       showErrorMessage: true,
-      errorStyle: 'warning',
-      errorTitle: options.errorTitle,
-      error: options.error,
+      errorStyle: 'stop',
+      errorTitle: 'Revisa el valor ingresado',
+      error: column.help,
+      ...validation,
     };
   }
 }
 
-/**
- * Genera la plantilla de Documento Soporte. "Tipo de documento" siempre
- * trae la lista desplegable NIT/CC. "Centro de costos" trae una lista
- * desplegable con el catálogo real de SIIGO de la empresa cuando
- * `costCenters` trae datos — si la empresa no tiene centros de costos
- * configurados (o no se pudo consultar SIIGO), esa columna queda como
- * texto libre sin validación en vez de bloquear la descarga.
- */
+/** Los catálogos se guardan en columnas ocultas de la misma hoja para que
+ * las listas largas funcionen sin pestañas auxiliares ni el límite de
+ * 255 caracteres de las listas escritas directamente en la validación. */
+function addCatalog(
+  workbook: ExcelJS.Workbook,
+  sheet: ExcelJS.Worksheet,
+  header: TemplateHeader,
+  catalogColumn: string,
+  rangeName: string,
+  options: SupportDocumentTemplateCostCenter[],
+): void {
+  sheet.getColumn(catalogColumn).hidden = true;
+  sheet.getColumn(catalogColumn).numFmt = '@';
+  options.forEach((option, index) => {
+    sheet.getCell(`${catalogColumn}${index + 2}`).value =
+      `${option.code} - ${option.name}`;
+  });
+  workbook.definedNames.add(
+    `'${SHEET_NAME}'!$${catalogColumn}$2:$${catalogColumn}$${options.length + 1}`,
+    rangeName,
+  );
+  applyValidation(sheet, header, { type: 'list', formulae: [rangeName] });
+}
+
 export async function buildSupportDocumentTemplateExcel(
   costCenters: SupportDocumentTemplateCostCenter[] = [],
   accounts: Array<{ code: string; name: string }> = [],
 ): Promise<Buffer> {
-  // El nombre del tercero se resuelve por NIT (BD → SIIGO), no va en el Excel.
-  const supplierNameIndex = TEMPLATE_HEADERS.indexOf('Nombre tercero');
-  const headers = TEMPLATE_HEADERS.filter(
-    (_, index) => index !== supplierNameIndex,
-  );
-  const documentTypeColumnIndex = headers.indexOf('Tipo de documento');
-  const costCenterColumnIndex = headers.indexOf('Centro de costos');
-  const exampleCostCenterLabel =
-    costCenters.length > 0 ? formatCostCenterLabel(costCenters[0]) : '';
-  const rows = buildTemplateExampleRows(exampleCostCenterLabel).map((row) =>
-    row.filter((_, index) => index !== supplierNameIndex),
-  );
-
-  const columnWidths = COLUMN_WIDTHS.filter(
-    (_, index) => index !== supplierNameIndex,
-  );
-
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('Documentos soporte', {
-    properties: { defaultRowHeight: DATA_ROW_HEIGHT },
+  const sheet = workbook.addWorksheet(SHEET_NAME, {
+    properties: { defaultRowHeight: 21 },
     views: [{ state: 'frozen', ySplit: 1 }],
   });
 
-  sheet.columns = headers.map((header, index) => ({
-    header,
-    width: columnWidths[index],
+  sheet.columns = COLUMNS.map((column) => ({
+    header: column.header,
+    width: column.width,
+    style: {
+      numFmt: column.format,
+      font: { name: 'Calibri', size: 11, color: { argb: 'FF1F2937' } },
+      alignment: { vertical: 'middle', wrapText: column.format === '@' },
+    },
   }));
-
-  const headerRow = sheet.getRow(1);
-  headerRow.height = HEADER_ROW_HEIGHT;
-  headerRow.eachCell((cell) => {
+  sheet.getRow(1).height = 44;
+  COLUMNS.forEach((column, index) => {
+    const cell = sheet.getCell(1, index + 1);
+    cell.value = column.required
+      ? column.header
+      : `${column.header} (opcional)`;
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: HEADER_FILL_COLOR },
+      fgColor: {
+        argb: column.required ? 'FF0F766E' : 'FF64748B',
+      },
     };
     cell.alignment = {
       vertical: 'middle',
       horizontal: 'center',
       wrapText: true,
     };
-    cell.border = { bottom: THIN_BORDER };
+    cell.border = {
+      right: { style: 'thin', color: { argb: 'FFD7DEE7' } },
+      bottom: { style: 'medium', color: { argb: 'FF0D9488' } },
+    };
+    cell.note = `${column.required ? 'Obligatorio' : 'Opcional'}. ${column.help}`;
   });
 
-  for (const row of rows) {
-    const addedRow = sheet.addRow(row);
-    addedRow.height = DATA_ROW_HEIGHT;
-    addedRow.eachCell({ includeEmpty: true }, (cell) => {
-      cell.alignment = { vertical: 'middle' };
+  const example = sheet.addRow([
+    todayInColombia(),
+    'CC',
+    '1234567890',
+    'DS',
+    100,
+    'Servicio de consultoría',
+    1,
+    150000,
+    null,
+    null,
+    null,
+  ]);
+  example.height = 24;
+  example.eachCell({ includeEmpty: true }, (cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFF3CD' },
+    };
+    cell.border = { bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } } };
+  });
+  example.getCell(1).note =
+    'Fila de ejemplo: reemplázala con tus datos antes de subir el archivo. Cada fila corresponde a un ítem; repite identificación, prefijo y consecutivo para agrupar varios ítems en un documento.';
+
+  sheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: COLUMNS.length },
+  };
+
+  applyValidation(sheet, 'Fecha', {
+    type: 'date',
+    operator: 'between',
+    formulae: [
+      new Date(Date.UTC(1900, 0, 1)),
+      new Date(Date.UTC(2100, 11, 31)),
+    ],
+  });
+  applyValidation(sheet, 'Tipo de identificación', {
+    type: 'list',
+    formulae: ['"NIT,CC,CE,PA"'],
+  });
+  applyValidation(sheet, 'Número de identificación', {
+    type: 'textLength',
+    operator: 'between',
+    formulae: [1, 30],
+  });
+  applyValidation(sheet, 'Prefijo', {
+    type: 'textLength',
+    operator: 'greaterThan',
+    formulae: [0],
+  });
+  applyValidation(sheet, 'Consecutivo', {
+    type: 'whole',
+    operator: 'between',
+    formulae: [1, 999999999999999],
+  });
+  applyValidation(sheet, 'Descripcion', {
+    type: 'textLength',
+    operator: 'greaterThan',
+    formulae: [0],
+  });
+  applyValidation(sheet, 'Cantidad', {
+    type: 'decimal',
+    operator: 'greaterThan',
+    formulae: [0],
+  });
+  applyValidation(sheet, 'Valor unitario', {
+    type: 'decimal',
+    operator: 'greaterThanOrEqual',
+    formulae: [0],
+  });
+
+  for (const header of [
+    'Cuenta contable',
+    'Centro de costos',
+    'Observaciones',
+  ] as const) {
+    applyValidation(sheet, header, {
+      type: 'textLength',
+      operator: 'greaterThanOrEqual',
+      formulae: [0],
+    });
+  }
+  if (costCenters.length) {
+    addCatalog(
+      workbook,
+      sheet,
+      'Centro de costos',
+      'M',
+      'CentrosCostoDocumentoSoporte',
+      costCenters,
+    );
+  }
+  if (accounts.length) {
+    addCatalog(
+      workbook,
+      sheet,
+      'Cuenta contable',
+      'N',
+      'CuentasDocumentoSoporte',
+      accounts,
+    );
+  }
+
+  for (let row = 3; row <= DATA_ROWS + 1; row++) {
+    COLUMNS.forEach((_, index) => {
+      const cell = sheet.getCell(row, index + 1);
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: row % 2 === 0 ? 'FFF0FDFA' : 'FFFFFFFF' },
+      };
       cell.border = {
-        top: THIN_BORDER,
-        left: THIN_BORDER,
-        bottom: THIN_BORDER,
-        right: THIN_BORDER,
+        right: { style: 'hair', color: { argb: 'FFD7DEE7' } },
+        bottom: { style: 'hair', color: { argb: 'FFD7DEE7' } },
       };
     });
   }
 
-  // Filtro rápido por columna — ayuda a ubicar filas cuando el Excel ya
-  // tiene muchas (el encabezado congelado ya se configuró al crear la hoja).
-  sheet.autoFilter = {
-    from: { row: 1, column: 1 },
-    to: { row: 1, column: headers.length },
-  };
-
-  // Lista corta y sin comas dentro de cada opción — alcanza con una fórmula
-  // inline, no hace falta la hoja auxiliar que sí necesita Centro de costos.
-  applyListDataValidation(
-    sheet,
-    documentTypeColumnIndex,
-    `"${DOCUMENT_TYPE_OPTIONS.join(',')}"`,
-    {
-      errorTitle: 'Tipo de documento no reconocido',
-      error: `Elegí ${DOCUMENT_TYPE_OPTIONS.join(' o ')} de la lista.`,
-    },
-  );
-
-  if (costCenters.length > 0) {
-    // Hoja auxiliar oculta con la lista de centros de costo — ExcelJS exige
-    // un rango fijo de celdas para la validación tipo "list" referenciada
-    // por fórmula (no puede apuntar a "toda la columna" de otra hoja de
-    // forma dinámica, ni sirve una fórmula inline: los nombres pueden traer
-    // comas o superar el límite de 255 caracteres de Excel), así que se usa
-    // esta hoja como fuente.
-    const costCenterSheet = workbook.addWorksheet('CentrosCosto');
-    costCenterSheet.state = 'veryHidden';
-
-    costCenters.forEach((costCenter, index) => {
-      costCenterSheet.getCell(index + 1, 1).value =
-        formatCostCenterLabel(costCenter);
-    });
-
-    applyListDataValidation(
-      sheet,
-      costCenterColumnIndex,
-      `CentrosCosto!$A$1:$A$${costCenters.length}`,
-      {
-        errorTitle: 'Centro de costos no reconocido',
-        error:
-          'Elegí un centro de costos de la lista — si no aparece ninguno, dejá la celda vacía.',
-      },
-    );
-  }
-
-  if (accounts.length > 0) {
-    const accountSheet = workbook.addWorksheet('CuentasContables');
-    accountSheet.state = 'veryHidden';
-    accounts.forEach((account, index) => {
-      accountSheet.getCell(index + 1, 1).value = `${account.code} - ${account.name}`;
-    });
-    applyListDataValidation(sheet, headers.indexOf('Cuenta contable'),
-      `CuentasContables!$A$1:$A$${accounts.length}`, {
-        errorTitle: 'Cuenta contable no reconocida',
-        error: 'Selecciona una cuenta de la empresa o deja la celda vacía para usar las sugerencias.',
-      });
-  }
-  const buffer = await workbook.xlsx.writeBuffer();
-
-  return Buffer.from(buffer);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }

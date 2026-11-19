@@ -48,7 +48,7 @@ function setup(
     commitNumber: jest.fn(),
   };
   const history = { lastIssuedNumber: jest.fn().mockResolvedValue(0), record: jest.fn().mockResolvedValue(undefined) };
-  const invoicePdf = { renderGraphicBase64: jest.fn().mockResolvedValue('') };
+  const invoicePdf = { renderGraphicBase64: jest.fn().mockResolvedValue(''), recordEmailDelivery: jest.fn() };
   const plans = {
     assertCanCreateDocuments: jest.fn().mockResolvedValue(undefined),
     withJarvisQuotaLock: jest.fn((_companyId: string, work: () => Promise<unknown>) => work()),
@@ -637,6 +637,16 @@ describe('Notas debito Jarvis', () => {
 });
 
 describe('correo NextPyme tras aceptación DIAN', () => {
+  it.each([true, false])('registra destinatarios solo si el proveedor confirma el correo: %s', async success => {
+    const { service, request, client, history, invoicePdf } = setup('company-token', {
+      name: 'Cliente', municipalityId: 149, typeRegimeId: 1, email: 'cliente@correo.com', copyEmails: ['cc@correo.com'],
+    });
+    history.record.mockResolvedValue('history-id' as never);
+    client.sendDocumentEmail.mockResolvedValue({ success });
+    await expect(service.createAndSendInvoice(request, 'company-1')).resolves.toMatchObject({ success: true });
+    if (success) expect(invoicePdf.recordEmailDelivery).toHaveBeenCalledWith('company-1', 'history-id', ['cliente@correo.com', 'cc@correo.com']);
+    else expect(invoicePdf.recordEmailDelivery).not.toHaveBeenCalled();
+  });
   it('envía send-email con prefijo, número y correos del cliente y la empresa', async () => {
     const { service, request, client, integrations, invoicePdf } = setup(' company-token ', {
       name: 'Cliente',

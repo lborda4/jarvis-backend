@@ -136,7 +136,6 @@ describe('contrato de envío de nómina NextPyme', () => {
         account_number: '00000000',
         payment_method_id: 42,
       },
-      sendmail: false,
       foot_note: state.footNote,
       head_note: state.headNote,
       deductions: {
