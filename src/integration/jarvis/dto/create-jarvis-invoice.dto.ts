@@ -118,6 +118,9 @@ export class CreateJarvisInvoiceRequestDto {
 }
 
 export class CreateJarvisInvoiceResponseDto {
+  @ApiPropertyOptional()
+  noteDocumentCredit?: string;
+
   @ApiProperty()
   success: boolean;
 

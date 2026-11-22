@@ -1,10 +1,12 @@
+jest.mock('./helpers/unlimited-note-credit', () => ({ creditUnlimitedNote: jest.fn().mockResolvedValue('APPLIED') }));
+import { creditUnlimitedNote } from './helpers/unlimited-note-credit';
 jest.mock('./helpers/jarvis-billing-operation', () => ({ withBillingOperation: (_db: unknown, _company: string, _kind: string, work: () => Promise<unknown>) => work() }));
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { BadGatewayException } from '@nestjs/common';
 
 import { JarvisInvoiceSendService } from './jarvis-invoice-send.service';
 
-beforeEach(() => { jest.useFakeTimers({ now: new Date('2026-09-16T17:00:00Z') }); });
+beforeEach(() => { jest.mocked(creditUnlimitedNote).mockClear(); jest.useFakeTimers({ now: new Date('2026-09-16T17:00:00Z') }); });
 afterEach(() => { jest.useRealTimers(); });
 
 jest.mock('./jarvis-invoice-pdf.service', () => ({
@@ -713,15 +715,15 @@ describe('correo NextPyme tras aceptación DIAN', () => {
 });
 
 describe('cupo Jarvis al enviar', () => {
-  it('no envía una nota cuando el cupo está agotado', async () => {
+  it('permite notas con el cupo agotado', async () => {
     const { service, request, plans, client } = setup();
-    plans.assertCanCreateDocuments.mockRejectedValue(new Error('Cupo agotado'));
+    plans.assertCanCreateDocuments.mockImplementation(async ({ quantity }) => { if (quantity > 0) throw new Error('Cupo agotado'); });
     await expect(service.createAndSendInvoice({
       ...request,
       billingReference: { number: 'SETP990000605', uuid: 'a'.repeat(96), issueDate: '2026-09-15' },
       discrepancyResponseCode: 2,
       discrepancyResponseDescription: 'Devolución',
-    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).rejects.toThrow('Cupo agotado');
+    }, 'company-1', JarvisResolutionKind.CREDIT_NOTE)).resolves.toMatchObject({ success: true, noteDocumentCredit: 'APPLIED' });
     expect(client.createInvoice).not.toHaveBeenCalled();
   });
   const reference = { number: 'SETP990000605', uuid: 'a'.repeat(96), issueDate: '2026-09-15' };
@@ -748,7 +750,7 @@ describe('cupo Jarvis al enviar', () => {
     });
   });
 
-  it.each([JarvisResolutionKind.CREDIT_NOTE, JarvisResolutionKind.DEBIT_NOTE, JarvisResolutionKind.SUPPORT_CREDIT_NOTE])('valida cupo para la nota %s', async (kind) => {
+  it.each([JarvisResolutionKind.CREDIT_NOTE, JarvisResolutionKind.DEBIT_NOTE, JarvisResolutionKind.SUPPORT_CREDIT_NOTE])('valida vigencia sin consumir cupo para la nota %s', async (kind) => {
     const { service, request, plans } = setup();
     await service.createAndSendInvoice({
       ...request,
@@ -757,9 +759,10 @@ describe('cupo Jarvis al enviar', () => {
       discrepancyResponseDescription: 'Devolución',
     }, 'company-1', kind);
     expect(plans.assertCanCreateDocuments).toHaveBeenCalledWith({
-      companyId: 'company-1', provider: 'JARVIS', quantity: 1,
+      companyId: 'company-1', provider: 'JARVIS', quantity: 0,
       documentType: kind === JarvisResolutionKind.SUPPORT_CREDIT_NOTE ? 'SUPPORT_DOCUMENT' : 'PURCHASE_INVOICE',
     });
+    expect(creditUnlimitedNote).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'company-1', `${kind}:FVJ:1`);
   });
 });
 

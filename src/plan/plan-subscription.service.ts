@@ -60,9 +60,6 @@ export interface PlanSubscriptionSnapshot {
 const JARVIS_BILLABLE_KINDS = [
   JarvisResolutionKind.ELECTRONIC_INVOICE,
   JarvisResolutionKind.SUPPORT_DOCUMENT,
-  JarvisResolutionKind.CREDIT_NOTE,
-  JarvisResolutionKind.DEBIT_NOTE,
-  JarvisResolutionKind.SUPPORT_CREDIT_NOTE,
 ] as const;
 
 const JARVIS_LOW_QUOTA_RATIO = 0.1;
@@ -288,7 +285,7 @@ export class PlanSubscriptionService {
       documentLimit == null ? null : Math.max(0, documentLimit - documentsUsed);
 
     if (provider === IntegrationProvider.JARVIS && remaining === 0) {
-      return 'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos electrónicos.';
+      return 'Se le acabaron los documentos disponibles del plan. Las notas crédito, débito y de ajuste siguen siendo ilimitadas durante la vigencia del plan.';
     }
 
     return (
@@ -497,7 +494,7 @@ export class PlanSubscriptionService {
         .andWhere('event.sentAt >= :since', { since })
         .getCount(),
       this.electronicDocumentsRepository.query(
-        `SELECT count(*)::int AS used FROM jarvis_payroll_documents WHERE company_id=$1 AND sent_at >= $2 AND status IN ('ACCEPTED','PROCESSING','UNCERTAIN')`,
+        `SELECT count(*)::int AS used FROM jarvis_payroll_documents WHERE company_id=$1 AND original_id IS NULL AND sent_at >= $2 AND status IN ('ACCEPTED','PROCESSING','UNCERTAIN')`,
         [companyId, since],
       ).then(rows => Number(rows[0]?.used ?? 0)),
     ]);

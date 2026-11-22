@@ -341,7 +341,7 @@ describe('cupo compartido Jarvis', () => {
     expect(result).toEqual({ allowed: 88, documentLimit: 100, documentsUsed: 12 });
   });
 
-  it('incluye todas las notas en el conteo de documentos enviados', async () => {
+  it('excluye las notas del conteo de documentos enviados', async () => {
     const repository = buildJarvisSalesRepository(3);
     const service = buildService(jarvis(), 0);
     (service as any).jarvisSalesInvoicesRepository = repository;
@@ -349,7 +349,7 @@ describe('cupo compartido Jarvis', () => {
     expect(snapshot.documentsUsed).toBe(3);
     expect(snapshot.remaining).toBe(97);
     expect(repository.queryBuilder.andWhere).toHaveBeenCalledWith('invoice.documentKind IN (:...kinds)', {
-      kinds: expect.arrayContaining(Object.values(JarvisResolutionKind)),
+      kinds: [JarvisResolutionKind.ELECTRONIC_INVOICE, JarvisResolutionKind.SUPPORT_DOCUMENT],
     });
     expect(repository.queryBuilder.andWhere).toHaveBeenCalledWith('invoice.sentAt >= :since', {
       since: jarvis().subscriptionStartedAt,
@@ -367,7 +367,7 @@ describe('cupo compartido Jarvis', () => {
         quantity: 1,
       }),
     ).rejects.toThrow(
-      'Se le acabaron los documentos disponibles del plan. Ya no puede enviar documentos electrónicos.',
+      'Se le acabaron los documentos disponibles del plan. Las notas crédito, débito y de ajuste siguen siendo ilimitadas durante la vigencia del plan.',
     );
   });
 
@@ -410,3 +410,21 @@ it('Jarvis suma nómina a la misma bolsa de documentos y reserva envíos pendien
   expect(snapshot.documentsUsed).toBe(42);
   expect(snapshot.remaining).toBe(58);
 });
+
+ it('permite notas sin saldo pero mantiene la vigencia del certificado', async () => {
+   const integration = buildIntegration({ provider: IntegrationProvider.JARVIS,
+     jarvisCertificateTerm: { startsAt: '2026-01-01T05:00:00Z', endsAt: '2027-01-01T05:00:00Z', checkedAt: '2026-01-01T05:00:00Z' } });
+   const service = buildService(integration, 100);
+   const params = { companyId: COMPANY_ID, provider: IntegrationProvider.JARVIS,
+     documentType: ElectronicDocumentType.PURCHASE_INVOICE, quantity: 0 };
+   await expect(service.assertCanCreateDocuments(params)).resolves.toBeUndefined();
+   await expect(service.assertCanCreateDocuments({ ...params, quantity: 1 })).rejects.toThrow();
+   integration.jarvisCertificateTerm!.endsAt = '2026-01-02T05:00:00Z';
+   await expect(service.assertCanCreateDocuments(params)).rejects.toThrow();
+ });
+ it('excluye ajustes de nómina del conteo SQL', async () => {
+   const service = buildService(buildIntegration({ provider: IntegrationProvider.JARVIS }), 0);
+   await service.getSubscription(COMPANY_ID, IntegrationProvider.JARVIS);
+   expect((service as any).electronicDocumentsRepository.query).toHaveBeenCalledWith(
+     expect.stringContaining('original_id IS NULL'), expect.any(Array));
+ });

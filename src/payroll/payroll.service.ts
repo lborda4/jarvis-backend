@@ -1,3 +1,4 @@
+import { creditUnlimitedNote } from '../integration/jarvis/helpers/unlimited-note-credit';
 import { buildPayrollReplacementPayload, payrollReplacementTotals } from './payroll-replacement';
 import { buildPayrollDeletionPayload, payrollAdjustmentState, payrollPredecessor, payrollAdjustmentProjection } from './payroll-adjustment';
 import { duplicatePayrollNovelties } from './payroll-duplicate';
@@ -1078,12 +1079,6 @@ export class PayrollService {
       );
     context.stage = 'JARVIS_QUOTA';
     const prepared = await this.plans.withJarvisQuotaLock(company, async () => {
-      await this.plans.assertCanCreateDocuments({
-        companyId: company,
-        provider: IntegrationProvider.JARVIS,
-        documentType: ElectronicDocumentType.PURCHASE_INVOICE,
-        quantity: 1,
-      });
       context.stage = 'LOAD_DOCUMENT';
       return this.db.transaction(async (m) => {
         await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
@@ -1094,6 +1089,9 @@ export class PayrollService {
           [company, id],
         );
         if (!d) throw new NotFoundException();
+        await this.plans.assertCanCreateDocuments({ companyId: company,
+          provider: IntegrationProvider.JARVIS,
+          documentType: ElectronicDocumentType.PURCHASE_INVOICE, quantity: d.original_id ? 0 : 1 });
         d.state = payrollDefaultLawDeductions(d.state);
         context.employee = d.employee_id;
         context.month = d.state.period;
@@ -1263,8 +1261,10 @@ export class PayrollService {
       );
       await this.audit(m, company, actor, `PAYROLL_${status}`, id);
     });
+    const noteDocumentCredit = prepared.adjustment && status === 'ACCEPTED'
+      ? await creditUnlimitedNote(this.db, this.api, company, `PAYROLL_ADJUSTMENT:${id}`) : undefined;
     context.stage = 'LOAD_RESULT';
-    return this.get(company, id);
+    return { ...await this.get(company, id), ...(noteDocumentCredit ? { noteDocumentCredit } : {}) };
   }
 
   async refreshStatus(company: string, actor: string, id: string) {
@@ -1312,7 +1312,9 @@ export class PayrollService {
       );
       await this.audit(m, company, actor, `PAYROLL_STATUS_${status}`, id);
     });
-    return this.get(company, id);
+    const noteDocumentCredit = d.original_id && validation.isValid && d.status !== 'ACCEPTED'
+      ? await creditUnlimitedNote(this.db, this.api, company, `PAYROLL_ADJUSTMENT:${id}`, new Date(d.sent_at)) : undefined;
+    return { ...await this.get(company, id), ...(noteDocumentCredit ? { noteDocumentCredit } : {}) };
   }
   async download(company: string, id: string, kind: 'pdf' | 'xml') {
     const d = await this.get(company, id);

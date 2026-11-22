@@ -1,3 +1,5 @@
+jest.mock('../integration/jarvis/helpers/unlimited-note-credit', () => ({ creditUnlimitedNote: jest.fn().mockResolvedValue('APPLIED') }));
+import { creditUnlimitedNote } from '../integration/jarvis/helpers/unlimited-note-credit';
 import { Logger } from '@nestjs/common';
 import { PayrollService } from './payroll.service';
 import { buildPayrollDeletionPayload, payrollAdjustmentProjection, payrollAdjustmentState, payrollPredecessor } from './payroll-adjustment';
@@ -54,7 +56,7 @@ function harness(noteType: 1 | 2 = 1) {
   const db = { query, transaction: jest.fn(async fn => fn({ query })) };
   const service = new PayrollService(db as any, catalogs as any, api as any, plans as any);
   const prepare = (state = changes(), overrides: any = {}) => service.prepareAdjustment(company, 'actor', 'original', 'note', { noteType, state, originalUpdatedAt: stamp, ...overrides });
-  return { service, prepare, documents, query, api, catalogs };
+  return { service, prepare, documents, query, api, catalogs, plans };
 }
 
 beforeEach(() => { jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {}); jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {}); });
@@ -89,11 +91,14 @@ it('reemplazo contiene nómina completa corregida y exige predecesor en el JSON 
 });
 
 it.each([1, 2] as const)('prepara y envía tipo %s con token de empresa y contador NA separado', async type => {
-  const { service, prepare, documents, api, query } = harness(type);
+  const { service, prepare, documents, api, query, plans } = harness(type);
+  plans.assertCanCreateDocuments.mockImplementation(async ({quantity}) => { if(quantity > 0)throw new Error('Cupo agotado'); });
   const prepared = await prepare();
   expect(prepared.status).toBe('DRAFT'); expect(api.payrollRequest).not.toHaveBeenCalled();
   const result = await service.sendDocument(company, 'actor', 'note');
   expect(result.status).toBe('ACCEPTED');
+  expect(plans.assertCanCreateDocuments).toHaveBeenCalledWith(expect.objectContaining({quantity:0}));
+  expect(creditUnlimitedNote).toHaveBeenCalledWith(expect.anything(), api, company, 'PAYROLL_ADJUSTMENT:note');
   expect(api.payrollRequest).toHaveBeenCalledWith('payroll-adjust-note', expect.objectContaining({ type_note: type, prefix: 'NA', consecutive: 1 }), 'private-company-token');
   expect(documents.get('original')).toEqual(original);
   expect(query.mock.calls.some(([sql]) => sql.includes('SET next_number=next_number+1'))).toBe(false);

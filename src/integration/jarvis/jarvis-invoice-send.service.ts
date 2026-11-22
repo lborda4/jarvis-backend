@@ -1,3 +1,4 @@
+import { creditUnlimitedNote } from './helpers/unlimited-note-credit';
 import { withBillingOperation } from './helpers/jarvis-billing-operation';
 import { checkInvoiceNoteEligibility } from './helpers/jarvis-invoice-note-eligibility.helper';
 import { resolveInvoicePayments } from './helpers/jarvis-invoice-payments.helper';
@@ -189,7 +190,7 @@ export class JarvisInvoiceSendService {
           documentType: (isSupport || isSupportCreditNote)
             ? ElectronicDocumentType.SUPPORT_DOCUMENT
             : ElectronicDocumentType.PURCHASE_INVOICE,
-          quantity: 1,
+          quantity: isNote ? 0 : 1,
         }),
       );
     }
@@ -715,6 +716,10 @@ export class JarvisInvoiceSendService {
           );
           const createdCufe = readNextPymeCreatedUniqueCode(created);
 
+          const noteDocumentCredit = isNote
+            ? await creditUnlimitedNote(this.dataSource, this.nextPymeApiClient, companyId,
+              `${kind}:${numbering.prefix}:${createdNumber}`)
+            : undefined;
           let historyId: string | undefined;
           let invoiceXml: string | null = null;
           try { invoiceXml = extractNextPymeInvoiceXml(created); } catch { /* Retrieve by CUFE/CUDE/CUDS when opening the PDF if emission did not include XML. */ }
@@ -771,6 +776,7 @@ export class JarvisInvoiceSendService {
 
           return {
             success: true,
+            noteDocumentCredit,
             invoice: {
               historyId,
               id: createdId,
