@@ -1,4 +1,5 @@
 import { parseInvoiceRadianStatus, type InvoiceRadianStatus } from './nextpyme-radian-status';
+import { parseJarvisCertificateTerm, type JarvisCertificateTerm } from '../../../plan/jarvis-certificate-term';
 import { parseRadianEventResult, type RadianEventResult } from './nextpyme-radian-result';
 import { extractNextPymeInvoiceXml } from './nextpyme-invoice-xml.helper';
 import {
@@ -372,6 +373,8 @@ function computeRetryDelayMs(attempt: number): number {
   return 1000 * 3 ** (attempt - 1);
 }
 
+export class NextPymePackageRejectedException extends BadGatewayException {}
+
 @Injectable()
 export class NextPymeApiClient {
   private readonly logger = new Logger(NextPymeApiClient.name);
@@ -380,6 +383,23 @@ export class NextPymeApiClient {
     private readonly httpService: HttpService,
     private readonly configService: ConfigService<AppConfiguration, true>,
   ) {}
+
+  /** Assignment only. The supplied curl uses POST with an empty body; do not log this response (contains P12 passwords). */
+  async getCertificateTerm(companyNit: string, companyToken: string): Promise<JarvisCertificateTerm> {
+    const token = this.requireToken(companyToken);
+    const nit = String(companyNit ?? '').trim().split('-')[0];
+    if (!/^\d{5,15}$/.test(nit)) throw new BadGatewayException('El NIT de la empresa no es válido para consultar su certificado digital.');
+    try {
+      const response = await firstValueFrom(this.httpService.post<unknown>(`${this.getBaseUrl()}/certificates-listing/${nit}`, '', {
+        headers: this.buildAuthHeaders(token), timeout: 20000, validateStatus: () => true,
+      }));
+      if (response.status < 200 || response.status >= 300) throw new Error('Certificate lookup rejected');
+      return parseJarvisCertificateTerm(response.data);
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException('No se pudo consultar la vigencia del certificado digital en NextPyme. No se asignó el plan. Intenta nuevamente.');
+    }
+  }
 
   /** The issuer belongs to the authenticated company, not to invoice.customer. */
   async getIssuerTaxConfiguration(companyToken: string): Promise<{
@@ -553,7 +573,9 @@ export class NextPymeApiClient {
       this.logger.log(`[plan/${operation}] status=${response.status} respuesta=${this.preview(response.data).split(token).join('[REDACTED]')}`);
       if (response.status < 200 || response.status >= 300 || (response.data && typeof response.data === 'object' && (response.data as Record<string, unknown>).success === false)) {
         const detail = this.extractErrorMessage(response.data);
-        throw new BadGatewayException(detail
+        const Failure = (response.status >= 400 && response.status < 500) || (response.data as { success?: boolean })?.success === false
+          ? NextPymePackageRejectedException : BadGatewayException;
+        throw new Failure(detail
           ? `NextPyme rechazó la operación de documentos (HTTP ${response.status}): ${detail.split(token).join('[REDACTED]')}`
           : `No se pudo completar la operación de documentos en NextPyme (HTTP ${response.status}).`);
       }

@@ -7,6 +7,7 @@ import {
 } from '../interfaces/jwt-payload.interface';
 import { resolveActiveCompanyId } from '../helpers/authenticated-company.helper';
 import { isSessionIssuedBeforePasswordChange } from '../helpers/password-reset.helper';
+import { UserRole } from '../enums/user-role.enum';
 
 /**
  * Resuelve un AuthTokenPayload (ya verificado/firmado válido) a un
@@ -29,7 +30,7 @@ export class AuthenticatedUserResolverService {
 
     const requestedCompanyId = payload.companyId?.trim() ?? '';
 
-    // Sin empresa en el token (solo posible para ADMIN): un único query.
+    // Administradores y asesores pueden iniciar sesión sin empresa.
     if (!requestedCompanyId) {
       const user = await this.usersRepository.findById(payload.sub);
 
@@ -46,6 +47,7 @@ export class AuthenticatedUserResolverService {
       );
 
       return {
+        ...(user.role === UserRole.ADVISOR ? { role: user.role } : {}),
         userId: user.id,
         email: user.email,
         companyId: null,
@@ -66,6 +68,9 @@ export class AuthenticatedUserResolverService {
 
     this.assertSessionCurrent(userCompany.user.passwordChangedAt, payload.iat);
 
+    resolveActiveCompanyId(requestedCompanyId, userCompany.user.role,
+      'El token no contiene una empresa activa válida.');
+
     if (!userCompany.company) {
       throw new UnauthorizedException(
         'La empresa activa del token no está asociada al usuario.',
@@ -73,6 +78,7 @@ export class AuthenticatedUserResolverService {
     }
 
     return {
+      ...(userCompany.user.role === UserRole.ADVISOR ? { role: userCompany.user.role } : {}),
       userId: userCompany.user.id,
       email: userCompany.user.email,
       companyId: userCompany.companyId,

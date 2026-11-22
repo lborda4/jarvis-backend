@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PlanModule } from '../plan/plan.module';
 import { CommonModule } from '../common/common.module';
 import { CompanyModule } from '../company/company.module';
 import { DianModule } from '../dian/dian.module';
@@ -14,6 +15,7 @@ import { PurchaseInvoiceImportWorkerService } from './services/purchase-invoice-
 /** La solicitud inicia el procesamiento en segundo plano, sin temporizadores. */
 @Module({
   imports: [
+    PlanModule,
     PurchaseInvoiceImportSharedModule,
     RealtimeModule,
     CommonModule,

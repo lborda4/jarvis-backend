@@ -5,8 +5,37 @@ import { IntegrationProvider } from '../integration/enums/integration-provider.e
 import { SubscriptionStatus } from './enums/subscription-status.enum';
 import { JarvisResolutionKind } from '../integration/jarvis/enums/jarvis-resolution-kind.enum';
 import { PlanSubscriptionService } from './plan-subscription.service';
+import { listJarvisTopUps } from './jarvis-top-ups';
 
 const COMPANY_ID = 'company-1';
+
+describe('recargas acumulativas de Jarvis', () => {
+  it('un certificado vencido deja el límite, consumo del período y saldo en cero incluso en planes ilimitados', async () => {
+    const integration = buildIntegration({ provider: IntegrationProvider.JARVIS, jarvisCertificateTerm: { startsAt: '2020-01-01T05:00:00Z', endsAt: '2021-01-01T05:00:00Z', checkedAt: '2020-01-01T05:00:00Z' } });
+    integration.plan!.documentLimit = null;
+    expect(await buildService(integration, 93, 20, 7, 10).getSubscription(COMPANY_ID, IntegrationProvider.JARVIS)).toMatchObject({ documentLimit: 0, documentsUsed: 0, remaining: 0, expired: true });
+  });
+  it('suma recargas confirmadas al cupo y conserva el consumo para validar el envío', async () => {
+    const integration = buildIntegration({ provider: IntegrationProvider.JARVIS, topUpOperations: [
+      { id: 'purchase', status: 'APPLIED', periodStart: '2025-12-31', createdAt: '2026-01-01T12:00:00Z', topUps: [listJarvisTopUps()[3]] },
+      { id: 'uncertain', status: 'UNCERTAIN', periodStart: '2025-12-31', createdAt: '2026-01-01T12:00:00Z', topUps: [listJarvisTopUps()[3]] },
+    ] });
+    const service = buildService(integration, 92);
+    const snapshot = await service.getSubscription(COMPANY_ID, IntegrationProvider.JARVIS);
+    expect(snapshot).toMatchObject({ documentLimit: 200, documentsUsed: 92, remaining: 108 });
+    expect(snapshot.plan?.documentLimit).toBe(100);
+    const allowed = await service.resolveAllowedQuantity({ companyId: COMPANY_ID, provider: IntegrationProvider.JARVIS, documentType: ElectronicDocumentType.SUPPORT_DOCUMENT, requestedQuantity: 200 });
+    expect(allowed.allowed).toBe(108);
+  });
+
+  it('un plan anual vencido no permite envíos aunque tenga documentos sin consumir', async () => {
+    const integration = buildIntegration({ provider: IntegrationProvider.JARVIS, subscriptionStartedAt: new Date('2020-02-29T12:00:00Z') });
+    integration.plan!.commercialTerms = { billingMonths: 12 } as never;
+    const service = buildService(integration, 0);
+    await expect(service.resolveAllowedQuantity({ companyId: COMPANY_ID, provider: IntegrationProvider.JARVIS, documentType: ElectronicDocumentType.SUPPORT_DOCUMENT, requestedQuantity: 1 })).rejects.toThrow('anual venció');
+    expect(await service.getSubscription(COMPANY_ID, IntegrationProvider.JARVIS)).toMatchObject({ expired: true, remaining: 0, expiresAt: '2021-02-28T05:00:00.000Z' });
+  });
+});
 
 function buildIntegration(overrides: Partial<Integration> = {}): Integration {
   return {

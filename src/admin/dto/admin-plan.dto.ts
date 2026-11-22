@@ -1,6 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateAdminPlanRequestDto {
+  commissionClass?: 'BASIC' | 'PLUS' | 'PRO' | null;
+  salePriceCop?: number | null;
   @ApiProperty({ maxLength: 255 })
   name: string;
 

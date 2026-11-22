@@ -21,6 +21,9 @@ import { IntegrationsRepository } from '../integration/repositories/integrations
 import { Plan } from './entities/plan.entity';
 import { SubscriptionStatus } from './enums/subscription-status.enum';
 import { PlansRepository } from './repositories/plans.repository';
+import { jarvisConsumptionStart, jarvisDocumentLimit, jarvisSubscriptionPeriod } from './jarvis-subscription';
+import { assignJarvisCertificateTerm, type JarvisCertificateTerm } from './jarvis-certificate-term';
+import { subscriptionAccess } from './subscription-access';
 
 export type DocumentQuotaNoticeCode = 'LOW' | 'EXHAUSTED';
 
@@ -34,6 +37,9 @@ export interface DocumentQuotaNotice {
 
 export interface DocumentQuotaSnapshot { documentLimit: number | null; documentsUsed: number; remaining: number | null; }
 export interface PlanSubscriptionSnapshot {
+  expiresAt?: string | null;
+  expired?: boolean;
+  notStarted?: boolean;
   documentQuotas?: Partial<Record<ElectronicDocumentType, DocumentQuotaSnapshot>>;
   quotaNotice?: DocumentQuotaNotice | null;
   status: SubscriptionStatus | null;
@@ -122,6 +128,12 @@ export class PlanSubscriptionService {
     }
 
     return this.buildSnapshot(integration);
+  }
+
+  async assertCanMutate(companyId: string, provider: IntegrationProvider) {
+    const integration = await this.integrationsRepository.findByCompanyAndProviderWithPlan(companyId, provider);
+    if (integration && !subscriptionAccess(integration).canWrite)
+      throw new ForbiddenException('La suscripción está vencida o inactiva. Solo puedes consultar documentos.');
   }
 
   resolveIncludedDocumentTypes(
@@ -218,6 +230,15 @@ export class PlanSubscriptionService {
       );
     }
 
+    if (provider === IntegrationProvider.JARVIS && jarvisSubscriptionPeriod(integration).expired) {
+      throw new ForbiddenException('La suscripción anual venció. Renueva el plan para seguir enviando documentos.');
+    }
+    if (provider === IntegrationProvider.JARVIS && jarvisSubscriptionPeriod(integration).notStarted) {
+      throw new ForbiddenException('La vigencia de la suscripción Jarvis aún no ha comenzado.');
+    }
+    if (provider === IntegrationProvider.SIIGO && !subscriptionAccess(integration).canWrite)
+      throw new ForbiddenException('La suscripción SIIGO venció. Solo puedes consultar documentos; no puedes importar ni realizar cambios.');
+
     const includedTypes = this.resolveIncludedDocumentTypes(integration);
     const isJarvis = provider === IntegrationProvider.JARVIS;
 
@@ -228,7 +249,7 @@ export class PlanSubscriptionService {
     }
 
     const documentLimit = isJarvis
-      ? integration.plan?.documentLimit ?? null
+      ? jarvisDocumentLimit(integration)
       : this.limitFor(integration, documentType);
 
     if (requestedQuantity <= 0) {
@@ -239,7 +260,7 @@ export class PlanSubscriptionService {
       return { allowed: requestedQuantity, documentLimit: null, documentsUsed: 0 };
     }
 
-    const startedAt = integration.subscriptionStartedAt ?? integration.createdAt;
+    const startedAt = isJarvis ? jarvisConsumptionStart(integration) : integration.subscriptionStartedAt ?? integration.createdAt;
     const documentsUsed = isJarvis
       ? await this.countJarvisBillableDocuments(companyId, startedAt)
       : await this.countDocumentsSince(
@@ -282,6 +303,7 @@ export class PlanSubscriptionService {
     subscriptionStatus?: SubscriptionStatus;
     restartSubscription?: boolean;
     includedDocumentTypes?: ElectronicDocumentType[];
+    jarvisCertificateTerm?: JarvisCertificateTerm;
   }): Promise<Integration> {
     const plan = await this.plansRepository.findById(params.planId);
 
@@ -297,6 +319,9 @@ export class PlanSubscriptionService {
 
     const shouldRestart =
       params.restartSubscription === true || !params.integration.planId;
+
+    if (params.integration.provider === IntegrationProvider.JARVIS && !params.jarvisCertificateTerm)
+      throw new BadRequestException('Consulta la vigencia del certificado digital antes de asignar un plan Jarvis.');
 
     params.integration.plan = plan;
     params.integration.subscriptionStatus =
@@ -317,6 +342,12 @@ export class PlanSubscriptionService {
 
     if (shouldRestart || !params.integration.subscriptionStartedAt) {
       params.integration.subscriptionStartedAt = new Date();
+    }
+
+    if (params.integration.provider === IntegrationProvider.JARVIS) {
+      assignJarvisCertificateTerm(params.integration, params.jarvisCertificateTerm!);
+      params.integration.commercialTopUps = [];
+      params.integration.pendingInitialDocuments = plan.documentLimit === null ? 0 : plan.documentLimit + 1;
     }
 
     return this.integrationsRepository.save(params.integration);
@@ -368,8 +399,11 @@ export class PlanSubscriptionService {
       };
     }
 
-    const startedAt = integration.subscriptionStartedAt ?? integration.createdAt;
     const isJarvis = integration.provider === IntegrationProvider.JARVIS;
+    const period = isJarvis ? jarvisSubscriptionPeriod(integration) : null;
+    const inactive = period?.expired || period?.notStarted;
+    const siigoAccess = integration.provider === IntegrationProvider.SIIGO ? subscriptionAccess(integration) : null;
+    const startedAt = isJarvis ? jarvisConsumptionStart(integration) : integration.subscriptionStartedAt ?? integration.createdAt;
     const usagePerType = isJarvis
       ? []
       : await Promise.all(
@@ -384,26 +418,27 @@ export class PlanSubscriptionService {
           return [type, { documentLimit, documentsUsed, remaining: documentLimit === null ? null : Math.max(0, documentLimit - documentsUsed) }];
         })) : undefined;
     const documentsUsed = isJarvis
-      ? await this.countJarvisBillableDocuments(integration.companyId, startedAt)
+      ? inactive ? 0 : await this.countJarvisBillableDocuments(integration.companyId, startedAt)
       : usagePerType.reduce((sum, count) => sum + count, 0);
     const quotaValues = documentQuotas ? Object.values(documentQuotas) : [];
     const documentLimit = documentQuotas
       ? (quotaValues.some(quota => quota.documentLimit === null) ? null : quotaValues.reduce((sum, quota) => sum + quota.documentLimit!, 0))
-      : plan?.documentLimit ?? null;
+      : isJarvis ? jarvisDocumentLimit(integration) : plan?.documentLimit ?? null;
     const remaining = documentQuotas
       ? (quotaValues.some(quota => quota.remaining === null) ? null : quotaValues.reduce((sum, quota) => sum + quota.remaining!, 0))
       : documentLimit === null ? null : Math.max(0, documentLimit - documentsUsed);
 
     return {
       status: integration.subscriptionStatus,
-      startedAt: integration.subscriptionStartedAt?.toISOString() ?? null,
+      startedAt: period?.start.toISOString() ?? integration.subscriptionStartedAt?.toISOString() ?? null,
       documentLimit,
       documentsUsed,
-      remaining,
+      remaining: period?.expired || period?.notStarted ? 0 : remaining,
       includedDocumentTypes,
       ...(isJarvis
-        ? { quotaNotice: this.buildJarvisQuotaNotice(documentLimit, documentsUsed, remaining) }
+        ? { expiresAt: period?.end?.toISOString() ?? null, expired: period?.expired ?? false, notStarted: period?.notStarted ?? false, quotaNotice: period?.expired || period?.notStarted ? null : this.buildJarvisQuotaNotice(documentLimit, documentsUsed, remaining) }
         : {}),
+      ...(siigoAccess ? { expiresAt: siigoAccess.expiresAt, expired: siigoAccess.expired, notStarted: false } : {}),
       ...(documentQuotas ? { documentQuotas } : {}),
       plan: plan ? {
         id: plan.id,

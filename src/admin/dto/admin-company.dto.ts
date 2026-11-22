@@ -5,6 +5,10 @@ import { IntegrationProvider } from '../../integration/enums/integration-provide
 import { JarvisCredentialsSeedDto } from '../../integration/jarvis/dto/jarvis-credentials-seed.dto';
 import { SubscriptionStatus } from '../../plan/enums/subscription-status.enum';
 import type { JarvisModule } from '../../company/jarvis-modules';
+import type { PlanCommercialTerms } from '../../plan/plan-commercial-terms';
+import type { JarvisTopUp } from '../../plan/jarvis-top-ups';
+import type { JarvisDocumentCycle, JarvisTopUpOperation } from '../../plan/jarvis-subscription';
+import type { JarvisCertificateTerm } from '../../plan/jarvis-certificate-term';
 
 export class UpdateCompanyJarvisModulesDto {
   @ApiProperty({ enum: ['BILLING', 'PAYROLL'], isArray: true })
@@ -25,6 +29,11 @@ export class AdminCompanyResponsibleDto {
 }
 
 export class AdminPlanDto {
+  commissionClass?: 'BASIC' | 'PLUS' | 'PRO' | null;
+  salePriceCop?: number | null;
+  @ApiPropertyOptional({ nullable: true, description: 'Precio en COP, periodicidad y alcance del plan. No incluye recargas.' })
+  commercialTerms: PlanCommercialTerms | null;
+
   @ApiProperty()
   id: string;
 
@@ -49,6 +58,17 @@ export class AdminPlanDto {
 }
 
 export class AdminIntegrationItemDto {
+  @ApiPropertyOptional({ nullable: true, description: 'Período de cupo nuevo, independiente del historial anterior.' })
+  jarvisDocumentCycle?: JarvisDocumentCycle | null;
+  @ApiPropertyOptional({ nullable: true, description: 'Vigencia del certificado consultada exclusivamente al asignar un plan Jarvis.' })
+  jarvisCertificateTerm?: JarvisCertificateTerm | null;
+  @ApiPropertyOptional({ description: 'Paquete inicial pendiente de asignar en NextPyme, incluida su reserva.' })
+  pendingInitialDocuments?: number;
+  @ApiPropertyOptional({ description: 'Historial de recargas acumulativas y su confirmación en NextPyme.' })
+  topUpOperations?: JarvisTopUpOperation[];
+  @ApiPropertyOptional({ description: 'Recargas comerciales elegidas y sus precios, separadas del plan.' })
+  commercialTopUps?: JarvisTopUp[];
+
   @ApiPropertyOptional({ description: 'Cupo actual calculado con el consumo del plan. remaining null significa sin límite.' })
   documentQuota?: { documentLimit: number | null; documentsUsed: number; remaining: number | null };
 
@@ -89,6 +109,7 @@ export class AdminIntegrationItemDto {
 }
 
 export class AdminCompanyListItemDto {
+  advisorId?: string | null;
   @ApiPropertyOptional({ nullable: true })
   registrationEmail?: string | null;
   @ApiProperty({ enum: ['BILLING', 'PAYROLL'], isArray: true })
@@ -239,6 +260,9 @@ export class CreateAdminCompanyRequestDto {
   })
   jarvisPlanId?: string;
 
+  @ApiPropertyOptional({ type: [String], description: 'Recargas acumulables de documentos y/o empleados. Cada codigo se selecciona una vez.' })
+  jarvisTopUpCodes?: string[];
+
   @ApiPropertyOptional({
     enum: ElectronicDocumentType,
     isArray: true,
@@ -279,6 +303,9 @@ export class CreateAdminCompanyRequestDto {
 }
 
 export class UpdateIntegrationSubscriptionRequestDto {
+  @ApiPropertyOptional({ type: [String], description: 'Recargas seleccionadas. Un arreglo vacío las quita; solo aplica a Jarvis.' })
+  topUpCodes?: string[];
+
   @ApiPropertyOptional({
     example: '11111111-1111-4111-8111-111111111102',
     description: 'Nuevo plan para la integración.',
@@ -303,6 +330,14 @@ export class UpdateIntegrationSubscriptionRequestDto {
       'Si es true, reinicia la fecha de inicio de suscripción al asignar plan.',
   })
   restartSubscription?: boolean;
+}
+
+export class ApplyJarvisTopUpRequestDto {
+  @ApiProperty({ description: 'Identificador estable de esta recarga. Reintentos con el mismo identificador no duplican documentos.' })
+  operationId: string;
+
+  @ApiProperty({ type: [String] })
+  topUpCodes: string[];
 }
 
 export class UpdateSiigoDocumentQuotasRequestDto {
@@ -338,8 +373,16 @@ export class CreateAdminCompanyResponseDto {
 }
 
 export class UpdateIntegrationSubscriptionResponseDto {
+  @ApiPropertyOptional({ type: AdminCompanyListItemDto })
+  company?: AdminCompanyListItemDto;
+
   @ApiProperty({ type: AdminIntegrationItemDto })
   integration: AdminIntegrationItemDto;
+}
+
+export class ApplyJarvisTopUpResponseDto extends UpdateIntegrationSubscriptionResponseDto {
+  @ApiProperty()
+  operation: JarvisTopUpOperation;
 }
 
 export class ListAdminCompaniesResponseDto {
@@ -451,6 +494,8 @@ export class LookupAdminCompanyNameResponseDto {
 }
 
 export class UpdateCompanyTrackingDto {
+  @ApiPropertyOptional({ nullable: true, description: 'Período Jarvis visto al registrar el pago; evita renovar dos veces.' })
+  expectedJarvisCycleId?: string | null;
   @ApiPropertyOptional({ description: 'Registrar el pago y renovar un período. Omitir o false al editar otros campos.' })
   paymentReceived?: boolean;
   @ApiPropertyOptional({ nullable: true, description: 'Vencimiento visto por el administrador; impide registrar dos veces el mismo pago.' })

@@ -4,6 +4,7 @@ import { AppConfiguration } from '../../config/configuration';
 import { isSafeMailFrom } from '../helpers/password-reset.helper';
 import { buildPasswordResetEmail } from '../helpers/password-reset-email.helper';
 import { buildWelcomeEmail } from '../helpers/welcome-email.helper';
+import { buildAdvisorEmail } from '../helpers/advisor-email.helper';
 
 const RESEND_EMAILS_URL = 'https://api.resend.com/emails';
 
@@ -22,6 +23,10 @@ export class ResendMailService {
 
   async sendWelcome(recipient: string, companyName: string, registrationUrl: string): Promise<boolean> {
     return this.send(recipient, buildWelcomeEmail(companyName, registrationUrl));
+  }
+
+  async sendAdvisorAccess(recipient: string, name: string, url: string, registered: boolean): Promise<boolean> {
+    return this.send(recipient, buildAdvisorEmail(name, url, registered));
   }
 
   async sendPayrollPayslip(recipient: string, template: { subject: string; html: string; text: string }, attachment: { filename: string; content: string }, requestKey: string): Promise<boolean> {

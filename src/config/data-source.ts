@@ -23,6 +23,8 @@ import { Plan } from '../plan/entities/plan.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductCategory } from '../products/entities/product-category.entity';
 import { ProductPriceList } from '../products/entities/product-price-list.entity';
+import { Advisor } from '../auth/entities/advisor.entity';
+import { AdvisorSale } from '../advisor/advisor-sale.entity';
 import { loadEnvironmentVariables } from './env-file.util';
 
 loadEnvironmentVariables();
@@ -40,6 +42,8 @@ export default new DataSource({
   url: databaseUrl,
   ssl: { rejectUnauthorized: false },
   entities: [
+    Advisor,
+    AdvisorSale,
     JarvisRadianEvent,
     JarvisPaymentMethod,
     JarvisSalesInvoice,

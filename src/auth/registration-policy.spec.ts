@@ -1,5 +1,6 @@
 import { AuthService } from './auth.service';
 import { User } from './entities/user.entity';
+import { UserRole } from './enums/user-role.enum';
 import { IntegrationProvider } from '../integration/enums/integration-provider.enum';
 import { registrationPolicy, assertRegistrationPolicy } from './helpers/registration-policy.helper';
 import * as bcrypt from 'bcrypt';
@@ -71,6 +72,12 @@ it('no permite sobrescribir una cuenta existente con otra contraseña', async ()
   await expect(service.register(request)).rejects.toThrow('contraseña actual');
   expect(users.save).not.toHaveBeenCalled();
   expect(query.mock.calls.some(([sql]) => sql.includes('UPDATE company_registration_invitations'))).toBe(false);
+});
+it('no vincula una cuenta de asesor a una empresa desde un enlace de registro normal', async () => {
+  const { service, request, users, links } = setup();
+  users.findOne.mockResolvedValue({ id: 'advisor', role: UserRole.ADVISOR, active: true });
+  await expect(service.register(request)).rejects.toThrow('corresponde a un asesor');
+  expect(links.save).not.toHaveBeenCalled(); expect(users.save).not.toHaveBeenCalled();
 });
 it('la consulta previa no consume el enlace', async () => {
   const { service, request, invitations, query } = setup();

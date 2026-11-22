@@ -27,6 +27,8 @@ import { AdminService } from './admin.service';
 import { RegistrationInvitationService } from '../auth/services/registration-invitation.service';
 import {
   CreateAdminCompanyRequestDto,
+  ApplyJarvisTopUpRequestDto,
+  ApplyJarvisTopUpResponseDto,
   CreateAdminCompanyResponseDto,
   ListAdminCitiesResponseDto,
   ListAdminCompaniesResponseDto,
@@ -54,6 +56,14 @@ import { RutParserService } from './rut-parser.service';
 @Controller('admin')
 @UseGuards(AdminGuard)
 export class AdminController {
+  @Get('companies/:companyId/details')
+  companyDetails(@Param('companyId') companyId: string) { return this.adminService.companyDetails(companyId); }
+
+  @Post('companies/:companyId/comments')
+  addCompanyComment(@Param('companyId') companyId: string, @Body() request: { text: string }) { return this.adminService.addCompanyComment(companyId, request?.text); }
+
+  @Patch('companies/:companyId/profile')
+  updateCompanyProfile(@Param('companyId') companyId: string, @Body() request: Parameters<AdminService['updateCompanyProfile']>[1]) { return this.adminService.updateCompanyProfile(companyId, request); }
   @Patch('companies/:companyId/jarvis-modules')
   @ApiOperation({ summary: 'Actualizar módulos de Jarvis de una empresa' })
   updateJarvisModules(@Param('companyId') companyId: string, @Body() request: UpdateCompanyJarvisModulesDto) {
@@ -86,6 +96,12 @@ export class AdminController {
     return this.adminService.assignNextPymePackage(companyId, request);
   }
 
+  @Post('companies/:companyId/jarvis/top-ups')
+  @ApiOperation({ summary: 'Aplicar una recarga acumulativa sin renovar la suscripción anual' })
+  applyJarvisTopUp(@Param('companyId') companyId: string, @Body() request: ApplyJarvisTopUpRequestDto): Promise<ApplyJarvisTopUpResponseDto> {
+    return this.adminService.applyCompanyJarvisTopUp(companyId, request);
+  }
+
   constructor(
     private readonly adminService: AdminService,
     private readonly rutParserService: RutParserService,
@@ -106,8 +122,8 @@ export class AdminController {
 
   @Patch('companies/:companyId/tracking')
   @ApiOperation({ summary: 'Configurar comercial y periodicidad del seguimiento' })
-  updateTracking(@Param('companyId') companyId: string, @Body() request: UpdateCompanyTrackingDto) {
-    return this.adminService.updateCompanyTracking(companyId, request);
+  updateTracking(@Param('companyId') companyId: string, @Body() request: UpdateCompanyTrackingDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.adminService.updateCompanyTracking(companyId, request, user.userId);
   }
 
   @Patch('plans/:planId')
@@ -123,6 +139,12 @@ export class AdminController {
   })
   listPlans(): Promise<ListAdminPlansResponseDto> {
     return this.adminService.listPlans();
+  }
+
+  @Get('jarvis/top-ups')
+  @ApiOperation({ summary: 'Listar recargas de documentos y nómina con sus precios en COP' })
+  listJarvisTopUps() {
+    return this.adminService.listJarvisTopUps();
   }
 
   @Get('companies')

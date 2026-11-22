@@ -24,6 +24,8 @@ import { Plan } from '../plan/entities/plan.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductCategory } from '../products/entities/product-category.entity';
 import { ProductPriceList } from '../products/entities/product-price-list.entity';
+import { Advisor } from '../auth/entities/advisor.entity';
+import { AdvisorSale } from '../advisor/advisor-sale.entity';
 import { AppConfiguration } from './configuration';
 
 export function buildTypeOrmConfig(
@@ -34,6 +36,8 @@ export function buildTypeOrmConfig(
     url: configService.get('database.url', { infer: true }),
     ssl: { rejectUnauthorized: false },
     entities: [
+      Advisor,
+      AdvisorSale,
       JarvisRadianEvent,
       JarvisPaymentMethod,
     JarvisSalesInvoice,

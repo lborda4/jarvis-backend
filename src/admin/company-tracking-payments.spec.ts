@@ -13,7 +13,7 @@ describe('Company tracking payments', () => {
     const repository = { findOne: jest.fn().mockResolvedValue(company), save: jest.fn() };
     const update = jest.fn(async (_criteria, changes) => { Object.assign(integration, changes); });
     const dataSource = { transaction: jest.fn(async work => work({ getRepository: entity => entity === Company ? repository : { update } })) };
-    const service = new AdminService(dataSource as never, { findAllWithIntegrations: async () => [company] } as never, {} as never, {} as never, { resolveIncludedDocumentTypes: () => [] } as never, {} as never, {} as never, {} as never);
+    const service = new AdminService(dataSource as never, { findById: async () => company, findAllWithIntegrations: async () => [company] } as never, {} as never, { findByCompanyAndProviderWithPlan: async () => null } as never, { resolveIncludedDocumentTypes: () => [] } as never, {} as never, {} as never, {} as never);
     return { service, company, integration, repository, update, startedAt };
   }
   it('renews overdue clients from today and activates their plan without restarting document usage', async () => {

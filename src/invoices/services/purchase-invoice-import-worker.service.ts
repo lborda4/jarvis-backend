@@ -1,4 +1,5 @@
 import { SiigoPurchaseHistorySyncService } from '../../integration/siigo/siigo-purchase-history-sync.service';
+import { PlanSubscriptionService } from '../../plan/plan-subscription.service';
 import { SiigoPurchaseSyncJobStatus } from '../../integration/enums/siigo-purchase-sync-job-status.enum';
 import { resolveCufeImportRow } from '../helpers/purchase-invoice-cufe.helper';
 import {
@@ -58,6 +59,7 @@ export class PurchaseInvoiceImportWorkerService
     private readonly purchaseInvoiceImportStatusService: PurchaseInvoiceImportStatusService,
     private readonly postgresNotifyService: PostgresNotifyService,
     private readonly siigoPurchaseHistorySyncService: SiigoPurchaseHistorySyncService,
+    private readonly planSubscriptionService: PlanSubscriptionService,
   ) {}
 
   onApplicationShutdown(): void {
@@ -111,6 +113,7 @@ export class PurchaseInvoiceImportWorkerService
   private async processOneBatchForJob(
     job: PurchaseInvoiceImportJob,
   ): Promise<boolean> {
+    await this.planSubscriptionService.assertCanMutate(job.companyId, job.provider ?? IntegrationProvider.SIIGO);
     const outstanding =
       await this.purchaseInvoiceImportJobRowsRepository.countOutstandingByJob(
         job.id,

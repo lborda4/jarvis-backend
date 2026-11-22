@@ -8,6 +8,8 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
+  Optional,
   UnauthorizedException,
   forwardRef,
 } from '@nestjs/common';
@@ -43,6 +45,7 @@ import {
   AUTH_ERROR_MESSAGE,
 } from './constants/auth-error.constants';
 import { UserRole } from './enums/user-role.enum';
+import { AdvisorAccountService } from './services/advisor-account.service';
 import { resolveActiveCompanyId } from './helpers/authenticated-company.helper';
 import {
   applyPrivacyConsent,
@@ -54,6 +57,8 @@ const BCRYPT_SALT_ROUNDS = 10;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   async integrationPolicyAcceptance(userId: string, companyId: string | null | undefined, policyId: string, accept = false) {
     const policy = INTEGRATION_POLICIES[policyId];
     if (!companyId || !policy || !Object.prototype.hasOwnProperty.call(INTEGRATION_POLICIES, policyId)) throw new BadRequestException('No se pudo identificar la política o la empresa.');
@@ -76,10 +81,22 @@ export class AuthService {
     @Inject(forwardRef(() => PlanSubscriptionService))
     private readonly planSubscriptionService: PlanSubscriptionService,
     private readonly registrationInvitations: RegistrationInvitationService,
+    @Optional() private readonly advisorAccounts?: AdvisorAccountService,
   ) {}
 
   async getRegistrationPolicy(token: unknown) {
     return this.registrationInvitations.preview(token);
+  }
+
+  async getAdvisorRegistration(token: unknown) {
+    if (!this.advisorAccounts) throw new BadRequestException('El registro de asesores no está disponible.');
+    return this.advisorAccounts.preview(token);
+  }
+
+  async registerAdvisor(request: { registrationToken?: unknown; password?: unknown; acceptPrivacyPolicy?: unknown }) {
+    if (!this.advisorAccounts) throw new BadRequestException('El registro de asesores no está disponible.');
+    const user = await this.advisorAccounts.register(request);
+    return this.buildAuthResponse(user, null);
   }
 
   async inviteAccountant(currentUser: AuthenticatedUser, email: unknown) {
@@ -104,6 +121,7 @@ export class AuthService {
         // Serialize account creation when different company invitations target the same email.
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`registration:${email}`]);
         const existingUser = await usersRepository.findOne({ where: { email } });
+        if (existingUser?.role === UserRole.ADVISOR) throw new ConflictException('Este correo corresponde a un asesor. Usa otro correo para el acceso de la empresa.');
         if (existingUser && (!existingUser.active || !await bcrypt.compare(password, existingUser.password)))
           throw new ConflictException('Ya existe una cuenta con este correo. Usa su contraseña actual para vincular esta empresa.');
         const passwordHash = existingUser?.password ?? await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
@@ -196,7 +214,11 @@ export class AuthService {
 
     const company = await this.resolveActiveCompanyForUser(user);
 
-    return this.buildAuthResponse(user, company);
+    const response = await this.buildAuthResponse(user, company);
+    this.logger.log(
+      `hola | Inicio de sesión | correo=${user.email} | empresa=${company?.name ?? 'Sin empresa activa'}`,
+    );
+    return response;
   }
 
   async switchCompany(
@@ -308,7 +330,7 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
-    const companies = await this.listCompaniesForUser(user.id);
+    const companies = user.role === UserRole.ADVISOR ? [] : await this.listCompaniesForUser(user.id);
     const companyId = resolveActiveCompanyId(
       currentUser.companyId,
       user.role,
@@ -344,7 +366,7 @@ export class AuthService {
     company: Company | null,
   ): Promise<AuthTokensResponseDto> {
     const tokens = await this.generateTokens(user, company?.id ?? null);
-    const companies = await this.listCompaniesForUser(user.id);
+    const companies = user.role === UserRole.ADVISOR ? [] : await this.listCompaniesForUser(user.id);
 
     return buildAuthTokensResponse(
       tokens.accessToken,
@@ -386,6 +408,7 @@ export class AuthService {
   private async resolveActiveCompanyForUser(
     user: User,
   ): Promise<Company | null> {
+    if (user.role === UserRole.ADVISOR) return null;
     const companies = await this.listCompaniesForUser(user.id);
 
     if (companies.length === 0) {

@@ -9,6 +9,9 @@ import { IntegrationModule } from '../integration/integration.module';
 import { JarvisModule } from '../integration/jarvis/jarvis.module';
 import { PlanModule } from '../plan/plan.module';
 import { AdminController } from './admin.controller';
+import { AdminAdvisorsController } from './admin-advisors.controller';
+import { AdvisorController, AdminAdvisorSalesController, AdvisorGuard } from '../advisor/advisor.controller';
+import { AdvisorSalesService } from '../advisor/advisor-sales.service';
 import { AdminService } from './admin.service';
 import { AdminGuard } from './guards/admin.guard';
 import { RutParserService } from './rut-parser.service';
@@ -21,7 +24,7 @@ import { RutParserService } from './rut-parser.service';
     forwardRef(() => JarvisModule),
     forwardRef(() => PlanModule),
   ],
-  controllers: [AdminController, AdminBillingEnvironmentController, AdminPayrollNumberingController],
-  providers: [AdminService, AdminGuard, RutParserService, AdminBillingEnvironmentService, AdminPayrollNumberingService],
+  controllers: [AdminController, AdminBillingEnvironmentController, AdminPayrollNumberingController, AdminAdvisorsController, AdvisorController, AdminAdvisorSalesController],
+  providers: [AdminService, AdminGuard, AdvisorGuard, AdvisorSalesService, RutParserService, AdminBillingEnvironmentService, AdminPayrollNumberingService],
 })
 export class AdminModule {}

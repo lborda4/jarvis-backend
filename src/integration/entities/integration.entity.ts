@@ -15,6 +15,9 @@ import { Plan } from '../../plan/entities/plan.entity';
 import { SubscriptionStatus } from '../../plan/enums/subscription-status.enum';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import type { IntegrationCredentials } from '../interfaces/integration-credentials.interface';
+import type { JarvisTopUp } from '../../plan/jarvis-top-ups';
+import type { JarvisDocumentCycle, JarvisTopUpOperation } from '../../plan/jarvis-subscription';
+import type { JarvisCertificateTerm } from '../../plan/jarvis-certificate-term';
 
 @Entity('integrations')
 @Index('UQ_integrations_company_provider', ['companyId', 'provider'], {
@@ -46,6 +49,15 @@ export class Integration {
   @RelationId((integration: Integration) => integration.plan)
   planId: string | null;
 
+  @Column({ name: 'commercial_top_ups', type: 'jsonb', default: () => "'[]'::jsonb" })
+  commercialTopUps: JarvisTopUp[];
+
+  @Column({ name: 'top_up_operations', type: 'jsonb', default: () => "'[]'::jsonb" })
+  topUpOperations: JarvisTopUpOperation[];
+
+  @Column({ name: 'pending_initial_documents', type: 'integer', default: 0 })
+  pendingInitialDocuments: number;
+
   @Column({
     name: 'included_document_types',
     type: 'jsonb',
@@ -55,6 +67,12 @@ export class Integration {
 
   @Column({ name: 'subscription_started_at', type: 'timestamp', nullable: true })
   subscriptionStartedAt: Date | null;
+
+  @Column({ name: 'jarvis_certificate_term', type: 'jsonb', nullable: true })
+  jarvisCertificateTerm: JarvisCertificateTerm | null;
+
+  @Column({ name: 'jarvis_document_cycle', type: 'jsonb', nullable: true })
+  jarvisDocumentCycle: JarvisDocumentCycle | null;
 
   @Column({
     name: 'subscription_status',

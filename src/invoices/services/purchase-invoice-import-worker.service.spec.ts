@@ -166,6 +166,7 @@ function buildService(
     ...overrides.historySync,
   };
 
+  const subscription = { assertCanMutate: jest.fn().mockResolvedValue(undefined) };
   const service = new PurchaseInvoiceImportWorkerService(
     configService as any,
     companiesRepository as any,
@@ -179,10 +180,12 @@ function buildService(
     statusService as any,
     postgresNotifyService as any,
     historySync as any,
+    subscription as any,
   );
 
   return {
     service,
+    subscription,
     historySync,
     companiesRepository,
     jobsRepository,
@@ -195,6 +198,15 @@ function buildService(
     postgresNotifyService,
   };
 }
+
+it('detiene un lote si la suscripción vence mientras la importación está en cola', async () => {
+  const context = buildService({});
+  context.subscription.assertCanMutate.mockRejectedValue(new Error('Suscripción vencida'));
+  await expect((context.service as any).processOneBatchForJob(buildJob({ provider: 'SIIGO' }))).rejects.toThrow('vencida');
+  expect(context.jobRowsRepository.claimPendingBatch).not.toHaveBeenCalled();
+  expect(context.electronicDocumentService.createFromPurchaseInvoiceRows).not.toHaveBeenCalled();
+  expect(context.nextPymeApiClient.getInvoiceByCufe).not.toHaveBeenCalled();
+});
 
 describe('PurchaseInvoiceImportWorkerService.processOneBatchForJob (private, vía cast)', () => {
   it('separa filas exitosas de fallidas y solo crea documentos para las exitosas del lote', async () => {

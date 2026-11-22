@@ -6,6 +6,9 @@ import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { Advisor } from './entities/advisor.entity';
+import { AdvisorAccountService } from './services/advisor-account.service';
+import { AdvisorAccessGuard } from './guards/advisor-access.guard';
 import { UserCompany } from './entities/user-company.entity';
 import { User } from './entities/user.entity';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -23,7 +26,7 @@ import { PlanModule } from '../plan/plan.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, UserCompany]),
+    TypeOrmModule.forFeature([User, UserCompany, Advisor]),
     forwardRef(() => PlanModule),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
@@ -36,6 +39,7 @@ import { PlanModule } from '../plan/plan.module';
   controllers: [AuthController],
   providers: [
     AuthService,
+    AdvisorAccountService,
     PasswordResetService,
     ResendMailService,
     RegistrationInvitationService,
@@ -49,8 +53,10 @@ import { PlanModule } from '../plan/plan.module';
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
+    { provide: APP_GUARD, useClass: AdvisorAccessGuard },
   ],
   exports: [
+    AdvisorAccountService,
     RegistrationInvitationService,
     AuthService,
     UsersRepository,

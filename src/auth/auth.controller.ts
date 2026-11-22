@@ -98,6 +98,18 @@ export class AuthController {
   }
 
   @Public()
+  @Post('advisor-registration/preview')
+  advisorRegistration(@Body() request: { registrationToken?: unknown }) {
+    return this.authService.getAdvisorRegistration(request?.registrationToken);
+  }
+
+  @Public()
+  @Post('advisor-registration')
+  registerAdvisor(@Body() request: { registrationToken?: unknown; password?: unknown; acceptPrivacyPolicy?: unknown }) {
+    return this.authService.registerAdvisor(request);
+  }
+
+  @Public()
   @Post('registration-policy')
   @ApiOperation({ summary: 'Consultar el documento de registro con NIT y código de invitación' })
   registrationPolicy(@Body() request: { registrationToken?: unknown }) {

@@ -1,4 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { SubscriptionAccessController } from './subscription-access.controller';
+import { SubscriptionAccessInterceptor } from './subscription-access.interceptor';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ElectronicDocument } from '../electronic-document/entities/electronic-document.entity';
 import { JarvisSalesInvoice } from '../integration/jarvis/entities/jarvis-sales-invoice.entity';
@@ -13,7 +16,8 @@ import { PlansRepository } from './repositories/plans.repository';
     TypeOrmModule.forFeature([Plan, ElectronicDocument, JarvisSalesInvoice, JarvisRadianEvent]),
     forwardRef(() => IntegrationModule),
   ],
-  providers: [PlansRepository, PlanSubscriptionService],
+  controllers: [SubscriptionAccessController],
+  providers: [PlansRepository, PlanSubscriptionService, { provide: APP_INTERCEPTOR, useClass: SubscriptionAccessInterceptor }],
   exports: [PlansRepository, PlanSubscriptionService, TypeOrmModule],
 })
 export class PlanModule {}

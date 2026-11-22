@@ -1,0 +1,10 @@
+const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+export function buildAdvisorEmail(name: string, url: string, registered: boolean) {
+  const title = registered ? 'Tu acceso de asesor a Jarvis' : 'Bienvenido a Jarvis, crea tu cuenta de asesor';
+  const message = registered ? 'Puedes iniciar sesión con tu correo y contraseña actual.' : 'El administrador te invitó como asesor. Crea tu contraseña desde este enlace. Es válido durante 72 horas y solo puede usarse una vez.';
+  const action = registered ? 'Iniciar sesión' : 'Crear mi cuenta';
+  return { subject: title,
+    text: `Hola, ${name}.\n\n${message}\n\n${url}\n\nNo compartas este enlace. Si no esperabas este correo, puedes ignorarlo.\nJarvis — https://www.jarviscol.com`,
+    html: `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#edf3f6;font-family:Arial,Helvetica,sans-serif;color:#102c42;"><table role="presentation" width="100%"><tr><td align="center" style="padding:32px 16px;"><table role="presentation" width="100%" style="max-width:580px;background:#ffffff;border:1px solid #dce7ed;border-radius:12px;"><tr><td style="padding:24px;background:#0b2535;"><img src="https://www.jarviscol.com/logo5.png" alt="Jarvis" width="70"></td></tr><tr><td style="padding:28px;"><h1 style="font-size:24px;">${escape(title)}</h1><p>Hola, ${escape(name)}.</p><p style="line-height:1.7;">${escape(message)}</p><p style="padding:16px 0;"><a href="${escape(url)}" style="display:inline-block;padding:14px 24px;background:#098d88;color:#ffffff;text-decoration:none;border-radius:6px;">${action}</a></p><p style="font-size:13px;overflow-wrap:anywhere;">Si el botón no abre, copia este enlace: <a href="${escape(url)}">${escape(url)}</a></p><p style="font-size:13px;">No compartas este enlace. Si no esperabas este correo, puedes ignorarlo.</p></td></tr></table></td></tr></table></body></html>` };
+}

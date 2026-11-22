@@ -1,4 +1,10 @@
 import { withBillingOperation } from '../integration/jarvis/helpers/jarvis-billing-operation';
+import { commercialActivity } from './commercial-activity';
+import { advisorSaleItems, recordAdvisorSale, planSaleTerms } from '../advisor/advisor-commission';
+import { Advisor } from '../auth/entities/advisor.entity';
+import { applyJarvisTopUp, type ApplyJarvisTopUpRequest } from './apply-jarvis-top-up';
+import { jarvisSubscriptionPeriod } from '../plan/jarvis-subscription';
+import { assignJarvisCertificateTerm, type JarvisCertificateTerm } from '../plan/jarvis-certificate-term';
 import { UpdateAdminPlanRequestDto } from './dto/admin-plan.dto';
 import { billingMonthsFromCycle, companyTrackingDueDate, normalizeCompanyTracking, trackingToday } from './company-tracking';
 import { UpdateCompanySoftwareRequestDto } from './dto/admin-company.dto';
@@ -14,7 +20,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
-import { DataSource, In } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { UserCompany } from '../auth/entities/user-company.entity';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { Company } from '../company/entities/company.entity';
@@ -39,6 +45,7 @@ import { Plan } from '../plan/entities/plan.entity';
 import { SubscriptionStatus } from '../plan/enums/subscription-status.enum';
 import { PlanSubscriptionService } from '../plan/plan-subscription.service';
 import { PlansRepository } from '../plan/repositories/plans.repository';
+import { listJarvisTopUps, resolveJarvisTopUps } from '../plan/jarvis-top-ups';
 import type { CompanyResponsible } from '../company/interfaces/company-responsible.interface';
 import { generateCompanyInviteCode } from '../company/helpers/company-invite-code.helper';
 import {
@@ -237,6 +244,23 @@ export class AdminService {
     return this.assignNextPymePackageForNit(company.nit, request.documents);
   }
 
+  async applyCompanyJarvisTopUp(companyId: string, request: ApplyJarvisTopUpRequest) {
+    const operation = await applyJarvisTopUp(this.dataSource, companyId, request,
+      documents => this.assignNextPymePackage(companyId, { documents }));
+    return { ...await this.companyCommercialState(companyId), operation };
+  }
+
+  private async assignJarvisPlanPackage(companyId: string) {
+    const integration = await this.integrationsRepository.findByCompanyAndProviderWithPlan(companyId, IntegrationProvider.JARVIS);
+    if (!integration?.jarvisDocumentCycle || !integration.pendingInitialDocuments) return;
+    const company = integration.company ?? await this.companiesRepository.findById(companyId);
+    const period = jarvisSubscriptionPeriod(integration);
+    if (!company?.nextPymeToken?.trim() || period.expired || period.notStarted) return;
+    const cycleId = integration.jarvisDocumentCycle.id;
+    await applyJarvisTopUp(this.dataSource, companyId, { operationId: `plan-${cycleId}`, topUpCodes: [] },
+      documents => this.assignNextPymePackage(companyId, { documents }), cycleId);
+  }
+
   private async assignNextPymePackageForNit(companyNit: string, documents: number) {
     const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date(Date.now())).replace(',', '');
     const jarvisCompany = await this.companiesRepository.findByNit('902086460');
@@ -250,6 +274,12 @@ export class AdminService {
       absolut_start_plan_date: date,
       absolut_documents: documents,
     }, jarvisToken) };
+  }
+
+  private async readJarvisCertificateTerm(nit: string, companyToken?: string | null): Promise<JarvisCertificateTerm> {
+    const token = companyToken?.trim() || (await this.companiesRepository.findByNit('902086460'))?.nextPymeToken?.trim();
+    if (!token) throw new BadRequestException('Configura el token de NextPyme para consultar el certificado digital antes de asignar el plan Jarvis.');
+    return this.nextPymeApiClient.getCertificateTerm(nit, token);
   }
 
   async updatePlan(planId: string, request: UpdateAdminPlanRequestDto): Promise<{ plan: AdminPlanDto }> {
@@ -271,6 +301,15 @@ export class AdminService {
     // El proveedor y el codigo se conservan para no mover suscripciones entre integraciones.
     plan.name = request.name.trim();
     plan.documentLimit = limit;
+    if (request.commissionClass !== undefined) {
+      if (request.commissionClass !== null && !['BASIC', 'PLUS', 'PRO'].includes(request.commissionClass)) throw new BadRequestException('Selecciona clase básica, plus o pro.');
+      plan.commissionClass = request.commissionClass;
+    }
+    if (request.salePriceCop !== undefined) {
+      if (request.salePriceCop !== null && (typeof request.salePriceCop !== 'number' || !Number.isFinite(request.salePriceCop) || request.salePriceCop < 0 || request.salePriceCop > 999999999999.99 || Math.abs(Math.round(request.salePriceCop * 100) / 100 - request.salePriceCop) > 0.0000001)) throw new BadRequestException('Indica un precio válido en COP.');
+      if (plan.commercialTerms && request.salePriceCop !== plan.commercialTerms.priceCop) throw new BadRequestException('El precio de este producto está definido en el portafolio Jarvis.');
+      plan.salePriceCop = request.salePriceCop?.toFixed(2) ?? null;
+    }
     const saved = await this.dataSource.getRepository(Plan).save(plan);
     return { plan: this.mapPlan(saved) };
   }
@@ -282,9 +321,30 @@ export class AdminService {
     };
   }
 
-  async updateCompanyTracking(companyId: string, request: UpdateCompanyTrackingDto) {
-    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle, request?.billingMonths);
+  listJarvisTopUps() {
+    return { items: listJarvisTopUps() };
+  }
+
+  async updateCompanyTracking(companyId: string, request: UpdateCompanyTrackingDto, paidBy?: string) {
+    let tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle, request?.billingMonths);
     if (request.paymentReceived !== undefined && typeof request.paymentReceived !== 'boolean') throw new BadRequestException('Indica si se recibió el pago.');
+    let jarvisRenewal: { integration: Integration; term: JarvisCertificateTerm } | null = null;
+    if (request.paymentReceived) {
+      const before = await this.companiesRepository.findById(companyId);
+      if (!before) throw new NotFoundException('Empresa no encontrada.');
+      if (request.expectedDueDate === undefined || request.expectedDueDate !== companyTrackingDueDate(before))
+        throw new ConflictException('El vencimiento cambió. Actualiza el seguimiento antes de registrar otro pago.');
+      const integration = await this.integrationsRepository.findByCompanyAndProviderWithPlan(companyId, IntegrationProvider.JARVIS);
+      if (integration?.plan) {
+        if (request.expectedJarvisCycleId !== undefined && request.expectedJarvisCycleId !== (integration.jarvisDocumentCycle?.id ?? null))
+          throw new ConflictException('El plan cambió. Actualiza el seguimiento antes de registrar el pago.');
+        const term = await this.readJarvisCertificateTerm(before.nit, before.nextPymeToken);
+        if (new Date() < new Date(term.startsAt) || new Date() >= new Date(term.endsAt))
+          throw new BadRequestException('Renueva el certificado digital para habilitar el nuevo período del plan Jarvis.');
+        jarvisRenewal = { integration, term };
+        if (integration.plan.commercialTerms) tracking = normalizeCompanyTracking(request?.commercial, 'ANNUAL', integration.plan.commercialTerms.billingMonths);
+      }
+    }
     const company = await this.dataSource.transaction(async manager => {
       const repository = manager.getRepository(Company);
       const company = await repository.findOne({ where: { id: companyId }, lock: { mode: 'pessimistic_write' } });
@@ -296,12 +356,36 @@ export class AdminService {
         const today = trackingToday(now);
         company.trackingPeriodStart = currentDueDate && currentDueDate > today ? currentDueDate : today;
         company.trackingLastPaidAt = now;
-        await manager.getRepository(Integration).update({ companyId, active: true, provider: In([IntegrationProvider.SIIGO, IntegrationProvider.JARVIS]) }, { subscriptionStatus: SubscriptionStatus.ACTIVE });
+        company.commercialActivity = [...(company.commercialActivity ?? []), commercialActivity({ kind: 'PAYMENT',
+          amountCop: jarvisRenewal?.integration.plan?.commercialTerms?.priceCop ?? null,
+          planName: jarvisRenewal?.integration.plan?.name, provider: jarvisRenewal ? 'JARVIS' : 'SIIGO' })];
+        const integrations = manager.getRepository(Integration);
+        if (jarvisRenewal) {
+          const integration = await integrations.findOne({ where: { companyId, provider: IntegrationProvider.JARVIS, active: true }, lock: { mode: 'pessimistic_write' } });
+          if (!integration || integration.planId !== jarvisRenewal.integration.planId || integration.jarvisDocumentCycle?.id !== jarvisRenewal.integration.jarvisDocumentCycle?.id)
+            throw new ConflictException('El plan cambió. Actualiza el seguimiento antes de registrar el pago.');
+          assignJarvisCertificateTerm(integration, jarvisRenewal.term);
+          integration.subscriptionStatus = SubscriptionStatus.ACTIVE;
+          integration.commercialTopUps = [];
+          const limit = jarvisRenewal.integration.plan!.documentLimit;
+          integration.pendingInitialDocuments = limit === null ? 0 : limit + 1;
+          await integrations.save(integration);
+        }
+        await integrations.update({ companyId, active: true, provider: IntegrationProvider.SIIGO }, { subscriptionStatus: SubscriptionStatus.ACTIVE });
+        if (company.advisorId) {
+          if (!paidBy) throw new BadRequestException('No se pudo identificar quién registra el pago.');
+          const paidPlans = await integrations.find({ where: { companyId, active: true }, relations: { plan: true } });
+          for (const item of paidPlans) if (item.plan && (item.provider === IntegrationProvider.SIIGO || item.provider === IntegrationProvider.JARVIS))
+            await recordAdvisorSale(manager, company, item.plan, `renewal-${request.expectedDueDate}-${item.provider}`, { paidBy, renewal: true });
+        }
       }
+      const assignedCommercial = company.commercial;
       Object.assign(company, tracking);
+      if (company.advisorId) company.commercial = assignedCommercial;
       await repository.save(company);
       return company;
     });
+    if (jarvisRenewal) await this.assignJarvisPlanPackage(companyId);
     const updated = (await this.companiesRepository.findAllWithIntegrations()).find(item => item.id === companyId);
     return { company: await this.mapCompanyWithDocumentQuotas(updated ?? company) };
   }
@@ -316,16 +400,55 @@ export class AdminService {
     };
   }
 
+  async companyDetails(companyId: string) {
+    const company = await this.companiesRepository.findById(companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    company.integrations = await this.integrationsRepository.findAllByCompanyId(companyId);
+    return { company: await this.mapCompanyWithDocumentQuotas(company), activity: company.commercialActivity ?? [] };
+  }
+
+  async addCompanyComment(companyId: string, text: unknown) {
+    if (typeof text !== 'string' || !text.trim() || text.trim().length > 2000) throw new BadRequestException('Escribe un comentario de hasta 2.000 caracteres.');
+    await this.dataSource.transaction(async manager => {
+      const repository = manager.getRepository(Company);
+      const company = await repository.findOne({ where: { id: companyId }, lock: { mode: 'pessimistic_write' } });
+      if (!company) throw new NotFoundException('Empresa no encontrada.');
+      company.commercialActivity = [...(company.commercialActivity ?? []), commercialActivity({ kind: 'COMMENT', text: text.trim() })];
+      await repository.save(company);
+    });
+    return this.companyDetails(companyId);
+  }
+
+  async updateCompanyProfile(companyId: string, request: { name?: unknown; responsible?: AdminCompanyListItemDto['responsible']; commercial?: unknown; registrationEmail?: string }) {
+    if (typeof request?.name !== 'string' || !request.name.trim() || request.name.trim().length > 200) throw new BadRequestException('Indica el nombre del cliente (máximo 200 caracteres).');
+    const responsible = this.normalizeResponsible(request.responsible ?? undefined);
+    if (request.commercial != null && (typeof request.commercial !== 'string' || request.commercial.trim().length > 120)) throw new BadRequestException('El comercial debe tener hasta 120 caracteres.');
+    const email = request.registrationEmail === undefined ? undefined : registrationEmail(request.registrationEmail);
+    await this.dataSource.transaction(async manager => {
+      const repository = manager.getRepository(Company);
+      const company = await repository.findOne({ where: { id: companyId }, lock: { mode: 'pessimistic_write' } });
+      if (!company) throw new NotFoundException('Empresa no encontrada.');
+      company.name = (request.name as string).trim();
+      company.responsible = responsible;
+      if (!company.advisorId) company.commercial = typeof request.commercial === 'string' ? request.commercial.trim() || null : null;
+      if (email !== undefined) company.registrationEmail = email;
+      await repository.save(company);
+    });
+    return this.companyDetails(companyId);
+  }
+
   async createCompany(
     request: CreateAdminCompanyRequestDto,
     adminUserId: string,
+    advisor?: Advisor,
   ): Promise<CreateAdminCompanyResponseDto> {
-    const tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle ?? 'MONTHLY', request?.billingMonths);
+    let tracking = normalizeCompanyTracking(request?.commercial, request?.billingCycle ?? 'MONTHLY', request?.billingMonths);
     const nit = this.normalizeNit(request?.nit);
     const name = request?.name?.trim();
     const personType = this.normalizePersonType(request?.personType);
     const responsible = this.normalizeResponsible(request?.responsible);
     const integrations = this.normalizeIntegrations(request?.integrations);
+    if (advisor && integrations.some(provider => provider !== IntegrationProvider.SIIGO && provider !== IntegrationProvider.JARVIS)) throw new BadRequestException('Selecciona integración Siigo o Jarvis.');
     const siigoPlanId = request?.siigoPlanId?.trim();
     const jarvisPlanId = request?.jarvisPlanId?.trim();
 
@@ -351,7 +474,7 @@ export class AdminService {
 
     const includesSiigo = integrations.includes(IntegrationProvider.SIIGO);
     const includesJarvis = integrations.includes(IntegrationProvider.JARVIS);
-    const jarvisModules = includesJarvis
+    let jarvisModules = includesJarvis
       ? validateJarvisModules(request.jarvisModules === undefined ? DEFAULT_JARVIS_MODULES : request.jarvisModules)
       : null;
     const requestedDocumentTypes =
@@ -383,7 +506,16 @@ export class AdminService {
         )
       : null;
 
+    if (jarvisPlan?.commercialTerms) {
+      // Read the price, period and modules from the persisted plan, never from the browser.
+      jarvisModules = validateJarvisModules(jarvisPlan.commercialTerms.modules);
+      if (!includesSiigo) tracking = normalizeCompanyTracking(request?.commercial, jarvisPlan.commercialTerms.billingMonths === 12 ? 'ANNUAL' : 'MONTHLY', jarvisPlan.commercialTerms.billingMonths);
+    }
+    const commercialTopUps = resolveJarvisTopUps(jarvisPlan, request.jarvisTopUpCodes);
+    if (advisor) for (const plan of [siigoPlan, jarvisPlan]) if (plan) advisorSaleItems(plan, plan.provider === IntegrationProvider.JARVIS ? commercialTopUps : []);
+
     const welcomeEmail = registrationEmail(request?.registrationEmail ?? request?.responsible?.email);
+    if (advisor && welcomeEmail === advisor.user.email) throw new BadRequestException('Usa el correo del cliente para su acceso. Tu correo de asesor es independiente.');
     const existingCompany = await this.companiesRepository.findByNit(nit);
 
     if (existingCompany) {
@@ -391,6 +523,9 @@ export class AdminService {
     }
 
     const nextPymeToken = request?.nextPymeToken?.trim() || null;
+    const certificateTerm = jarvisPlan ? await this.readJarvisCertificateTerm(nit, nextPymeToken) : null;
+    if (commercialTopUps.length && certificateTerm && (new Date() < new Date(certificateTerm.startsAt) || new Date() >= new Date(certificateTerm.endsAt)))
+      throw new BadRequestException('La suscripción debe estar vigente según el certificado digital para aplicar la recarga inicial.');
     if (nextPymeToken) {
       await this.nextPymeApiClient.configureProductionEnvironment(nextPymeToken);
     }
@@ -407,6 +542,7 @@ export class AdminService {
           personType,
           responsible,
           ...tracking,
+          ...(advisor ? { advisorId: advisor.id, commercial: advisor.user.name } : {}),
           inviteCode: generateCompanyInviteCode(),
           description: validateCompanyAiContext({ description: request?.description ?? '', rules: [] }),
           cityCode: request?.cityCode?.trim() || null,
@@ -453,9 +589,17 @@ export class AdminService {
 
           if (jarvisPlan) {
             integration.plan = jarvisPlan;
+            integration.commercialTopUps = commercialTopUps;
+            integration.pendingInitialDocuments = !nextPymeToken && jarvisPlan.documentLimit != null ? jarvisPlan.documentLimit + 1 : 0;
             integration.includedDocumentTypes = requestedDocumentTypes;
             integration.subscriptionStatus = SubscriptionStatus.ACTIVE;
-            integration.subscriptionStartedAt = new Date();
+            assignJarvisCertificateTerm(integration, certificateTerm!);
+            const applied = commercialTopUps.filter(item => item.kind !== 'DOCUMENTS' || Boolean(nextPymeToken));
+            if (applied.length) integration.topUpOperations = [{
+              id: `initial-${createdCompany.id}`, status: 'APPLIED', topUps: applied,
+              cycleId: integration.jarvisDocumentCycle!.id,
+              periodStart: jarvisSubscriptionPeriod(integration).key, createdAt: new Date().toISOString(),
+            }];
             await integrationsRepository.save(integration);
           }
         }
@@ -470,7 +614,12 @@ export class AdminService {
         }
       }
 
-      const existingLink = await userCompaniesRepository.findOne({
+      if (advisor) {
+        for (const plan of [siigoPlan, jarvisPlan]) if (plan) await recordAdvisorSale(manager, createdCompany, plan, `initial-${plan.provider}`, {
+          topUps: plan.provider === IntegrationProvider.JARVIS ? commercialTopUps.filter(item => item.kind !== 'DOCUMENTS' || Boolean(nextPymeToken)) : [],
+        });
+      }
+      const existingLink = advisor ? true : await userCompaniesRepository.findOne({
         where: {
           userId: adminUserId,
           companyId: createdCompany.id,
@@ -492,7 +641,8 @@ export class AdminService {
       // el paquete. Se podrá asignar desde la recarga al vincular la empresa.
       // Con token, un fallo revierte el alta para poder reintentar.
       if (nextPymeToken && jarvisPlan?.documentLimit != null) {
-        await this.assignNextPymePackageForNit(request.nit, jarvisPlan.documentLimit + 1);
+        const additional = commercialTopUps.filter(item => item.kind === 'DOCUMENTS').reduce((sum, item) => sum + item.units, 0);
+        await this.assignNextPymePackageForNit(request.nit, jarvisPlan.documentLimit + additional + 1);
       }
 
       return companiesRepository.findOne({
@@ -738,6 +888,10 @@ export class AdminService {
     request: UpdateIntegrationSubscriptionRequestDto,
     _adminUserId: string,
   ): Promise<UpdateIntegrationSubscriptionResponseDto> {
+    if (request.topUpCodes !== undefined) {
+      if (provider !== IntegrationProvider.JARVIS) throw new BadRequestException('Las recargas del portafolio solo aplican a Jarvis.');
+      return this.updateJarvisCommercialSelection(companyId, request);
+    }
     const company = await this.companiesRepository.findById(companyId);
 
     if (!company) {
@@ -766,6 +920,14 @@ export class AdminService {
       );
     }
 
+    let certificateTerm: JarvisCertificateTerm | undefined;
+    if (planId && company.advisorId && (provider === IntegrationProvider.SIIGO || provider === IntegrationProvider.JARVIS))
+      planSaleTerms(await this.requirePlanForProvider(planId, provider, provider));
+    if (planId && provider === IntegrationProvider.JARVIS) {
+      await this.requirePlanForProvider(planId, IntegrationProvider.JARVIS, 'Jarvis');
+      certificateTerm = await this.readJarvisCertificateTerm(company.nit, company.nextPymeToken);
+    }
+
     if (hasDocumentTypes) {
       const documentTypes = this.planSubscriptionService.normalizeDocumentTypes(
         request.includedDocumentTypes,
@@ -789,10 +951,13 @@ export class AdminService {
         planId,
         subscriptionStatus: SubscriptionStatus.ACTIVE,
         restartSubscription: request.restartSubscription,
+        jarvisCertificateTerm: certificateTerm,
         includedDocumentTypes: hasDocumentTypes
           ? request.includedDocumentTypes
           : undefined,
       });
+      if (provider === IntegrationProvider.JARVIS) await this.assignJarvisPlanPackage(companyId);
+      if (company.advisorId && (provider === IntegrationProvider.SIIGO || provider === IntegrationProvider.JARVIS)) await this.recordCurrentAdvisorPlan(companyId, provider);
     } else if (hasStatus) {
       await this.planSubscriptionService.updateSubscriptionStatus(
         integration,
@@ -813,6 +978,74 @@ export class AdminService {
     return {
       integration: this.mapIntegration(updated),
     };
+  }
+
+  private async updateJarvisCommercialSelection(companyId: string, request: UpdateIntegrationSubscriptionRequestDto): Promise<UpdateIntegrationSubscriptionResponseDto> {
+    const changingPlan = request.planId !== undefined;
+    if (changingPlan && !request.planId?.trim()) throw new BadRequestException('Selecciona el plan de la empresa.');
+    if (request.subscriptionStatus !== undefined || request.includedDocumentTypes !== undefined || request.restartSubscription) throw new BadRequestException('El cambio comercial no modifica el estado ni reinicia la suscripción.');
+    let certificateTerm: JarvisCertificateTerm | undefined;
+    let certificateCompany: Company | null = null;
+    if (changingPlan) {
+      const selectedPlan = await this.requirePlanForProvider(request.planId!.trim(), IntegrationProvider.JARVIS, 'Jarvis');
+      resolveJarvisTopUps(selectedPlan, request.topUpCodes);
+      certificateCompany = await this.companiesRepository.findById(companyId);
+      if (!certificateCompany) throw new NotFoundException('Empresa no encontrada.');
+      certificateTerm = await this.readJarvisCertificateTerm(certificateCompany.nit, certificateCompany.nextPymeToken);
+    }
+    await this.dataSource.transaction(async manager => {
+      const companies = manager.getRepository(Company);
+      const integrations = manager.getRepository(Integration);
+      const company = await companies.findOne({ where: { id: companyId }, lock: { mode: 'pessimistic_write' } });
+      if (!company) throw new NotFoundException('Empresa no encontrada.');
+      const integration = await integrations.findOne({ where: { companyId, provider: IntegrationProvider.JARVIS, active: true }, lock: { mode: 'pessimistic_write' } });
+      if (!integration) throw new NotFoundException('La empresa no tiene integración Jarvis.');
+      const planId = changingPlan ? request.planId!.trim() : integration.planId;
+      if (!planId) throw new BadRequestException('La empresa no tiene un plan Jarvis asignado.');
+      const plan = await manager.getRepository(Plan).findOne({ where: { id: planId, ...(changingPlan ? { active: true } : {}) } });
+      if (!plan || plan.provider !== IntegrationProvider.JARVIS) throw new BadRequestException('Selecciona un plan Jarvis disponible.');
+      const topUps = resolveJarvisTopUps(plan, request.topUpCodes);
+      integration.commercialTopUps = topUps;
+      if (changingPlan) {
+        if (company.nit !== certificateCompany!.nit || company.nextPymeToken !== certificateCompany!.nextPymeToken)
+          throw new ConflictException('La vinculación de la empresa cambió durante la consulta del certificado. Intenta nuevamente.');
+        if (integration.jarvisCertificateTerm && integration.jarvisCertificateTerm.checkedAt > certificateTerm!.checkedAt)
+          throw new ConflictException('Otra asignación de plan actualizó el certificado. Actualiza el listado e intenta nuevamente.');
+        integration.plan = plan;
+        integration.subscriptionStatus = SubscriptionStatus.ACTIVE;
+        assignJarvisCertificateTerm(integration, certificateTerm!);
+        integration.commercialTopUps = [];
+        integration.pendingInitialDocuments = plan.documentLimit === null ? 0 : plan.documentLimit + 1;
+        if (plan.commercialTerms) {
+          company.jarvisModules = validateJarvisModules(plan.commercialTerms.modules);
+          company.billingMonths = plan.commercialTerms.billingMonths;
+          company.billingCycle = company.billingMonths === 12 ? 'ANNUAL' : company.billingMonths === 1 ? 'MONTHLY' : null;
+          await companies.save(company);
+        }
+      }
+      await integrations.save(integration);
+      if (changingPlan) await recordAdvisorSale(manager, company, plan, `plan-${integration.jarvisDocumentCycle!.id}`);
+    });
+    if (changingPlan) await this.assignJarvisPlanPackage(companyId);
+    return this.companyCommercialState(companyId);
+  }
+
+  private async recordCurrentAdvisorPlan(companyId: string, provider: IntegrationProvider) {
+    await this.dataSource.transaction(async manager => {
+      const company = await manager.getRepository(Company).findOne({ where: { id: companyId }, lock: { mode: 'pessimistic_write' } });
+      const integration = await manager.getRepository(Integration).findOne({ where: { companyId, provider }, relations: { plan: true } });
+      if (company?.advisorId && integration?.plan) await recordAdvisorSale(manager, company, integration.plan,
+        `plan-${integration.jarvisDocumentCycle?.id ?? integration.subscriptionStartedAt?.toISOString() ?? integration.id}`);
+    });
+  }
+
+  private async companyCommercialState(companyId: string) {
+    const company = await this.companiesRepository.findById(companyId);
+    if (!company) throw new NotFoundException('Empresa no encontrada.');
+    company.integrations = await this.integrationsRepository.findAllByCompanyId(companyId);
+    const mapped = await this.mapCompanyWithDocumentQuotas(company);
+    const integration = mapped.integrations.find(item => item.provider === IntegrationProvider.JARVIS)!;
+    return { company: mapped, integration };
   }
 
   async updateSiigoDocumentQuotas(
@@ -878,17 +1111,25 @@ export class AdminService {
 
   private mapPlan(plan: Plan): AdminPlanDto {
     return {
+      commissionClass: plan.commissionClass ?? null,
+      salePriceCop: plan.commercialTerms?.priceCop ?? (plan.salePriceCop == null ? null : Number(plan.salePriceCop)),
       id: plan.id,
       name: plan.name,
       code: plan.code,
       provider: plan.provider,
       documentLimit: plan.documentLimit,
+      commercialTerms: plan.commercialTerms ?? null,
       includedDocumentTypes: plan.includedDocumentTypes ?? [],
     };
   }
 
   private mapIntegration(integration: Integration): AdminIntegrationItemDto {
     return {
+      commercialTopUps: integration.commercialTopUps ?? [],
+      topUpOperations: integration.topUpOperations ?? [],
+      pendingInitialDocuments: integration.pendingInitialDocuments ?? 0,
+      ...(integration.provider === IntegrationProvider.JARVIS ? { jarvisDocumentCycle: integration.jarvisDocumentCycle ?? null } : {}),
+      ...(integration.provider === IntegrationProvider.JARVIS ? { jarvisCertificateTerm: integration.jarvisCertificateTerm ?? null } : {}),
       id: integration.id,
       provider: integration.provider,
       active: integration.active,
@@ -933,6 +1174,7 @@ export class AdminService {
     return {
       id: company.id,
       registrationEmail: company.registrationEmail ?? null,
+      advisorId: company.advisorId ?? null,
       nit: company.nit,
       jarvisModules: company.jarvisModules ?? [...DEFAULT_JARVIS_MODULES],
       name: company.name,

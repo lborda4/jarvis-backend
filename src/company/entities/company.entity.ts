@@ -2,21 +2,32 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { SupplierConfiguration } from '../../integration/entities/supplier-configuration.entity';
 import { UserCompany } from '../../auth/entities/user-company.entity';
+import { Advisor } from '../../auth/entities/advisor.entity';
 import { Integration } from '../../integration/entities/integration.entity';
 import { CompanyPersonType } from '../enums/company-person-type.enum';
 import type { CompanyResponsible } from '../interfaces/company-responsible.interface';
 
 import type { CompanyAiContext } from '../company-ai-context';
 import type { JarvisModule } from '../jarvis-modules';
+import type { CommercialActivity } from '../../admin/commercial-activity';
 
 @Entity('companies')
 export class Company {
+  @Column({ name: 'advisor_id', type: 'uuid', nullable: true })
+  advisorId: string | null;
+  @ManyToOne(() => Advisor, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'advisor_id' })
+  advisor: Advisor | null;
+  @Column({ name: 'commercial_activity', type: 'jsonb', default: () => "'[]'::jsonb" })
+  commercialActivity: CommercialActivity[];
   @Column({ name: 'registration_email', type: 'varchar', length: 254, nullable: true })
   registrationEmail: string | null;
   @Column({ name: 'jarvis_modules', type: 'jsonb', nullable: true })

@@ -28,7 +28,7 @@ export class IntegrationsRepository {
   ): Promise<Integration | null> {
     return this.repository.findOne({
       where: { companyId, provider, active: true },
-      relations: { plan: true },
+      relations: { plan: true, company: true },
     });
   }
 
@@ -75,7 +75,7 @@ export class IntegrationsRepository {
   findAllByCompanyId(companyId: string): Promise<Integration[]> {
     return this.repository.find({
       where: { companyId, active: true },
-      relations: { plan: true },
+      relations: { plan: true, company: true },
       order: { provider: 'ASC' },
     });
   }

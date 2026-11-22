@@ -10,6 +10,7 @@ export interface AuthTokenPayload {
 }
 
 export interface AuthenticatedUser {
+  role?: import('../enums/user-role.enum').UserRole;
   userId: string;
   email: string;
   /** Vacío o ausente solo para admin sin empresa asociada. */
