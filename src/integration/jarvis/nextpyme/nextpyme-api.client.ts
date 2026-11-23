@@ -1,3 +1,4 @@
+import { radianProviderDiagnostic } from './nextpyme-radian-diagnostic';
 import { parseInvoiceRadianStatus, type InvoiceRadianStatus } from './nextpyme-radian-status';
 import { parseJarvisCertificateTerm, type JarvisCertificateTerm } from '../../../plan/jarvis-certificate-term';
 import { parseRadianEventResult, type RadianEventResult } from './nextpyme-radian-result';
@@ -905,15 +906,52 @@ export class NextPymeApiClient {
     const token = this.requireToken(companyToken);
     if (typeof cufe !== 'string' || !/^[a-f0-9]{96}$/i.test(cufe.trim()))
       throw new BadGatewayException('El CUFE no es válido para consultar RADIAN.');
+    let response: { status: number; data: unknown };
     try {
-      const response = await firstValueFrom(this.httpService.post<unknown>(
+      response = await firstValueFrom(this.httpService.post<unknown>(
         this.getBaseUrl() + '/status/events-document/' + encodeURIComponent(cufe.trim().toLowerCase()), {},
         { headers: this.buildAuthHeaders(token), timeout: 20000, validateStatus: () => true },
       ));
-      const parsed = response.status >= 200 && response.status < 300 ? parseInvoiceRadianStatus(response.data) : null;
-      if (parsed) return parsed;
-    } catch { /* No convertir fallos de consulta en ausencia de aceptación. */ }
-    throw new BadGatewayException('No se pudo verificar la aceptación RADIAN de esta factura en NextPyme. Intenta nuevamente antes de crear la nota.');
+    } catch (error) {
+      const timeout = axios.isAxiosError(error) && ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code ?? '');
+      return this.failRadianVerification(timeout ? 'RADIAN_TIMEOUT' : 'RADIAN_UNAVAILABLE', undefined, undefined, { transportCode: axios.isAxiosError(error) && /^(?:E[A-Z_]{1,30})$/.test(error.code ?? '') ? error.code : 'UNKNOWN' });
+    }
+    if (response.status < 200 || response.status >= 300) {
+      const code = [401, 403].includes(response.status) ? 'RADIAN_AUTH'
+        : response.status === 429 ? 'RADIAN_RATE_LIMIT' : 'RADIAN_UNAVAILABLE';
+      return this.failRadianVerification(code, response.status, undefined, radianProviderDiagnostic(response.data, token));
+    }
+    const parsed = parseInvoiceRadianStatus(response.data);
+    if (parsed) return parsed;
+    // Record structure only: never log the token, XML, CUFE or provider body values.
+    const shape: string[] = [];
+    const pending = [{ value: response.data, path: 'body', depth: 0 }];
+    while (pending.length && shape.length < 20) {
+      const item = pending.shift()!;
+      if (item.depth > 8) continue;
+      if (Array.isArray(item.value)) {
+        shape.push(item.path + '[]');
+        if (item.value.length) pending.push({ value: item.value[0], path: item.path + '[]', depth: item.depth + 1 });
+      } else if (item.value && typeof item.value === 'object') {
+        for (const key of Object.keys(item.value).slice(0, 12)) {
+          const safeKey = key.split(token).join('[REDACTED]').replace(/[^a-zA-Z0-9_:.-]/g, '').slice(0, 48);
+          const childPath = item.path + '.' + safeKey;
+          if (shape.length < 20) shape.push(childPath);
+          if (pending.length < 20) pending.push({ value: (item.value as UnknownRecord)[key], path: childPath, depth: item.depth + 1 });
+        }
+      }
+    }
+    return this.failRadianVerification('RADIAN_RESPONSE', response.status, shape, radianProviderDiagnostic(response.data, token));
+  }
+
+  private failRadianVerification(code: string, httpStatus?: number, responseShape?: string[], diagnostic?: object): never {
+    console.warn('[radian/note-eligibility] ' + JSON.stringify({ code, httpStatus, responseShape, ...diagnostic }));
+    throw new BadGatewayException({
+      statusCode: 502,
+      error: 'Bad Gateway',
+      code,
+      message: 'No se pudo verificar la aceptación RADIAN de esta factura en NextPyme. Intenta nuevamente antes de crear la nota.',
+    });
   }
 
   async getRadianEventStatus(cude: string, companyToken: string): Promise<RadianEventResult> {

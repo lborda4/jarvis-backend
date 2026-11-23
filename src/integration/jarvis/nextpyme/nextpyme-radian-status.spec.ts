@@ -84,3 +84,39 @@ it('la elegibilidad usa NextPyme y no consulta el historial local de Jarvis', as
   await expect(service.noteEligibility('other', cufe)).rejects.toThrow('integración activa');
   expect(client.getInvoiceRadianStatus).not.toHaveBeenCalled();
 });
+
+it.each([
+  [401, 'RADIAN_AUTH'], [403, 'RADIAN_AUTH'], [404, 'RADIAN_UNAVAILABLE'],
+  [429, 'RADIAN_RATE_LIMIT'], [503, 'RADIAN_UNAVAILABLE'],
+])('distingue HTTP %s sin permitir la nota ni exponer datos privados', async (status, code) => {
+  const { client, http } = setupClient();
+  const log = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  http.post.mockReturnValue(of({ status, data: { message: 'private-token', events: [] } }));
+  const error = await client.getInvoiceRadianStatus(cufe, 'private-token').catch(error => error);
+  expect(error.getResponse()).toMatchObject({ statusCode: 502, code });
+  expect(JSON.stringify(log.mock.calls)).not.toContain('private-token');
+  expect(JSON.stringify(log.mock.calls)).not.toContain(cufe);
+});
+
+it('distingue el timeout y registra solo la estructura de una respuesta desconocida', async () => {
+  const { client, http } = setupClient();
+  const log = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  http.post.mockReturnValue(throwError(() => ({ isAxiosError: true, code: 'ECONNABORTED', message: 'private-token' })));
+  let error = await client.getInvoiceRadianStatus(cufe, 'private-token').catch(error => error);
+  expect(error.getResponse()).toMatchObject({ code: 'RADIAN_TIMEOUT' });
+  http.post.mockReturnValue(of({ status: 200, data: { ResponseDian: { unknown: 'private-token' } } } as never));
+  error = await client.getInvoiceRadianStatus(cufe, 'private-token').catch(error => error);
+  expect(error.getResponse()).toMatchObject({ code: 'RADIAN_RESPONSE' });
+  expect(log).toHaveBeenLastCalledWith(expect.stringContaining('body.ResponseDian.unknown'));
+  expect(JSON.stringify(log.mock.calls)).not.toContain('private-token');
+});
+
+it('registra el motivo del proveedor solo en el servidor y oculta credenciales', async () => {
+  const { client, http } = setupClient();
+  const log = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  http.post.mockReturnValue(of({ status: 422, data: { message: 'Certificado vencido; token=private-token', password: 'private-password' } } as never));
+  const error = await client.getInvoiceRadianStatus(cufe, 'private-token').catch(error => error);
+  expect(log).toHaveBeenLastCalledWith(expect.stringContaining('Certificado vencido'));
+  expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-token|private-password/);
+  expect(JSON.stringify(error.getResponse())).not.toContain('Certificado vencido');
+});
