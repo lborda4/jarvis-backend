@@ -161,3 +161,46 @@ it('no confunde el código 67 aislado ni una consulta fallida con una confirmaci
 it.each([4, 5])('mantiene bloqueada la aceptación %s aunque venga un resultado 67 contradictorio', event_id => {
   expect(parseInvoiceRadianStatus({ ...noEventsResponse(), events: [{ event_id }] })?.accepted).not.toBe(false);
 });
+
+function nestedNoEventsResponse(statusCode: unknown = '67') {
+  const body = noEventsResponse();
+  const result = body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult;
+  return { ...body, ResponseDian: { Envelope: {
+    ...body.ResponseDian.Envelope,
+    Body: { GetStatusEventResponse: { GetStatusEventResult: { DianResponse: {
+      IsValid: { _value: 'false' }, StatusCode: { _value: statusCode },
+      StatusDescription: { _value: result.StatusDescription },
+      ErrorMessage: { string: { _value: result.StatusDescription } },
+    } } } },
+  } } };
+}
+
+it('reproduce el 502 con el resultado DIAN dentro de GetStatusEventResult.DianResponse', async () => {
+  const { client, http } = setupClient();
+  http.post.mockReturnValue(of({ status: 200, data: nestedNoEventsResponse() } as never));
+  await expect(client.getInvoiceRadianStatus(cufe, 'token')).resolves.toEqual({ accepted: false, eventCodes: [] });
+});
+
+it.each([{}, { _attributes: { nil: 'true' } }])('tolera un DianResponse vacío %j cuando el resultado 67 ya confirmó ausencia de eventos', empty => {
+  const body = noEventsResponse();
+  const result = { ...body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult, DianResponse: empty };
+  expect(parseInvoiceRadianStatus({ ...body, ResponseDian: { GetStatusEventResult: result } })).toEqual({ accepted: false, eventCodes: [] });
+});
+
+it('lee el resultado anidado con namespaces y sobres SOAP serializados como JSON', () => {
+  const body = nestedNoEventsResponse();
+  const result = body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult.DianResponse;
+  expect(parseInvoiceRadianStatus({ ...body, ResponseDian: JSON.stringify({ 's:Envelope': { 's:Body': { 'a:GetStatusEventResponse': { 'a:GetStatusEventResult': { 'a:DianResponse': result } } } } }) })).toEqual({ accepted: false, eventCodes: [] });
+});
+
+it.each(['99', '66', undefined])('no habilita la nota ante un fallo DIAN anidado %j', code => {
+  const body = nestedNoEventsResponse();
+  body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult.DianResponse.StatusCode._value = code;
+  expect(parseInvoiceRadianStatus(body)).toBeNull();
+});
+
+it.each([4, 5])('no habilita la nota si hay aceptación %s o falla explícita junto al código 67 anidado', event_id => {
+  expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), events: [{ event_id }] })?.accepted).not.toBe(false);
+  expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), success: false })).toBeNull();
+  expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), events: [{ status: 'unknown' }] })).toBeNull();
+});

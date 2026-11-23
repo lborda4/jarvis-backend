@@ -87,9 +87,9 @@ export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus 
       const collection = ['events', 'event', 'eventos', 'dianresponse'].includes(normalized);
       if (collection && (Array.isArray(child) || record(child))) knownCollection = true;
       if (collection && child == null && !confirmedNoEvents) uncertain = true;
-      pending.push({ value: child, inEvents: inEvents || collection, depth: depth + 1, eventResult: normalized === 'getstatuseventresult', noEvents: confirmedNoEvents });
+      pending.push({ value: child, inEvents: inEvents || collection, depth: depth + 1, eventResult: normalized === 'getstatuseventresult' || Boolean(eventResult && normalized === 'dianresponse'), noEvents: confirmedNoEvents });
     }
-    if (inEvents && !code && !decodedEvent && !Object.keys(value).some(key => ['events', 'event', 'eventos', 'dianresponse'].includes(keyName(key)))) uncertain = true;
+    if (inEvents && !confirmedNoEvents && !code && !decodedEvent && !Object.keys(value).some(key => ['events', 'event', 'eventos', 'dianresponse'].includes(keyName(key)))) uncertain = true;
     if (!inEvents && !emptyEventResult && (isFalse(valid) || (statusCode != null && String(statusCode) !== '00'))) failed = true;
   }
   if (failed) return null;
