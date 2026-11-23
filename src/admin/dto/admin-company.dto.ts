@@ -109,6 +109,9 @@ export class AdminIntegrationItemDto {
 }
 
 export class AdminCompanyListItemDto {
+  @ApiPropertyOptional({ nullable: true, enum: ['VERIFY_PAYMENT', 'PAID', 'ACTIVE'] })
+  clientStatus?: 'VERIFY_PAYMENT' | 'PAID' | 'ACTIVE' | null;
+
   advisorId?: string | null;
   @ApiPropertyOptional({ nullable: true })
   registrationEmail?: string | null;

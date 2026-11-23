@@ -1,3 +1,4 @@
+import { clientLifecycleStatus } from './client-lifecycle';
 import { withBillingOperation } from '../integration/jarvis/helpers/jarvis-billing-operation';
 import { commercialActivity } from './commercial-activity';
 import { advisorSaleItems, recordAdvisorSale, planSaleTerms } from '../advisor/advisor-commission';
@@ -1157,6 +1158,7 @@ export class AdminService {
 
   private async mapCompanyWithDocumentQuotas(company: Company): Promise<AdminCompanyListItemDto> {
     const item = this.mapCompany(company);
+    item.clientStatus = await clientLifecycleStatus(company, this.dataSource);
     await Promise.all(item.integrations.map(async integration => {
       const source = company.integrations?.find(value => value.id === integration.id);
       if (integration.provider === IntegrationProvider.BOLD || (!integration.plan && !source?.documentLimits)) return;

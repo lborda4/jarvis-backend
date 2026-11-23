@@ -28,3 +28,21 @@ it('uses the advisor profile from the authenticated user for clients, reports an
   expect(result.company).toMatchObject({ nextPymeToken: null, technicalKey: null, inviteCode: '' });
   expect(invitations.send).toHaveBeenCalledWith('created', 'client@example.com', 'user');
 });
+
+it('shows created and paid clients without changing ownership or attributing unpaid commissions', async () => {
+  const profile = { id: 'advisor-id', registeredAt: new Date(), user: { name: 'Laura', active: true, role: UserRole.ADVISOR } };
+  const clients = [
+    { id: 'created', name: 'Creada', nit: '900', createdAt: new Date(), integrations: [], commercialActivity: [] },
+    { id: 'paid', name: 'Pagada', nit: '901', createdAt: new Date(), integrations: [], commercialActivity: [{ kind: 'PAYMENT' }] },
+    { id: 'pending-topup', name: 'Con recarga pendiente', nit: '902', createdAt: new Date(), integrations: [], commercialActivity: [{ kind: 'PAYMENT' }] },
+  ];
+  const advisors = { findOne: async () => profile }, companies = { find: jest.fn(async () => clients) };
+  const report = { pending: [{ companyId: 'pending-topup' }], paid: [], totalCommissionCop: 0 };
+  const db = { getRepository: entity => entity === Advisor ? advisors : companies };
+  const sales = { report: jest.fn(async () => report) };
+  const controller = new AdvisorController(db as never, {} as never, sales as never, {} as never);
+  const result = await controller.dashboard({ userId: 'advisor-user', role: UserRole.ADVISOR } as never, '2026-11');
+  expect(result.clients.map(client => client.paymentStatus)).toEqual(['PENDING', 'PAID', 'PENDING']);
+  expect(companies.find).toHaveBeenCalledWith(expect.objectContaining({ where: { advisorId: 'advisor-id' } }));
+  expect(result.commissions).toBe(report);
+});

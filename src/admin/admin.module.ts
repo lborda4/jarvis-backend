@@ -1,3 +1,4 @@
+import { AdvisorPortalService } from '../advisor/advisor-portal.service';
 import { AdminPayrollNumberingController } from './admin-payroll-numbering.controller';
 import { AdminPayrollNumberingService } from './admin-payroll-numbering.service';
 import { AdminBillingEnvironmentController } from './admin-billing-environment.controller';
@@ -25,6 +26,6 @@ import { RutParserService } from './rut-parser.service';
     forwardRef(() => PlanModule),
   ],
   controllers: [AdminController, AdminBillingEnvironmentController, AdminPayrollNumberingController, AdminAdvisorsController, AdvisorController, AdminAdvisorSalesController],
-  providers: [AdminService, AdminGuard, AdvisorGuard, AdvisorSalesService, RutParserService, AdminBillingEnvironmentService, AdminPayrollNumberingService],
+  providers: [AdvisorPortalService, AdminService, AdminGuard, AdvisorGuard, AdvisorSalesService, RutParserService, AdminBillingEnvironmentService, AdminPayrollNumberingService],
 })
 export class AdminModule {}
