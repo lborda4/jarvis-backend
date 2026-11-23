@@ -120,3 +120,44 @@ it('registra el motivo del proveedor solo en el servidor y oculta credenciales',
   expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-token|private-password/);
   expect(JSON.stringify(error.getResponse())).not.toContain('Certificado vencido');
 });
+
+function noEventsResponse(statusCode: unknown = '67') {
+  return {
+    success: true, message: 'Consulta de eventos generada con exito', events: [],
+    ResponseDian: { Envelope: {
+      Header: { Action: { _attributes: { mustUnderstand: '1' }, _value: 'GetStatusEventResponse' } },
+      Body: { GetStatusEventResponse: { GetStatusEventResult: {
+        IsValid: 'false', StatusCode: statusCode,
+        StatusDescription: 'EL CUFE o Factura consultada no tiene a la fecha eventos asociados.',
+        DianResponse: null,
+      } } },
+    } },
+  };
+}
+
+it.each(['67', 67, { _value: '67' }])('reconoce la consulta sin eventos con código DIAN %j', code => {
+  expect(parseInvoiceRadianStatus(noEventsResponse(code))).toEqual({ accepted: false, eventCodes: [] });
+});
+
+it('permite crear la nota cuando NextPyme confirma HTTP 200 y código 67 sin eventos', async () => {
+  const { client, http } = setupClient();
+  http.post.mockReturnValue(of({ status: 200, data: noEventsResponse() } as never));
+  await expect(client.getInvoiceRadianStatus(cufe, 'token')).resolves.toEqual({ accepted: false, eventCodes: [] });
+});
+
+it.each(['99', '66', undefined])('mantiene bloqueados otros errores o respuestas incompletas: %j', code => {
+  const body = noEventsResponse();
+  body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult.StatusCode = code;
+  expect(parseInvoiceRadianStatus(body)).toBeNull();
+});
+
+it('no confunde el código 67 aislado ni una consulta fallida con una confirmación', () => {
+  expect(parseInvoiceRadianStatus({ success: true, events: [], StatusCode: '67' })).toBeNull();
+  expect(parseInvoiceRadianStatus({ ...noEventsResponse(), success: false })).toBeNull();
+  expect(parseInvoiceRadianStatus({ ...noEventsResponse(), events: null })).toBeNull();
+  expect(parseInvoiceRadianStatus({ ...noEventsResponse(), events: [{ status: 'unknown' }] })).toBeNull();
+});
+
+it.each([4, 5])('mantiene bloqueada la aceptación %s aunque venga un resultado 67 contradictorio', event_id => {
+  expect(parseInvoiceRadianStatus({ ...noEventsResponse(), events: [{ event_id }] })?.accepted).not.toBe(false);
+});

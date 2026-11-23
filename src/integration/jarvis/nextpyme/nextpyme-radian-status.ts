@@ -11,26 +11,31 @@ const isTrue = (value: unknown) => value === true || value === 'true';
 
 /** Unknown/error payloads must never be interpreted as an invoice without events. */
 export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus | null {
+  // NextPyme/DIAN status 67 is a successful lookup with no associated events.
+  // Require the provider's explicit success and empty events collection as well.
+  const providerEvents = record(payload) ? field(payload, ['events', 'eventos']) : undefined;
+  const confirmedEmptyEvents = record(payload) && isTrue(scalar(field(payload, ['success'])))
+    && Array.isArray(providerEvents) && providerEvents.length === 0;
   let knownCollection = Array.isArray(payload);
   let uncertain = false;
   let failed = false;
   const codes = new Set<string>();
-  const pending: Array<{ value: unknown; inEvents: boolean; depth: number }> = [{ value: payload, inEvents: Array.isArray(payload), depth: 0 }];
+  const pending: Array<{ value: unknown; inEvents: boolean; depth: number; eventResult?: boolean; noEvents?: boolean }> = [{ value: payload, inEvents: Array.isArray(payload), depth: 0 }];
   let visited = 0;
   while (pending.length) {
     if (++visited > 5000) return null;
-    const { value, inEvents, depth } = pending.shift()!;
+    const { value, inEvents, depth, eventResult, noEvents } = pending.shift()!;
     if (depth > 30) return null;
     if (typeof value === 'string') {
       const text = value.trim();
       try {
-        if (text.startsWith('{') || text.startsWith('[')) pending.push({ value: JSON.parse(text), inEvents, depth: depth + 1 });
+        if (text.startsWith('{') || text.startsWith('[')) pending.push({ value: JSON.parse(text), inEvents, depth: depth + 1, eventResult, noEvents });
       } catch { uncertain = true; }
       continue;
     }
     if (Array.isArray(value)) {
       if (inEvents && value.some(item => !record(item) && !Array.isArray(item))) uncertain = true;
-      pending.push(...value.map(item => ({ value: item, inEvents, depth: depth + 1 })));
+      pending.push(...value.map(item => ({ value: item, inEvents, depth: depth + 1, eventResult, noEvents })));
       continue;
     }
     if (!record(value)) continue;
@@ -41,6 +46,8 @@ export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus 
       : eventId != null ? ({ 1: '030', 2: '031', 3: '032', 4: '033', 5: '034', 6: '002', 7: '004' } as Record<string, string>)[String(eventId)] : undefined;
     const valid = scalar(field(value, ['isvalid']));
     const statusCode = scalar(field(value, ['statuscode']));
+    const emptyEventResult = Boolean(eventResult && confirmedEmptyEvents && String(statusCode) === '67');
+    const confirmedNoEvents = noEvents || emptyEventResult;
     const status = String(scalar(field(value, ['status'])) ?? '').toLowerCase();
     const rejected = isFalse(valid) || ['failed', 'rejected'].includes(status);
     if (code && ['030', '031', '032', '033', '034', '002', '004'].includes(code)) {
@@ -79,11 +86,11 @@ export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus 
       }
       const collection = ['events', 'event', 'eventos', 'dianresponse'].includes(normalized);
       if (collection && (Array.isArray(child) || record(child))) knownCollection = true;
-      if (collection && child == null) uncertain = true;
-      pending.push({ value: child, inEvents: inEvents || collection, depth: depth + 1 });
+      if (collection && child == null && !confirmedNoEvents) uncertain = true;
+      pending.push({ value: child, inEvents: inEvents || collection, depth: depth + 1, eventResult: normalized === 'getstatuseventresult', noEvents: confirmedNoEvents });
     }
     if (inEvents && !code && !decodedEvent && !Object.keys(value).some(key => ['events', 'event', 'eventos', 'dianresponse'].includes(keyName(key)))) uncertain = true;
-    if (!inEvents && (isFalse(valid) || (statusCode != null && String(statusCode) !== '00'))) failed = true;
+    if (!inEvents && !emptyEventResult && (isFalse(valid) || (statusCode != null && String(statusCode) !== '00'))) failed = true;
   }
   if (failed) return null;
   if (codes.has('033') || codes.has('034')) return { accepted: true, eventCodes: [...codes] };
