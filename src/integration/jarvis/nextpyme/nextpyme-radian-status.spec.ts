@@ -204,3 +204,19 @@ it.each([4, 5])('no habilita la nota si hay aceptación %s o falla explícita ju
   expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), success: false })).toBeNull();
   expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), events: [{ status: 'unknown' }] })).toBeNull();
 });
+
+it('imprime la respuesta completa protegida cuando falla la lectura y mantiene el bloqueo', async () => {
+  const { client, http } = setupClient();
+  const log = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  log.mockClear();
+  const body = { success: true, events: [], ResponseDian: { Result: { StatusCode: '67' } }, token: 'private-token' };
+  http.post.mockReturnValue(of({ status: 200, data: body } as never));
+  await expect(client.getInvoiceRadianStatus(cufe, 'private-token')).rejects.toThrow('No se pudo verificar');
+  const entry = log.mock.calls.find(call => String(call[0]).startsWith('[radian/note-eligibility:nextpyme-response]'));
+  expect(entry).toBeDefined();
+  const snapshot = JSON.parse(String(entry![0]).slice('[radian/note-eligibility:nextpyme-response] '.length));
+  expect(snapshot.parserVersion).toBe('2026-11-23.4');
+  expect(snapshot.response.responsedian.result.statuscode).toBe('67');
+  expect(snapshot.response.events.arrayLength).toBe(0);
+  expect(JSON.stringify(snapshot)).not.toContain('private-token');
+});

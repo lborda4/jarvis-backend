@@ -1,3 +1,4 @@
+import { radianResponseForLog } from './nextpyme-radian-response-log';
 import { radianProviderDiagnostic } from './nextpyme-radian-diagnostic';
 import { parseInvoiceRadianStatus, type InvoiceRadianStatus } from './nextpyme-radian-status';
 import { parseJarvisCertificateTerm, type JarvisCertificateTerm } from '../../../plan/jarvis-certificate-term';
@@ -916,13 +917,16 @@ export class NextPymeApiClient {
       const timeout = axios.isAxiosError(error) && ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code ?? '');
       return this.failRadianVerification(timeout ? 'RADIAN_TIMEOUT' : 'RADIAN_UNAVAILABLE', undefined, undefined, { transportCode: axios.isAxiosError(error) && /^(?:E[A-Z_]{1,30})$/.test(error.code ?? '') ? error.code : 'UNKNOWN' });
     }
+    const logResponse = () => console.warn('[radian/note-eligibility:nextpyme-response] ' + JSON.stringify({ parserVersion: '2026-11-23.4', httpStatus: response.status, response: radianResponseForLog(response.data, token) }));
     if (response.status < 200 || response.status >= 300) {
+      logResponse();
       const code = [401, 403].includes(response.status) ? 'RADIAN_AUTH'
         : response.status === 429 ? 'RADIAN_RATE_LIMIT' : 'RADIAN_UNAVAILABLE';
       return this.failRadianVerification(code, response.status, undefined, radianProviderDiagnostic(response.data, token));
     }
     const parsed = parseInvoiceRadianStatus(response.data);
     if (parsed) return parsed;
+    logResponse();
     // Record structure only: never log the token, XML, CUFE or provider body values.
     const shape: string[] = [];
     const pending = [{ value: response.data, path: 'body', depth: 0 }];
