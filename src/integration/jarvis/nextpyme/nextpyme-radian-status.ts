@@ -12,10 +12,21 @@ const isTrue = (value: unknown) => value === true || value === 'true';
 /** Unknown/error payloads must never be interpreted as an invoice without events. */
 export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus | null {
   // NextPyme/DIAN status 67 is a successful lookup with no associated events.
-  // Require the provider's explicit success and empty events collection as well.
+  // NextPyme also returns success:false for DIAN 67; only that confirmed no-events result may override it.
   const providerEvents = record(payload) ? field(payload, ['events', 'eventos']) : undefined;
-  const confirmedEmptyEvents = record(payload) && isTrue(scalar(field(payload, ['success'])))
+  const providerSuccess = record(payload) ? scalar(field(payload, ['success'])) : undefined;
+  const providerFailed = isFalse(providerSuccess);
+  const providerMessage = record(payload) ? scalar(field(payload, ['message'])) : undefined;
+  const successfulLookupMessage = typeof providerMessage === 'string'
+    && /^consulta de eventos generada con exito$/i.test(providerMessage.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim());
+  const confirmedEmptyEvents = (isTrue(providerSuccess) || providerFailed)
     && Array.isArray(providerEvents) && providerEvents.length === 0;
+  // NextPyme's events[].dian_code is the event type; event_number is only its sequence.
+  const hasStructuredEvents = isTrue(providerSuccess) && Array.isArray(providerEvents) && providerEvents.length > 0
+    && providerEvents.every(event => record(event) && ['030', '031', '032', '033', '034', '002', '004'].includes(
+      String(scalar(field(event, ['diancode', 'eventcode', 'codigoevento', 'responsecode'])) ?? '').trim().padStart(3, '0'),
+    ));
+  let confirmedNoEventsDespiteProviderFlag = false;
   let knownCollection = Array.isArray(payload);
   let uncertain = false;
   let failed = false;
@@ -39,14 +50,21 @@ export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus 
       continue;
     }
     if (!record(value)) continue;
-    if (isFalse(scalar(field(value, ['success', 'ok']))) || field(value, ['fault']) !== undefined) failed = true;
-    const rawCode = scalar(field(value, ['eventcode', 'codigoevento', 'responsecode', ...(inEvents ? ['code'] : [])]));
+    if ((value !== payload && isFalse(scalar(field(value, ['success']))))
+      || isFalse(scalar(field(value, ['ok']))) || field(value, ['fault']) !== undefined) failed = true;
+    const rawCode = scalar(field(value, ['eventcode', 'codigoevento', 'responsecode', ...(inEvents ? ['diancode', 'code'] : [])]));
     const eventId = scalar(field(value, ['eventid']));
     const code = rawCode != null ? String(rawCode).trim().padStart(3, '0')
       : eventId != null ? ({ 1: '030', 2: '031', 3: '032', 4: '033', 5: '034', 6: '002', 7: '004' } as Record<string, string>)[String(eventId)] : undefined;
     const valid = scalar(field(value, ['isvalid']));
     const statusCode = scalar(field(value, ['statuscode']));
     const emptyEventResult = Boolean(eventResult && confirmedEmptyEvents && String(statusCode) === '67');
+    const description = scalar(field(value, ['statusdescription']));
+    const errors = field(value, ['errormessage']);
+    if (emptyEventResult && typeof description === 'string'
+      && /no tiene (?:a la fecha )?eventos asociados/i.test(description)
+      && (errors == null || (Array.isArray(errors) && errors.length === 0)))
+      confirmedNoEventsDespiteProviderFlag = true;
     const confirmedNoEvents = noEvents || emptyEventResult;
     const status = String(scalar(field(value, ['status'])) ?? '').toLowerCase();
     const rejected = isFalse(valid) || ['failed', 'rejected'].includes(status);
@@ -61,6 +79,9 @@ export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus 
     for (const [key, child] of Object.entries(value)) {
       const normalized = keyName(key);
       if (['xmlbase64bytes', 'applicationresponsexml'].includes(normalized) && typeof scalar(child) === 'string' && !rejected) {
+        // The GetStatusEventResult XML can be the invoice validation, not the event list.
+        // Use the complete structured event list when supplied; retain XML fallback otherwise.
+        if (eventResult && hasStructuredEvents) continue;
         const raw = String(scalar(child)).trim();
         const xml = raw.startsWith('<') ? raw : Buffer.from(raw, 'base64').toString('utf8').trim();
         if (!xml.includes('ApplicationResponse') || /<!DOCTYPE|<!ENTITY/i.test(xml) || xml.length > 2_000_000) { uncertain = true; continue; }
@@ -92,7 +113,7 @@ export function parseInvoiceRadianStatus(payload: unknown): InvoiceRadianStatus 
     if (inEvents && !confirmedNoEvents && !code && !decodedEvent && !Object.keys(value).some(key => ['events', 'event', 'eventos', 'dianresponse'].includes(keyName(key)))) uncertain = true;
     if (!inEvents && !emptyEventResult && (isFalse(valid) || (statusCode != null && String(statusCode) !== '00'))) failed = true;
   }
-  if (failed) return null;
+  if (failed || (providerFailed && !(successfulLookupMessage && confirmedNoEventsDespiteProviderFlag))) return null;
   if (codes.has('033') || codes.has('034')) return { accepted: true, eventCodes: [...codes] };
   if (!knownCollection || uncertain) return null;
   return { accepted: false, eventCodes: [...codes] };

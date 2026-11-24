@@ -153,7 +153,7 @@ it.each(['99', '66', undefined])('mantiene bloqueados otros errores o respuestas
 
 it('no confunde el código 67 aislado ni una consulta fallida con una confirmación', () => {
   expect(parseInvoiceRadianStatus({ success: true, events: [], StatusCode: '67' })).toBeNull();
-  expect(parseInvoiceRadianStatus({ ...noEventsResponse(), success: false })).toBeNull();
+  expect(parseInvoiceRadianStatus({ success: false, events: [] })).toBeNull();
   expect(parseInvoiceRadianStatus({ ...noEventsResponse(), events: null })).toBeNull();
   expect(parseInvoiceRadianStatus({ ...noEventsResponse(), events: [{ status: 'unknown' }] })).toBeNull();
 });
@@ -201,7 +201,7 @@ it.each(['99', '66', undefined])('no habilita la nota ante un fallo DIAN anidado
 
 it.each([4, 5])('no habilita la nota si hay aceptación %s o falla explícita junto al código 67 anidado', event_id => {
   expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), events: [{ event_id }] })?.accepted).not.toBe(false);
-  expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), success: false })).toBeNull();
+  expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), success: false, message: 'Error de autenticación' })).toBeNull();
   expect(parseInvoiceRadianStatus({ ...nestedNoEventsResponse(), events: [{ status: 'unknown' }] })).toBeNull();
 });
 
@@ -219,4 +219,135 @@ it('imprime la respuesta completa protegida cuando falla la lectura y mantiene e
   expect(snapshot.response.responsedian.result.statuscode).toBe('67');
   expect(snapshot.response.events.arrayLength).toBe(0);
   expect(JSON.stringify(snapshot)).not.toContain('private-token');
+});
+
+// Response supplied from the real failing NextPyme call: preserve flags, nil wrappers and XML fields.
+function realNoEventsResponse() {
+  return {
+    success: false,
+    message: 'Consulta de eventos generada con exito ',
+    events: [],
+    ResponseDian: { Envelope: {
+      Header: {
+        Action: { _attributes: { mustUnderstand: '1' }, _value: 'http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatusEventResponse' },
+        Security: { _attributes: { mustUnderstand: '1' }, Timestamp: { _attributes: { Id: '_0' }, Created: '2026-11-23T23:58:12.380Z', Expires: '2026-11-24T00:03:12.380Z' } },
+      },
+      Body: { GetStatusEventResponse: { GetStatusEventResult: {
+        ErrorMessage: [], IsValid: 'false', StatusCode: '67',
+        StatusDescription: 'EL CUFE o Factura consultada no tiene a la fecha eventos asociados.',
+        StatusMessage: { _attributes: { nil: 'true' } },
+        XmlBase64Bytes: 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiIHN0YW5kYWxvbmU9Im5vIj8+PEFwcGxpY2F0aW9uUmVzcG9uc2UgeG1sbnM6Y2FjPSJ1cm46b2FzaXM6bU+DQogICAgICA8L2NhYzpUYXhTY2hlbWU+DQogICAgPC9jYWM6UGFydHlUYXhTY2hlbWU+DQogIDwvY2FjOlJlY2VpdmVyUGFydHk+DQo8L0FwcGxpY2F0aW9uUmVzcG9uc2U+',
+        XmlBytes: { _attributes: { nil: 'true' } },
+        XmlDocumentKey: cufe, XmlFileName: 'fv-test',
+      } } },
+    } },
+    cufecude: cufe, certificate_days_left: 239,
+  };
+}
+
+it('reproduce la respuesta real: success false con DIAN 67, eventos vacíos y XML no significa error', () => {
+  expect(parseInvoiceRadianStatus(realNoEventsResponse())).toEqual({ accepted: false, eventCodes: [] });
+});
+
+it('devuelve allowed true para la respuesta real a través del cliente y servicio usados por el frontend', async () => {
+  const { client, http } = setupClient();
+  http.post.mockReturnValue(of({ status: 200, data: realNoEventsResponse() } as never));
+  const service = new JarvisRadianService(
+    { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'owner-token' }) } as never,
+    { findByCompanyAndProvider: jest.fn().mockResolvedValue({ subscriptionStatus: 'ACTIVE' }) } as never,
+    client, {} as never,
+  );
+  await expect(service.noteEligibility('owner', cufe)).resolves.toEqual({ source: 'nextpyme', allowed: true, blockReason: null });
+});
+
+it.each([401, 403, 429, 500])('no permite la nota con HTTP %s aunque el cuerpo sea el caso 67 real', async status => {
+  const { client, http } = setupClient();
+  http.post.mockReturnValue(of({ status, data: realNoEventsResponse() } as never));
+  await expect(client.getInvoiceRadianStatus(cufe, 'token')).rejects.toThrow('No se pudo verificar');
+});
+
+it.each([
+  { success: false, events: [] },
+  { ...realNoEventsResponse(), message: 'Unauthenticated' },
+  { ...realNoEventsResponse(), events: [{ event_id: 4 }] },
+  { ...realNoEventsResponse(), events: [{ event_id: 5 }] },
+  { ...realNoEventsResponse(), events: [{ status: 'unknown' }] },
+  { ...realNoEventsResponse(), events: null },
+])('mantiene el bloqueo ante fallos o eventos contradictorios en una respuesta success false: %#', payload => {
+  expect(parseInvoiceRadianStatus(payload)?.accepted).not.toBe(false);
+});
+
+it.each(['99', '66', undefined])('no convierte success false y otro código DIAN %j en ausencia de eventos', code => {
+  const body = realNoEventsResponse();
+  const result = { ...body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult, StatusCode: code };
+  expect(parseInvoiceRadianStatus({ ...body, ResponseDian: { GetStatusEventResult: result } })).toBeNull();
+});
+
+it('mantiene el bloqueo si existe una falla adicional aunque haya código 67', () => {
+  const body = realNoEventsResponse();
+  const result = { ...body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult, ErrorMessage: ['Certificado vencido'] };
+  expect(parseInvoiceRadianStatus({ ...body, ResponseDian: { GetStatusEventResult: result } })).toBeNull();
+  expect(parseInvoiceRadianStatus({ ...body, ok: false })).toBeNull();
+  expect(parseInvoiceRadianStatus({ ...body, ResponseDian: { ...body.ResponseDian, Fault: { message: 'Error' } } })).toBeNull();
+});
+
+function realEventsResponse() {
+  const body = realNoEventsResponse();
+  return { ...body, success: true,
+    events: [
+      { event_number: '1', dian_code: '030', description: 'Acuse de recibo de Factura Electrónica de Venta', date: '2025-06-17', time: '16:39:59-05:00', cude: 'b'.repeat(96) },
+      { event_number: '2', dian_code: '032', description: 'Recibo del bien o prestación del servicio', date: '2025-07-01', time: '06:56:14-05:00', cude: 'c'.repeat(96) },
+      { event_number: '3', dian_code: '034', description: 'Aceptación Tácita', date: '2026-11-23', time: '19:09:32-05:00', cude: 'd'.repeat(96) },
+    ],
+    ResponseDian: { Envelope: { ...body.ResponseDian.Envelope, Body: { GetStatusEventResponse: { GetStatusEventResult: {
+      ErrorMessage: { string: [
+        'Regla: RUT01, Notificación: La validación del estado del RUT próximamente estará disponible.',
+        'Regla: RUT01, Notificación: La validación del estado del RUT próximamente estará disponible.',
+      ] },
+      IsValid: 'true', StatusCode: '00', StatusDescription: 'Procesado Correctamente.',
+      StatusMessage: 'La Factura electrónica FV-453, ha sido autorizada.',
+      XmlBase64Bytes: 'PD94bWwgdmVyc2lvbjG9uc2U+',
+      XmlBytes: { _attributes: { nil: 'true' } }, XmlDocumentKey: cufe, XmlFileName: 'fv-test',
+    } } } } },
+  };
+}
+
+it('lee la respuesta real con dian_code 030, 032 y 034 sin confundir la notificación RUT con un rechazo', () => {
+  expect(parseInvoiceRadianStatus(realEventsResponse())).toEqual({ accepted: true, eventCodes: ['030', '032', '034'] });
+});
+
+it.each(['033', '034'])('devuelve allowed false y el mensaje de aceptación para dian_code %s', async code => {
+  const { client, http } = setupClient();
+  const body = realEventsResponse();
+  body.events[2].dian_code = code;
+  http.post.mockReturnValue(of({ status: 200, data: body } as never));
+  const service = new JarvisRadianService(
+    { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'owner-token' }) } as never,
+    { findByCompanyAndProvider: jest.fn().mockResolvedValue({ subscriptionStatus: 'ACTIVE' }) } as never,
+    client, {} as never,
+  );
+  await expect(service.noteEligibility('owner', cufe)).resolves.toEqual({ source: 'nextpyme', allowed: false, blockReason: expect.stringContaining('aceptación en RADIAN') });
+});
+
+it('permite una factura con solo acuse y recibo usando los eventos estructurados aunque el XML de factura esté abreviado', async () => {
+  const { client, http } = setupClient();
+  const body = realEventsResponse();
+  body.events = body.events.slice(0, 2);
+  body.events[0].event_number = '4';
+  http.post.mockReturnValue(of({ status: 200, data: body } as never));
+  await expect(client.getInvoiceRadianStatus(cufe, 'token')).resolves.toEqual({ accepted: false, eventCodes: ['030', '032'] });
+});
+
+it('no confunde el consecutivo del evento con su código DIAN ni toma una lista desconocida como ausencia de aceptación', () => {
+  expect(parseInvoiceRadianStatus({ success: true, events: [{ event_number: '4' }] })).toBeNull();
+  const body = realEventsResponse();
+  body.events = [{ ...body.events[0], dian_code: '999' }];
+  expect(parseInvoiceRadianStatus(body)).toBeNull();
+});
+
+it.each(['99', '66'])('no convierte el código DIAN de error %s en permiso aunque haya una lista estructurada', code => {
+  const body = realEventsResponse();
+  body.events = body.events.slice(0, 2);
+  body.ResponseDian.Envelope.Body.GetStatusEventResponse.GetStatusEventResult.StatusCode = code;
+  expect(parseInvoiceRadianStatus(body)).toBeNull();
 });
