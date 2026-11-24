@@ -41,6 +41,46 @@ export class AdvisorAccountService {
     const clients = await this.db.getRepository(Company).find({ where: { advisorId: id }, select: { id: true, name: true, nit: true }, order: { name: 'ASC' } });
     return this.dto(advisor, clients);
   }
+  private conversionReason(user: Pick<User, 'role' | 'active'>, advisor: Advisor | null): string | null {
+    if (user.role === UserRole.ADMIN) return 'Las cuentas de administrador no se pueden convertir a comercial.';
+    if (!user.active) return 'Esta cuenta está inactiva. Debe completar o recuperar su acceso antes de convertirla.';
+    if (user.role !== UserRole.USER && user.role !== UserRole.ADVISOR) return 'El rol de esta cuenta no permite la conversión.';
+    if (user.role === UserRole.ADVISOR && advisor?.registeredAt) return 'El usuario ya es comercial.';
+    return null;
+  }
+  async lookupExistingUser(rawEmail: unknown) {
+    const email = registrationEmail(rawEmail);
+    const user = await this.db.getRepository(User).findOne({ where: { email }, select: { id: true, name: true, email: true, role: true, active: true } });
+    if (!user) throw new NotFoundException('No se encontró un usuario con este correo.');
+    const advisor = await this.db.getRepository(Advisor).findOne({ where: { userId: user.id } });
+    const reason = this.conversionReason(user, advisor);
+    return { user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active,
+      advisorId: advisor?.id ?? null, canConvert: reason === null, reason } };
+  }
+  async convertExistingUser(userId: string) {
+    const result = await this.db.transaction(async manager => {
+      const users = manager.getRepository(User);
+      const user = await users.findOne({ where: { id: userId }, lock: { mode: 'pessimistic_write' } });
+      if (!user) throw new NotFoundException('Usuario no encontrado.');
+      // Never change administrator privileges or bypass inactive-account registration.
+      if (user.role === UserRole.ADMIN || !user.active || ![UserRole.USER, UserRole.ADVISOR].includes(user.role))
+        throw new BadRequestException(this.conversionReason(user, null)!);
+      const repository = manager.getRepository(Advisor);
+      let advisor = await repository.findOne({ where: { userId }, lock: { mode: 'pessimistic_write' } });
+      const changed = user.role !== UserRole.ADVISOR || !advisor?.registeredAt;
+      if (user.role !== UserRole.ADVISOR) await users.update({ id: user.id }, { role: UserRole.ADVISOR });
+      if (!advisor) {
+        advisor = await repository.save(repository.create({ userId, commissionType: 'FIXED', commissionValue: null,
+          registeredAt: new Date(), invitationHash: null, invitationExpiresAt: null, lastDeliveryStatus: null, lastInvitedAt: null }));
+      } else if (!advisor.registeredAt) {
+        advisor.registeredAt = new Date(); advisor.invitationHash = null; advisor.invitationExpiresAt = null;
+        advisor.lastDeliveryStatus = null;
+        await repository.save(advisor);
+      }
+      return { id: advisor.id, changed };
+    });
+    return { advisor: await this.get(result.id), changed: result.changed };
+  }
   async create(input: AdvisorInput) {
     const name = this.name(input?.name), email = registrationEmail(input?.email);
     const commission = advisorCommission(input?.commissionType ?? 'FIXED', input?.commissionValue);

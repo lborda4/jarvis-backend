@@ -12,6 +12,8 @@ import { AdminGuard } from './guards/admin.guard';
 @UseGuards(AdminGuard)
 export class AdminAdvisorsController {
   constructor(private readonly advisors: AdvisorAccountService, private readonly portal: AdvisorPortalService, private readonly admin: AdminService) {}
+  @Get('existing-user') existingUser(@Query('email') email: string) { return this.advisors.lookupExistingUser(email); }
+  @Post('existing-users/:userId/convert') convertUser(@Param('userId', ParseUUIDPipe) userId: string) { return this.advisors.convertExistingUser(userId); }
   @Get('portal/catalog') catalog() { return this.portal.catalog(); }
   @Get('portal/lookup-name') lookup(@Query('nit') nit: string) { return this.admin.lookupCompanyName(nit ?? ''); }
   @Get(':id/dashboard') async dashboard(@Param('id', ParseUUIDPipe) id: string, @Query('month') month?: string) {

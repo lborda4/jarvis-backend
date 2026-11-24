@@ -124,3 +124,85 @@ it('assigns clients by advisor id, preserves ownership and updates linked names 
   f.companies[0].advisorId = advisor.id; await f.service.assignClient(advisor.id, 'client', true);
   expect(f.companies[0]).toMatchObject({ advisorId: null, commercial: null });
 });
+
+function addExistingUser(f: ReturnType<typeof setup>, patch: Partial<User> = {}) {
+  const user = { id: 'existing-user', email: 'existing@example.com', name: 'Usuario existente', role: UserRole.USER,
+    active: true, password: 'existing-password-hash', acceptedPrivacyAt: new Date('2026-01-01'), privacyPolicyVersion: 'existing-policy', ...patch } as User;
+  f.users.push(user);
+  return user;
+}
+
+it('finds an existing account by normalized email without exposing passwords or changing it', async () => {
+  const f = setup(); const user = addExistingUser(f);
+  await expect(f.service.lookupExistingUser(' EXISTING@example.com ')).resolves.toEqual({ user: {
+    id: user.id, name: user.name, email: user.email, role: UserRole.USER, active: true, advisorId: null, canConvert: true, reason: null,
+  } });
+  expect(f.users[0].role).toBe(UserRole.USER);
+  expect(f.mail.sendAdvisorAccess).not.toHaveBeenCalled();
+  await expect(f.service.lookupExistingUser('missing@example.com')).rejects.toThrow('No se encontró');
+  await expect(f.service.lookupExistingUser('invalid')).rejects.toThrow();
+});
+
+it('converts an active existing account without changing its password, consent or company links and without email', async () => {
+  const f = setup(); const user = addExistingUser(f);
+  const password = user.password, consent = user.acceptedPrivacyAt;
+  f.companies.push({ id: 'unchanged-company', advisorId: null, commercial: null } as Company);
+  const result = await f.service.convertExistingUser(user.id);
+  expect(result.changed).toBe(true);
+  expect(result.advisor).toMatchObject({ name: user.name, email: user.email, active: true, registered: true, commissionValue: null, clients: [] });
+  expect(user).toMatchObject({ role: UserRole.ADVISOR, password, acceptedPrivacyAt: consent, privacyPolicyVersion: 'existing-policy', active: true });
+  expect(f.users).toHaveLength(1); expect(f.advisors).toHaveLength(1);
+  expect(f.events).toEqual(['lock:user', 'lock:advisor']);
+  expect(f.companyRepo.update).not.toHaveBeenCalled();
+  expect(f.mail.sendAdvisorAccess).not.toHaveBeenCalled();
+  expect(JSON.stringify(result)).not.toMatch(/password|invitationHash/);
+});
+
+it('restores the original advisor profile and retains its client assignments, commission and registration date', async () => {
+  const f = setup(); const user = addExistingUser(f);
+  const registeredAt = new Date('2026-02-01');
+  f.advisors.push({ id: 'old-advisor', userId: user.id, registeredAt, commissionType: 'PERCENT', commissionValue: '12.50', lastDeliveryStatus: 'SENT', invitationHash: null, invitationExpiresAt: null } as Advisor);
+  f.companies.push({ id: 'old-client', name: 'Cliente anterior', nit: '900', advisorId: 'old-advisor', commercial: user.name } as Company);
+  const result = await f.service.convertExistingUser(user.id);
+  expect(result).toMatchObject({ changed: true, advisor: { id: 'old-advisor', commissionType: 'PERCENT', commissionValue: 12.5, clients: [{ id: 'old-client' }] } });
+  expect(f.advisors[0].registeredAt).toBe(registeredAt);
+  expect(f.advisors).toHaveLength(1); expect(f.advisorRepo.save).not.toHaveBeenCalled();
+  expect(f.companies[0].advisorId).toBe('old-advisor');
+});
+
+it('is idempotent on retries and reports accounts already registered as advisors', async () => {
+  const f = setup(); const user = addExistingUser(f);
+  const first = await f.service.convertExistingUser(user.id);
+  const again = await f.service.convertExistingUser(user.id);
+  expect(again.changed).toBe(false); expect(again.advisor.id).toBe(first.advisor.id);
+  expect(f.advisors).toHaveLength(1); expect(f.userRepo.update).toHaveBeenCalledTimes(1);
+  expect((await f.service.lookupExistingUser(user.email)).user).toMatchObject({ canConvert: false, advisorId: first.advisor.id, reason: 'El usuario ya es comercial.' });
+});
+
+it.each([
+  { role: UserRole.ADMIN, active: true },
+  { role: UserRole.USER, active: false },
+  { role: UserRole.ADVISOR, active: false },
+])('rejects unsafe or inactive conversion targets: %j', async patch => {
+  const f = setup(); const user = addExistingUser(f, patch);
+  expect((await f.service.lookupExistingUser(user.email)).user.canConvert).toBe(false);
+  await expect(f.service.convertExistingUser(user.id)).rejects.toThrow();
+  expect(user.role).toBe(patch.role); expect(user.active).toBe(patch.active);
+  expect(f.advisors).toHaveLength(0); expect(f.userRepo.update).not.toHaveBeenCalled();
+  expect(f.mail.sendAdvisorAccess).not.toHaveBeenCalled();
+});
+
+it('completes only the commercial profile for an already active account and invalidates pending invitations', async () => {
+  const f = setup(); const user = addExistingUser(f);
+  f.advisors.push({ id: 'old-pending', userId: user.id, registeredAt: null, commissionType: 'FIXED', commissionValue: '40000.00', invitationHash: 'old-invite', invitationExpiresAt: new Date(), lastDeliveryStatus: 'FAILED' } as Advisor);
+  const result = await f.service.convertExistingUser(user.id);
+  expect(result.advisor).toMatchObject({ id: 'old-pending', registered: true, active: true, commissionValue: 40000, lastDeliveryStatus: null });
+  expect(f.advisors[0]).toMatchObject({ invitationHash: null, invitationExpiresAt: null });
+  expect(f.users[0].password).toBe('existing-password-hash');
+});
+
+it('does not create a profile for a missing user id', async () => {
+  const f = setup();
+  await expect(f.service.convertExistingUser('missing')).rejects.toThrow('Usuario no encontrado');
+  expect(f.advisors).toHaveLength(0);
+});
