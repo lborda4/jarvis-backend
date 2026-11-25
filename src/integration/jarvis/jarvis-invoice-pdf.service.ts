@@ -51,7 +51,7 @@ export class JarvisInvoicePdfService {
     private readonly integrations: IntegrationsRepository,
   ) {}
 
-  async sendEmail(companyId: string, id: string, request: { additionalEmails?: string[]; message?: string }) {
+  async sendEmail(companyId: string, id: string, request: { recipientEmail?: string; additionalEmails?: string[]; message?: string }) {
     const trace = { requestId: randomUUID(), companyId, documentId: id };
     return this.traceEmailStep(trace, 'reenvio', () => this.performSendEmail(companyId, id, request, trace));
   }
@@ -73,8 +73,8 @@ export class JarvisInvoicePdfService {
     }
   }
 
-  private async performSendEmail(companyId: string, id: string, request: { additionalEmails?: string[]; message?: string }, trace: Record<string, string>) {
-    if (!request || (request.additionalEmails !== undefined && (!Array.isArray(request.additionalEmails) || request.additionalEmails.length > 50)) || (request.message !== undefined && (typeof request.message !== 'string' || request.message.length > 500))) {
+  private async performSendEmail(companyId: string, id: string, request: { recipientEmail?: string; additionalEmails?: string[]; message?: string }, trace: Record<string, string>) {
+    if (!request || (request.recipientEmail !== undefined && (typeof request.recipientEmail !== 'string' || (request.recipientEmail.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(request.recipientEmail.trim())))) || (request.additionalEmails !== undefined && (!Array.isArray(request.additionalEmails) || request.additionalEmails.length > 50)) || (request.message !== undefined && (typeof request.message !== 'string' || request.message.length > 500))) {
       throw new BadRequestException('Los correos adicionales o el mensaje no son válidos.');
     }
     const extras = request.additionalEmails ?? [];
@@ -84,8 +84,8 @@ export class JarvisInvoicePdfService {
     const invoice = await this.traceEmailStep(trace, 'consultar-documento', () => this.invoices.findOne({ where: { companyId, id } }));
     if (!invoice) throw new NotFoundException('No se encontró el documento.');
     const data = await this.traceEmailStep(trace, 'consultar-datos-pdf', () => this.getData(companyId, id));
-    const registered = data.buyer.email?.trim().toLowerCase();
-    const emails = [...new Set([registered, ...(data.recipientCopyEmails ?? []), ...extras].filter((email): email is string => Boolean(email)).map(email => email.trim().toLowerCase()))];
+    const recipient = request.recipientEmail === undefined ? data.buyer.email : request.recipientEmail;
+    const emails = [...new Set([recipient, ...(data.recipientCopyEmails ?? []), ...extras].filter((email): email is string => Boolean(email?.trim())).map(email => email.trim().toLowerCase()))];
     if (!emails.length || emails.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) throw new BadRequestException('Se requiere al menos un correo válido.');
     const company = await this.traceEmailStep(trace, 'consultar-empresa', () => this.companies.findById(companyId));
     if (!company?.nextPymeToken) throw new BadRequestException('La empresa no tiene un token de correo configurado.');
@@ -119,6 +119,23 @@ export class JarvisInvoicePdfService {
     if (response.success === false) throw new BadGatewayException('El proveedor no confirmó el envío del correo.');
     const delivery = await this.recordEmailDelivery(companyId, id, emails);
     return { success: true, delivery };
+  }
+
+  async downloadInvoiceXml(companyId: string, id: string): Promise<{ buffer: Buffer; filename: string }> {
+    const invoice = await this.invoices.findOne({ where: { companyId, id, documentKind: JarvisResolutionKind.ELECTRONIC_INVOICE } });
+    if (!invoice) throw new NotFoundException('No se encontró la factura.');
+    if (!invoice.cufe) throw new BadGatewayException('La factura aún no tiene CUFE disponible.');
+    const company = await this.companies.findById(companyId);
+    const nit = company?.nit?.replace(/[.\s]/g, '').replace(/-\d$/, '') ?? '';
+    const token = company?.nextPymeToken?.trim();
+    const number = invoice.number.startsWith(invoice.prefix) ? invoice.number : `${invoice.prefix}${invoice.number}`;
+    if (!/^\d+$/.test(nit) || !token || !/^[a-zA-Z0-9]+$/.test(number)) {
+      throw new BadRequestException('No se pudo determinar el NIT, token o número para descargar el XML.');
+    }
+    const filename = `FES-${number}.xml`;
+    const buffer = await this.nextPyme.downloadInvoiceXml(nit, filename, token);
+    mapInvoiceXmlToPurchaseInvoiceDownload(buffer.toString('utf8'), id, invoice.cufe);
+    return { buffer, filename };
   }
 
   async recordEmailDelivery(companyId: string, id: string, recipients: string[]) {

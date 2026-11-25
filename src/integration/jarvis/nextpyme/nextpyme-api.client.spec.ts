@@ -2,6 +2,16 @@ import { of, throwError } from 'rxjs';
 import { NextPymeApiClient } from './nextpyme-api.client';
 
 describe('NextPyme company authentication', () => {
+  it('descarga el XML por la ruta solicitada usando el token de la empresa', async () => {
+    const { client, httpService } = buildClient();
+    const xml = Buffer.from('<Invoice/>');
+    httpService.get.mockReturnValue(of({ status: 200, data: xml }));
+    await expect(client.downloadInvoiceXml('900123456', 'FES-FE1.xml', 'company-token')).resolves.toEqual(xml);
+    expect(httpService.get).toHaveBeenCalledWith('https://nextpyme.example/download/900123456/FES-FE1.xml',
+      expect.objectContaining({ responseType: 'arraybuffer', maxRedirects: 0, headers: expect.objectContaining({ Authorization: expect.stringContaining('company-token') }) }));
+    httpService.get.mockReturnValue(of({ status: 404, data: Buffer.from('not found') }));
+    await expect(client.downloadInvoiceXml('900123456', 'FES-FE1.xml', 'company-token')).rejects.toThrow('HTTP 404');
+  });
   it('lee los documentos de nómina cuando NextPyme devuelve registros como JSON anidado en texto', async () => {
     const { client, httpService } = buildClient();
     httpService.post.mockReturnValue(of({ status: 200, data: { success: true, data: { payroll_type_document_identifications: JSON.stringify([{ id: '3', name: 'Cédula de ciudadanía', code: 'CC' }]) } } }));

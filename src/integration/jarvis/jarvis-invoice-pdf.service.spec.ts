@@ -5,6 +5,24 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
+  it('descarga el XML de la factura propia con el token y NIT de la empresa', async () => {
+    const { service, repository, client, companies } = setup(null);
+    repository.findOne.mockResolvedValue({ prefix: 'XML', number: 'XML1', cufe: 'cufe-123' });
+    companies.findById.mockResolvedValue({ nextPymeToken: 'company-token', nit: '900.123.456-7', name: 'Empresa SAS' });
+    client.downloadInvoiceXml.mockResolvedValue(Buffer.from(DOWNLOAD_XML));
+    const result = await service.downloadInvoiceXml('company', 'id');
+    expect(repository.findOne).toHaveBeenCalledWith({ where: { companyId: 'company', id: 'id', documentKind: 'ELECTRONIC_INVOICE' } });
+    expect(client.downloadInvoiceXml).toHaveBeenCalledWith('900123456', 'FES-XML1.xml', 'company-token');
+    expect(result).toEqual({ buffer: Buffer.from(DOWNLOAD_XML), filename: 'FES-XML1.xml' });
+  });
+  it('no descarga facturas ajenas y rechaza XML con CUFE distinto', async () => {
+    const { service, repository, client } = setup(null);
+    repository.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({ prefix: 'XML', number: '1', cufe: 'otro' });
+    client.downloadInvoiceXml.mockResolvedValue(Buffer.from(DOWNLOAD_XML));
+    await expect(service.downloadInvoiceXml('company', 'id')).rejects.toThrow('No se encontró');
+    expect(client.downloadInvoiceXml).not.toHaveBeenCalled();
+    await expect(service.downloadInvoiceXml('company', 'id')).rejects.toThrow('CUFE');
+  });
   it('devuelve los envios registrados sin usar los correos configurados como prueba de envio', async () => {
     const emailDeliveries = [{ recipients: ['original@correo.com'], sentAt: '2026-11-17T22:01:00Z' }];
     const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, sourceRequest: { emailDeliveries, recipientCopyEmails: ['actual@correo.com'] } });
@@ -138,9 +156,9 @@ describe('sales invoice PDF data', () => {
 
   function setup(invoice: unknown) {
     const query = { addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn().mockResolvedValue(invoice) };
-    const repository = { createQueryBuilder: jest.fn(() => query), update: jest.fn() };
+    const repository = { createQueryBuilder: jest.fn(() => query), update: jest.fn(), findOne: jest.fn() };
     const companies = { findById: jest.fn().mockResolvedValue({ nextPymeToken: 'company-token', nit: '900123456', name: 'Empresa SAS' }) };
-    const client = { getInvoiceXmlByCufe: jest.fn().mockResolvedValue(DOWNLOAD_XML) };
+    const client = { getInvoiceXmlByCufe: jest.fn().mockResolvedValue(DOWNLOAD_XML), downloadInvoiceXml: jest.fn() };
     const logos = { get: jest.fn().mockResolvedValue({ logoDataUrl: null }) };
     const integrations = { findByCompanyAndProvider: jest.fn().mockResolvedValue({ credentials: { business_name: 'Empresa SAS' } }) };
     return { service: new JarvisInvoicePdfService(repository as never, companies as never, client as never, logos as never, integrations as never), repository, query, client, logos, integrations, companies };
@@ -252,6 +270,21 @@ describe('reenvío de correo de documentos emitidos', () => {
     jest.mocked(service.getData).mockResolvedValue({ ...data, recipientCopyEmails: ['cc@example.com', 'CLIENTE@CORREO.COM'] });
     await service.sendEmail('owner', 'id', { additionalEmails: ['CC@example.com', 'extra@example.com'] });
     expect(client.sendDocumentEmail).toHaveBeenCalledWith(expect.objectContaining({ alternate_email: 'cliente@correo.com', email_cc_list: [{ email: 'cc@example.com' }, { email: 'extra@example.com' }] }), 'owner-token');
+  });
+  it('envía al destinatario editado sin incluir el correo registrado automáticamente', async () => {
+    const { service, client } = setup();
+    const data = await service.getData('owner', 'id');
+    jest.mocked(service.getData).mockResolvedValue({ ...data, recipientCopyEmails: ['cc@example.com'] });
+    const result = await service.sendEmail('owner', 'id', { recipientEmail: ' NUEVO@example.com ', additionalEmails: ['nuevo@example.com', 'extra@example.com'] });
+    expect(client.sendDocumentEmail).toHaveBeenCalledWith(expect.objectContaining({
+      alternate_email: 'nuevo@example.com', email_cc_list: [{ email: 'cc@example.com' }, { email: 'extra@example.com' }],
+    }), 'owner-token');
+    expect(result.delivery?.recipients).toEqual(['nuevo@example.com', 'cc@example.com', 'extra@example.com']);
+  });
+  it('rechaza un destinatario editado inválido antes de enviar', async () => {
+    const { service, client } = setup();
+    await expect(service.sendEmail('owner', 'id', { recipientEmail: 'no-es-correo' })).rejects.toThrow();
+    expect(client.sendDocumentEmail).not.toHaveBeenCalled();
   });
   function setup() {
     const repository = { findOne: jest.fn().mockResolvedValue({ prefix: 'NDS', number: 'NDS5' }), query: jest.fn().mockResolvedValue([]) };

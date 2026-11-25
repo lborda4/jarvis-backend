@@ -287,7 +287,7 @@ export class JarvisInvoiceSendService {
       ));
     const liabilityId =
       await this.nextPymeMasterCatalogService.resolveLiabilityId(
-        credentials.tax_responsibility ??
+        tercero.taxResponsibility?.trim() ||
           JarvisTaxResponsibility.NOT_APPLICABLE,
         companyId,
       );
@@ -296,7 +296,7 @@ export class JarvisInvoiceSendService {
         ? JarvisVatRegime.NON_RESPONSIBLE
         : tercero.taxRegime
           ? JarvisVatRegime.RESPONSIBLE
-          : credentials.vat_regime;
+          : JarvisVatRegime.NON_RESPONSIBLE;
     const regimeId =
       tercero.typeRegimeId ??
       (await this.nextPymeMasterCatalogService.resolveRegimeId(

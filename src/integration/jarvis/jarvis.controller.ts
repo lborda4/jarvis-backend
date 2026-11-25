@@ -17,6 +17,7 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -449,8 +450,15 @@ export class JarvisController {
 
   @Post('invoices/:id/send-email')
   @ApiOperation({ summary: 'Reenviar por correo un documento Jarvis emitido.' })
-  sendInvoiceEmail(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Body() request: { additionalEmails?: string[]; message?: string }) {
+  sendInvoiceEmail(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Body() request: { recipientEmail?: string; additionalEmails?: string[]; message?: string }) {
     return this.invoicePdf.sendEmail(getAuthenticatedCompanyId(user), id, request);
+  }
+
+  @Get('invoices/:id/xml')
+  @ApiOperation({ summary: 'Descargar el XML de una factura de venta emitida.' })
+  async downloadInvoiceXml(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    const file = await this.invoicePdf.downloadInvoiceXml(getAuthenticatedCompanyId(user), id);
+    return new StreamableFile(file.buffer, { type: 'application/xml', length: file.buffer.length, disposition: `attachment; filename="${file.filename}"` });
   }
 
   @Get('invoices/:id/pdf-data')

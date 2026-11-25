@@ -1762,6 +1762,23 @@ export class NextPymeApiClient {
     return Buffer.from(response.data);
   }
 
+  async downloadInvoiceXml(nit: string, filename: string, companyToken: string): Promise<Buffer> {
+    const token = this.requireToken(companyToken);
+    try {
+      const response = await firstValueFrom(this.httpService.get<ArrayBuffer>(
+        `${this.getBaseUrl()}/download/${encodeURIComponent(nit)}/${encodeURIComponent(filename)}`,
+        { headers: this.buildAuthHeaders(token), timeout: 30000, responseType: 'arraybuffer', maxContentLength: 10 * 1024 * 1024, maxRedirects: 0, validateStatus: () => true },
+      ));
+      if (response.status < 200 || response.status >= 300) {
+        throw new BadGatewayException(`NextPyme no permitió descargar el XML (HTTP ${response.status}).`);
+      }
+      return Buffer.from(response.data);
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException('No se pudo descargar el XML de NextPyme. Intenta nuevamente.');
+    }
+  }
+
   private getBaseUrl(): string {
     return this.configService
       .get('nextPyme.baseUrl', { infer: true })

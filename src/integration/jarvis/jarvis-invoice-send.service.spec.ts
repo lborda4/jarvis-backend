@@ -105,6 +105,88 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     return setupResult;
   }
 
+  it.each([
+    [JarvisResolutionKind.ELECTRONIC_INVOICE, 'createInvoice'],
+    [JarvisResolutionKind.CREDIT_NOTE, 'createCreditNote'],
+    [JarvisResolutionKind.DEBIT_NOTE, 'createDebitNote'],
+  ] as const)('envía los datos tributarios del comprador en %s, no los del emisor', async (kind, method) => {
+    const { service, request, client, catalog, integrations } = setup('company-token', {
+      name: 'Cliente', documentNumber: '901335977', municipalityId: 149,
+      typeRegimeId: 2, taxResponsibility: 'O-13', entityType: 'legal_entity',
+    });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
+      vat_regime: 'vat_responsible', tax_responsibility: 'R-99-PN',
+    } });
+    catalog.resolveLiabilityId.mockResolvedValue(7);
+    await service.createAndSendInvoice({
+      ...request,
+      ...(kind === JarvisResolutionKind.ELECTRONIC_INVOICE ? {} : {
+        billingReference: { number: 'FV1', uuid: 'a'.repeat(96), issueDate: '2026-09-15' },
+        discrepancyResponseCode: 1, discrepancyResponseDescription: 'Corrección',
+      }),
+    }, 'company-1', kind);
+    expect(catalog.resolveLiabilityId).toHaveBeenCalledWith('O-13', 'company-1');
+    expect(client[method].mock.calls[0][0].customer).toMatchObject({
+      identification_number: 901335977, type_regime_id: 2, type_liability_id: 7,
+      type_organization_id: 1,
+    });
+  });
+
+  it.each([
+    ['vat_responsible', 2],
+    ['non_vat_responsible', 1],
+  ])('mantiene el régimen del comprador independiente del IVA del emisor %s', async (issuerRegime, regimeId) => {
+    const { service, request, client, catalog, integrations } = setup('company-token', {
+      name: 'Cliente', documentNumber: '901335977', municipalityId: 149,
+      typeRegimeId: regimeId, taxResponsibility: 'R-99-PN',
+    });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { vat_regime: issuerRegime, tax_responsibility: 'O-13' } });
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice.mock.calls[0][0].customer.type_regime_id).toBe(regimeId);
+    expect(catalog.resolveLiabilityId).toHaveBeenCalledWith('R-99-PN', 'company-1');
+    expect(catalog.resolveRegimeId).not.toHaveBeenCalled();
+  });
+
+  it('usa los valores predeterminados del tercero antiguo, no los del emisor', async () => {
+    const { service, request, client, catalog, integrations } = setup('company-token', {
+      name: 'Cliente', documentNumber: '901335977', municipalityId: 149,
+      typeRegimeId: null, taxRegime: null, taxResponsibility: null,
+    });
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: {
+      vat_regime: 'vat_responsible', tax_responsibility: 'O-13',
+    } });
+    catalog.resolveRegimeId.mockResolvedValue(2);
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(catalog.resolveRegimeId).toHaveBeenCalledWith('non_vat_responsible', 'company-1');
+    expect(catalog.resolveLiabilityId).toHaveBeenCalledWith('R-99-PN', 'company-1');
+    expect(client.createInvoice.mock.calls[0][0].customer).toMatchObject({ type_regime_id: 2, type_liability_id: 117 });
+  });
+
+  it.each([
+    ['simplified', 'non_vat_responsible', 2],
+    ['common', 'vat_responsible', 1],
+  ])('respeta el régimen anterior %s del tercero cuando no tiene id de régimen', async (taxRegime, expectedRegime, regimeId) => {
+    const { service, request, client, catalog } = setup('company-token', {
+      name: 'Cliente', documentNumber: '901335977', municipalityId: 149,
+      typeRegimeId: null, taxRegime, taxResponsibility: 'R-99-PN',
+    });
+    catalog.resolveRegimeId.mockResolvedValue(regimeId);
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(catalog.resolveRegimeId).toHaveBeenCalledWith(expectedRegime, 'company-1');
+    expect(client.createInvoice.mock.calls[0][0].customer.type_regime_id).toBe(regimeId);
+  });
+
+  it('no envía una responsabilidad tributaria distinta si falla su resolución', async () => {
+    const { service, request, client, catalog, numbering } = setup('company-token', {
+      name: 'Cliente', documentNumber: '901335977', municipalityId: 149,
+      typeRegimeId: 2, taxResponsibility: 'O-13',
+    });
+    catalog.resolveLiabilityId.mockRejectedValue(new Error('Responsabilidad no disponible'));
+    await expect(service.createAndSendInvoice(request, 'company-1')).rejects.toThrow('Responsabilidad no disponible');
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+    expect(client.createInvoice).not.toHaveBeenCalled();
+  });
+
   it.each([0, 12500, 47500])('conserva el IVA elegido (%s) aunque el emisor esté configurado como no responsable', async taxAmount => {
     const { service, request, client, history } = nonResponsibleIssuer();
     await service.createAndSendInvoice({ ...request, items: [{ ...request.items[0], taxAmount }] }, 'company-1');
