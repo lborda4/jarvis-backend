@@ -223,6 +223,11 @@ export class JarvisInvoiceSendService {
     const credentials: JarvisCredentials = jarvisIntegration
       ? normalizeJarvisCredentials(jarvisIntegration.credentials)
       : {};
+    const activity = credentials.economic_activity?.trim();
+    const ciiu = isSaleInvoice ? activity?.match(/^(\d{4})(?=$|[\s\-–—])/)?.[1] : undefined;
+    if (isSaleInvoice && activity && !ciiu) {
+      this.logger.warn(`[companyId=${companyId}] No se envió la actividad económica: la configuración no contiene un código CIIU inicial de cuatro dígitos.`);
+    }
 
     const defaultTaxId = this.nextPymeMasterCatalogService.getIvaTaxId();
     const allowedTaxIds = new Set([defaultTaxId]);
@@ -512,6 +517,7 @@ export class JarvisInvoiceSendService {
               isSupportCreditNote ? 13 : isDebitNote ? 5 : isNote ? 4 : isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
             number: numbering.number,
             date: issueDate,
+            ...(ciiu ? { actividadeconomica: ciiu } : {}),
             sendmail: false,
             sendmailtome: false,
             ...((isSupport || isNote) ? { time: new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }) } : {}),

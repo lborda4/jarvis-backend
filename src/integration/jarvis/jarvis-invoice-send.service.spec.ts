@@ -106,6 +106,44 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
   }
 
   it.each([
+    ['4923', '4923'],
+    ['  0081  ', '0081'],
+    ['1410 - Confección de prendas de vestir', '1410'],
+    ['6201 – Desarrollo de sistemas', '6201'],
+  ])('envía el código CIIU configurado %s como %s en la factura', async (activity, expected) => {
+    const { service, request, client, integrations } = setup();
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { economic_activity: activity } });
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice.mock.calls[0][0]).toMatchObject({ actividadeconomica: expected });
+  });
+
+  it.each([undefined, '', '   ', 'Consultoría', '12345', 'CIIU 4923'])('omite la actividad económica si no hay un código inicial válido: %s', async activity => {
+    const { service, request, client, integrations } = setup();
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { economic_activity: activity } });
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice.mock.calls[0][0]).not.toHaveProperty('actividadeconomica');
+  });
+
+  it.each([
+    [JarvisResolutionKind.SUPPORT_DOCUMENT, 'createSupportDocument'],
+    [JarvisResolutionKind.CREDIT_NOTE, 'createCreditNote'],
+    [JarvisResolutionKind.DEBIT_NOTE, 'createDebitNote'],
+    [JarvisResolutionKind.SUPPORT_CREDIT_NOTE, 'createSupportCreditNote'],
+  ] as const)('no añade el campo de factura de venta al documento %s', async (kind, method) => {
+    const { service, request, client, integrations } = setup();
+    integrations.findByCompanyAndProvider.mockResolvedValue({ credentials: { economic_activity: '4923' } });
+    const note = kind !== JarvisResolutionKind.SUPPORT_DOCUMENT;
+    await service.createAndSendInvoice({
+      ...request,
+      ...(note ? {
+        billingReference: { number: 'FV1', uuid: 'a'.repeat(96), issueDate: '2026-09-15' },
+        discrepancyResponseCode: 1, discrepancyResponseDescription: 'Corrección',
+      } : {}),
+    }, 'company-1', kind);
+    expect(client[method].mock.calls[0][0]).not.toHaveProperty('actividadeconomica');
+  });
+
+  it.each([
     [JarvisResolutionKind.ELECTRONIC_INVOICE, 'createInvoice'],
     [JarvisResolutionKind.CREDIT_NOTE, 'createCreditNote'],
     [JarvisResolutionKind.DEBIT_NOTE, 'createDebitNote'],
