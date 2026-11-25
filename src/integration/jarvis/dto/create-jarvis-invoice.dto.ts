@@ -43,6 +43,17 @@ export class JarvisInvoicePaymentAllocationDto {
   amount: number;
 }
 
+export class JarvisPurchaseOrderDto {
+  @ApiProperty({ example: 'OC-' })
+  prefix: string;
+
+  @ApiProperty({ example: '12345' })
+  consecutive: string;
+
+  @ApiProperty({ example: '2024-01-10' })
+  issueDate: string;
+}
+
 export class CreateJarvisInvoiceRequestDto {
   @ApiPropertyOptional({ description: 'Borrador de esta empresa que contiene el adjunto interno.' })
   attachmentDraftId?: string;
@@ -58,6 +69,8 @@ export class CreateJarvisInvoiceRequestDto {
   prefix?: string;
   @ApiPropertyOptional()
   billingReference?: { number: string; uuid: string; issueDate: string };
+  @ApiPropertyOptional({ type: JarvisPurchaseOrderDto, description: 'Orden de compra opcional para factura de venta.' })
+  purchaseOrder?: JarvisPurchaseOrderDto;
   @ApiPropertyOptional()
   discrepancyResponseCode?: number;
   @ApiPropertyOptional()

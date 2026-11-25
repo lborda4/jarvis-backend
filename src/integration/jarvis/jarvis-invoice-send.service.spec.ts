@@ -78,6 +78,46 @@ function setup(
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
+  it('envía y guarda la orden de compra con ceros iniciales', async () => {
+    const { service, request, client, history } = setup();
+    const purchaseOrder = { prefix: ' OC- ', consecutive: ' 00123 ', issueDate: '2024-01-10' };
+    await service.createAndSendInvoice({ ...request, purchaseOrder }, 'company-1');
+    expect(client.createInvoice.mock.calls[0][0].order_reference).toEqual({ id_order: 'OC-00123', issue_date_order: '2024-01-10' });
+    expect(history.record.mock.calls[0][0].sourceRequest.purchaseOrder).toEqual(purchaseOrder);
+  });
+
+  it('omite la orden si no se proporciona', async () => {
+    const { service, request, client } = setup();
+    await service.createAndSendInvoice(request, 'company-1');
+    expect(client.createInvoice.mock.calls[0][0]).not.toHaveProperty('order_reference');
+  });
+
+  it.each([
+    null, {}, { prefix: 'OC-', consecutive: '', issueDate: '2024-01-10' },
+    { prefix: '', consecutive: '1', issueDate: '2024-01-10' },
+    { prefix: 'OC-', consecutive: '1', issueDate: '2023-02-29' },
+    { prefix: 'OC-', consecutive: 123, issueDate: '2024-01-10' },
+  ])('rechaza una orden incompleta o inválida antes de reservar numeración: %j', async purchaseOrder => {
+    const { service, request, client, numbering } = setup();
+    await expect(service.createAndSendInvoice({ ...request, purchaseOrder } as never, 'company-1')).rejects.toThrow('orden de compra');
+    expect(numbering.allocateResolutionNumber).not.toHaveBeenCalled();
+    expect(client.createInvoice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [JarvisResolutionKind.SUPPORT_DOCUMENT, 'createSupportDocument'],
+    [JarvisResolutionKind.CREDIT_NOTE, 'createCreditNote'],
+    [JarvisResolutionKind.DEBIT_NOTE, 'createDebitNote'],
+    [JarvisResolutionKind.SUPPORT_CREDIT_NOTE, 'createSupportCreditNote'],
+  ] as const)('no envía la orden en %s', async (kind, method) => {
+    const { service, request, client } = setup();
+    await service.createAndSendInvoice({ ...request, purchaseOrder: { prefix: 'OC-', consecutive: '1', issueDate: '2024-01-10' },
+      billingReference: { number: 'FV1', uuid: 'a'.repeat(96), issueDate: '2026-09-15' },
+      discrepancyResponseCode: 2, discrepancyResponseDescription: 'Motivo',
+    }, 'company-1', kind);
+    expect(client[method].mock.calls[0][0]).not.toHaveProperty('order_reference');
+  });
+
   it.each([JarvisResolutionKind.ELECTRONIC_INVOICE, JarvisResolutionKind.SUPPORT_DOCUMENT])('captura productos y tercero antes del envío y guarda su copia en %s', async kind => {
     const thirdParty = { name: 'Cliente original', municipalityId: 149, typeRegimeId: 2, documentNumber: '901335977', email: 'original@example.com', address: 'Calle original' };
     const { service, request, dataSource, history, client } = setup('company-token', thirdParty);

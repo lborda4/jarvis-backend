@@ -13,6 +13,14 @@ it('persists incomplete drafts without requiring an invoice sender', async () =>
   expect(query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO jarvis_invoice_drafts'), ['draft-1', 'company-1', 'ELECTRONIC_INVOICE', JSON.stringify(state)]);
   expect(query).toHaveBeenCalledTimes(1);
 });
+it('conserva una orden de compra parcial al guardar y volver a abrir el borrador', async () => {
+  const { controller, query } = setup();
+  const purchaseOrder = { prefix: 'OC-', consecutive: '00123', issueDate: '' };
+  await controller.save(user, 'draft-1', { documentKind: 'ELECTRONIC_INVOICE', state: { purchaseOrder } });
+  const storedState = JSON.parse(query.mock.calls[0][1][3]);
+  query.mockResolvedValue([{ state: storedState }]);
+  expect(await controller.get(user, 'draft-1')).toEqual({ draft: { state: { purchaseOrder } } });
+});
 it('scopes reads and deletes to the authenticated company', async () => {
   const { controller, query } = setup();
   await controller.get(user, 'draft-1');

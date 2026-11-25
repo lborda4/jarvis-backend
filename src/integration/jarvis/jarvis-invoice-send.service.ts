@@ -136,6 +136,17 @@ export class JarvisInvoiceSendService {
       );
     }
 
+    const order = request.purchaseOrder;
+    if (isSaleInvoice && order !== undefined) {
+      const date = typeof order?.issueDate === 'string' ? order.issueDate.trim() : '';
+      if (typeof order?.prefix !== 'string' || !order.prefix.trim() ||
+          typeof order.consecutive !== 'string' || !order.consecutive.trim() ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) ||
+          new Date(date).toISOString().slice(0, 10) !== date) {
+        throw new BadRequestException('Indique el prefijo, consecutivo y fecha válidos de la orden de compra.');
+      }
+    }
+
     if (isNote) {
       const reference = request.billingReference;
       const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
@@ -517,6 +528,10 @@ export class JarvisInvoiceSendService {
               isSupportCreditNote ? 13 : isDebitNote ? 5 : isNote ? 4 : isSupport ? this.nextPymeMasterCatalogService.getSupportDocumentTypeId() : this.nextPymeMasterCatalogService.getElectronicInvoiceTypeId(),
             number: numbering.number,
             date: issueDate,
+            ...(isSaleInvoice && order ? { order_reference: {
+              id_order: `${order.prefix.trim()}${order.consecutive.trim()}`,
+              issue_date_order: order.issueDate.trim(),
+            } } : {}),
             ...(ciiu ? { actividadeconomica: ciiu } : {}),
             sendmail: false,
             sendmailtome: false,

@@ -156,6 +156,7 @@ export interface NextPymeSupportDocumentCreatePayload {
 export interface NextPymeInvoiceCreatePayload {
   type_document_id: number;
   number: number;
+  order_reference?: { id_order: string; issue_date_order: string };
   actividadeconomica?: string;
   resolution_number?: string;
   date?: string;
