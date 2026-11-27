@@ -52,6 +52,7 @@ export interface ReportDocument {
   kind: string;
   date: string;
   number: string;
+  prefix?: string;
   customerId: string;
   customerName: string;
   currency: string;

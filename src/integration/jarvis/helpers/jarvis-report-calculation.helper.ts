@@ -28,6 +28,7 @@ interface Detail extends Amounts {
   kind: string;
   date: string;
   number: string;
+  prefix: string;
   customerId: string;
   customerName: string;
   customerType: string;
@@ -390,6 +391,7 @@ export function calculateJarvisReport(
       kind: document.kind,
       date: document.date,
       number: document.number,
+      prefix: document.prefix ?? '',
       customerId: document.customerId,
       customerName: document.customerName,
       customerType: document.source?.customerDocumentType ?? '',

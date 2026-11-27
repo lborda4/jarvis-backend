@@ -7,6 +7,9 @@ import { Workbook } from 'exceljs';
 import { DataSource } from 'typeorm';
 import { IntegrationProvider } from '../enums/integration-provider.enum';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
+import { jarvisDisplayNumberSql } from './helpers/jarvis-display-number-sql';
+import { addTaxDetailSheet } from './helpers/jarvis-tax-detail-export.helper';
+import { addCustomerReportSheet, addProductReportSheet, addSellerReportSheet } from './helpers/jarvis-customer-report-export.helper';
 import { buildReportSuggestions, type ReportSuggestionCatalog } from './helpers/jarvis-report-suggestions.helper';
 import {
   calculateJarvisReport,
@@ -140,7 +143,9 @@ export class JarvisReportsService {
     if (filters.search) {
       params.push(filters.search);
       conditions.push(
-        `strpos(lower(concat_ws(' ', i.customer_identification, i.customer_name, i.prefix || i.number)), lower($${params.length})) > 0`,
+        `(strpos(lower(concat_ws(' ', i.customer_identification, i.customer_name, i.prefix || i.number)), lower($${params.length})) > 0
+          OR strpos(lower(CASE WHEN left(i.number,length(i.prefix))=i.prefix THEN i.number ELSE i.prefix || i.number END), lower($${params.length})) > 0
+          OR strpos(lower(${jarvisDisplayNumberSql('i.prefix', 'i.number')}), lower($${params.length})) > 0)`,
       );
     }
     if (filters.customer) {
@@ -153,7 +158,7 @@ export class JarvisReportsService {
     const documents = await this.source.query<ReportDocument[]>(
       `
       SELECT i.id, i.document_kind AS kind, i.issue_date::text AS date,
-        CASE WHEN left(i.number,length(i.prefix))=i.prefix THEN i.number ELSE i.prefix || i.number END AS number,
+        CASE WHEN left(i.number,length(i.prefix))=i.prefix THEN i.number ELSE i.prefix || i.number END AS number, i.prefix,
         i.customer_identification AS "customerId", i.customer_name AS "customerName",
         i.currency, i.total::text AS total, i.source_request AS source,
         reference.sellers AS "referenceSellers"
@@ -226,6 +231,25 @@ export class JarvisReportsService {
     const book = new Workbook();
     book.creator = 'JARVIS';
     book.created = new Date();
+    if (data.filters.report === 'customers' || data.filters.report === 'sellers' || data.filters.report === 'products' || (data.filters.report === 'taxes' && data.filters.view === 'detail')) {
+      const [company] = await this.source.query<Array<{ name: string; nit: string }>>(
+        'SELECT name, nit FROM companies WHERE id=$1',
+        [companyId],
+      );
+      if (!company) throw new NotFoundException('No se encontró la empresa del reporte.');
+      if (data.filters.report === 'customers')
+        addCustomerReportSheet(book, company, data.filters, data.summary, data.detail, reportColumns({ ...data.filters, view: 'detail' }), data.totals, data.warnings);
+      else if (data.filters.report === 'sellers')
+        addSellerReportSheet(book, company, data.filters, data.summary, data.detail, reportColumns({ ...data.filters, view: 'detail' }), data.totals, data.warnings);
+      else if (data.filters.report === 'products')
+        addProductReportSheet(book, company, data.filters, data.summary, data.detail, reportColumns({ ...data.filters, view: 'detail' }), data.totals, data.warnings);
+      else
+        addTaxDetailSheet(book, company, data.filters, reportColumns(data.filters), data.detail, data.totals, data.warnings);
+      return {
+        buffer: Buffer.from(await book.xlsx.writeBuffer()),
+        filename: `JARVIS-${data.filters.report}-${data.filters.from}-${data.filters.to}.xlsx`,
+      };
+    }
     const addSheet = (
       name: string,
       columns: ReportColumn[],
@@ -329,23 +353,6 @@ export class JarvisReportsService {
         label: ['Facturas', 'Notas crédito / ajuste', 'Notas débito'][index],
         format: 'number' as const,
       })),
-      ...(data.filters.report === 'products'
-        ? [
-            'soldQuantity',
-            'returnedQuantity',
-            'debitQuantity',
-            'netQuantity',
-          ].map((key, index) => ({
-            key,
-            label: [
-              'Cantidad vendida',
-              'Cantidad devuelta',
-              'Cantidad notas débito',
-              'Cantidad neta',
-            ][index],
-            format: 'number' as const,
-          }))
-        : []),
     ];
     addSheet('Totales', totalColumns, data.totals);
     const metadata = book.addWorksheet('Filtros y criterios');

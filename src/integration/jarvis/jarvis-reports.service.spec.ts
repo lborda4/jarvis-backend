@@ -9,6 +9,8 @@ import {
 } from './helpers/jarvis-report-calculation.helper';
 import type { ReportDocument, ReportQuery } from './jarvis-reports.types';
 import { JarvisReportsController } from './jarvis-reports.controller';
+import { addTaxDetailSheet } from './helpers/jarvis-tax-detail-export.helper';
+import { addCustomerReportSheet, addProductReportSheet } from './helpers/jarvis-customer-report-export.helper';
 
 it('concilia ventas netas con descuentos posteriores a impuestos en notas débito', () => {
   const debit = invoice({ kind: 'DEBIT_NOTE', total: '109' });
@@ -75,8 +77,10 @@ function invoice(overrides: Partial<ReportDocument> = {}): ReportDocument {
 function setup(documents: ReportDocument[] = []) {
   const source = {
     query: jest
-      .fn<Promise<ReportDocument[]>, [string, unknown[]]>()
-      .mockResolvedValue(documents),
+      .fn<Promise<unknown[]>, [string, unknown[]]>()
+      .mockImplementation(async (sql) => sql === 'SELECT name, nit FROM companies WHERE id=$1'
+        ? [{ name: 'Empresa SAS', nit: '900123456' }]
+        : documents),
   };
   const integrations = {
     findByCompanyAndProvider: jest.fn().mockResolvedValue({ id: 'jarvis' }),
@@ -169,6 +173,81 @@ it('consolida ventas, créditos negativos y débitos positivos sin mezclar moned
   });
 });
 
+it.each(['summary', 'detail'])('exporta ventas por producto en una hoja con vista %s y conserva cantidades y monedas', async view => {
+  const sale = invoice({ prefix: 'FV', number: 'FV001' });
+  const credit = invoice({ id: 'credit', kind: 'CREDIT_NOTE', number: 'NC1', total: '23.8',
+    source: { ...sale.source!, items: [{ code: 'A', description: 'Servicio A', quantity: 0.2, unitValue: 100, taxAmount: 3.8 }] } });
+  const debit = invoice({ id: 'debit', kind: 'DEBIT_NOTE', number: 'ND1', total: '11.9',
+    source: { ...sale.source!, items: [{ code: 'A', description: 'Servicio A', quantity: 0.1, unitValue: 100, taxAmount: 1.9 }] } });
+  const dollar = invoice({ id: 'usd', currency: 'USD', number: 'FV2' });
+  const { service, source } = setup([sale, credit, debit, dollar]);
+  const exported = await service.export('company-a', { ...query, report: 'products', view, page: '2', pageSize: '10' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  expect(workbook.worksheets).toHaveLength(1);
+  const sheet = workbook.getWorksheet('Ventas por producto')!;
+  expect(sheet.getCell('A2').value).toBe('Ventas por producto');
+  expect(sheet.getCell('A3').value).toBe('Empresa SAS');
+  expect(sheet.getCell('A4').value).toBe('900123456');
+  const columns = sheet.getRow(7).values as string[];
+  const get = (row: number, label: string) => sheet.getRow(row).getCell(columns.indexOf(label)).value;
+  expect(get(8, 'Código producto')).toBe('A');
+  expect(get(8, 'Cantidad vendida')).toBe(1);
+  expect(get(8, 'Cantidad devuelta')).toBe(0.2);
+  expect(get(8, 'Cantidad notas débito')).toBe(0.1);
+  expect(get(8, 'Cantidad neta')).toBe(0.9);
+  expect(get(8, 'Subtotal')).toBe(90);
+  expect(get(8, 'Impuestos a cargo')).toBe(17.1);
+  expect(get(8, 'Valor total')).toBe(107.1);
+  expect(get(9, 'Moneda')).toBe('USD');
+  expect(sheet.getCell('A10').value).toBe('Total · COP');
+  expect(get(10, 'Cantidad neta')).toBe(0.9);
+  expect(sheet.getCell('A11').value).toBe('Total · USD');
+  expect(columns).not.toContain('Referencia fábrica');
+  expect(columns).not.toContain('Grupo inventario');
+  const rows: unknown[][] = [];
+  sheet.eachRow(row => rows.push(row.values as unknown[]));
+  expect(rows.some(row => row.includes('Detalle de comprobantes'))).toBe(view === 'detail');
+  if (view === 'detail') {
+    expect(rows.some(row => row.includes('FV001'))).toBe(true);
+    expect(rows.some(row => row.includes('NC1'))).toBe(true);
+    expect(rows.some(row => row.includes('FV-001'))).toBe(false);
+  }
+  expect(source.query).toHaveBeenCalledWith('SELECT name, nit FROM companies WHERE id=$1', ['company-a']);
+});
+
+it('exporta todos los productos filtrados sin limitarse a la página y advierte sobre comprobantes sin desglose', async () => {
+  const docs = Array.from({ length: 25 }, (_, index) => {
+    const doc = invoice({ id: String(index), number: `FV${index}` });
+    doc.source!.items[0].code = `P${String(index).padStart(2, '0')}`;
+    return doc;
+  });
+  const { service } = setup([...docs, invoice({ id: 'legacy', source: null })]);
+  const exported = await service.export('company-a', { ...query, report: 'products', view: 'detail', product: 'P', page: '2', pageSize: '10' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  const sheet = workbook.worksheets[0];
+  const rows: unknown[][] = [];
+  sheet.eachRow(row => rows.push(row.values as unknown[]));
+  expect(sheet.getCell('A8').value).toBe('P00');
+  expect(sheet.getCell('A32').value).toBe('P24');
+  expect(rows.some(row => row.includes('FV24'))).toBe(true);
+  expect(rows.some(row => row.some(value => typeof value === 'string' && value.includes('no conservan desglose suficiente')))).toBe(true);
+  expect(rows.some(row => row.some(value => typeof value === 'string' && value.includes('producto P')))).toBe(true);
+});
+
+it('genera el informe de productos sin resultados y rechaza el exceso de filas', async () => {
+  const { service } = setup();
+  const exported = await service.export('company-a', { ...query, report: 'products', view: 'detail' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  expect(workbook.worksheets).toHaveLength(1);
+  expect(workbook.worksheets[0].getCell('A7').value).toBe('Código producto');
+  expect(() => addProductReportSheet(new Workbook(), { name: 'Empresa', nit: '1' },
+    filters({ report: 'products', view: 'detail' }), new Array(1048576), [], [], [], [],
+  )).toThrow('límite de filas');
+});
+
 it('agrupa por identificación y tipo del cliente, preservando ceros iniciales', () => {
   const first = invoice();
   const second = invoice({ id: 'second', number: 'FV2' });
@@ -187,6 +266,85 @@ it('agrupa por identificación y tipo del cliente, preservando ceros iniciales',
     subtotal: 200,
     total: 238,
   });
+});
+
+  it.each(['summary', 'detail'])('exporta ventas por cliente en una hoja con vista %s', async view => {
+    const sale = invoice({ prefix: 'FV', number: 'FV001' });
+    const credit = invoice({ id: 'credit', kind: 'CREDIT_NOTE', number: 'NC1', total: '23.8',
+      source: { ...sale.source!, items: [{ description: 'Servicio', quantity: 0.2, unitValue: 100, taxAmount: 3.8 }] } });
+    const dollar = invoice({ id: 'usd', currency: 'USD', number: 'FV2' });
+    const { service, source } = setup([sale, credit, dollar]);
+    const exported = await service.export('company-a', { ...query, report: 'customers', view, page: '2', pageSize: '10' });
+    const workbook = new Workbook();
+    await workbook.xlsx.load(exported.buffer as never);
+    expect(workbook.worksheets).toHaveLength(1);
+    const sheet = workbook.getWorksheet('Ventas por cliente')!;
+    expect(sheet.getCell('A2').value).toBe('Ventas por cliente');
+    expect(sheet.getCell('A3').value).toBe('Empresa SAS');
+    expect(sheet.getCell('A4').value).toBe('900123456');
+    expect(sheet.getCell('A5').value).toContain('2026-10-01');
+    const columns = sheet.getRow(7).values as string[];
+    const customerId = columns.indexOf('Identificación');
+    const count = columns.indexOf('Número de comprobantes');
+    const subtotal = columns.indexOf('Subtotal');
+    const taxes = columns.indexOf('Impuestos a cargo');
+    expect(sheet.getRow(8).getCell(customerId).value).toBe('00123');
+    expect(sheet.getRow(8).getCell(count).value).toBe(2);
+    expect(sheet.getRow(8).getCell(subtotal).value).toBe(80);
+    expect(sheet.getRow(8).getCell(taxes).value).toBe(15.2);
+    expect(sheet.getCell('A10').value).toBe('Total · COP');
+    expect(sheet.getCell('A11').value).toBe('Total · USD');
+    const rows: unknown[][] = [];
+    sheet.eachRow(row => rows.push(row.values as unknown[]));
+    const detailTitle = rows.findIndex(row => row.includes('Detalle de comprobantes'));
+    expect(detailTitle >= 0).toBe(view === 'detail');
+    if (view === 'detail') {
+      expect(rows.some(row => row.includes('FV001'))).toBe(true);
+      expect(rows.some(row => row.includes('NC1'))).toBe(true);
+      expect(rows.some(row => row.includes('FV-001'))).toBe(false);
+    }
+    expect(source.query).toHaveBeenCalledWith('SELECT name, nit FROM companies WHERE id=$1', ['company-a']);
+  });
+
+  it('exporta todos los clientes filtrados sin limitarse a la página y conserva datos desconocidos', async () => {
+    const documents = Array.from({ length: 25 }, (_, index) =>
+      invoice({ id: String(index), customerId: String(index).padStart(3, '0'), number: `FV${index}`, source: index === 0 ? null : invoice().source }),
+    );
+    const { service } = setup(documents);
+    const exported = await service.export('company-a', { ...query, report: 'customers', view: 'summary', page: '2', pageSize: '10' });
+    const workbook = new Workbook();
+    await workbook.xlsx.load(exported.buffer as never);
+    const sheet = workbook.worksheets[0];
+    const columns = sheet.getRow(7).values as string[];
+    expect(sheet.getCell('B8').value).toBe('000');
+    expect(sheet.getCell('B32').value).toBe('024');
+    expect(sheet.getRow(8).getCell(columns.indexOf('Impuestos a cargo')).value).toBeNull();
+    expect(sheet.getRow(33).getCell(columns.indexOf('Impuestos a cargo')).value).toBeNull();
+    expect(sheet.getCell('A33').value).toBe('Total · COP');
+    const text: string[] = [];
+    sheet.eachRow(row => { if (typeof row.getCell(1).value === 'string') text.push(String(row.getCell(1).value)); });
+    expect(text.some(value => value.includes('no conservan desglose suficiente'))).toBe(true);
+  });
+
+  it('rechaza un reporte de clientes que excede el límite de una hoja', () => {
+    expect(() => addCustomerReportSheet(new Workbook(), { name: 'Empresa', nit: '1' },
+      filters({ report: 'customers', view: 'detail' }), new Array(1048576), [], [], [], [],
+    )).toThrow('límite de filas');
+  });
+
+it('preserva el filtro de cliente y permite exportar sin resultados', async () => {
+  const { service, source } = setup();
+  const exported = await service.export('company-a', { ...query, report: 'customers', view: 'detail', customer: '00123' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  const sheet = workbook.worksheets[0];
+  expect(workbook.worksheets).toHaveLength(1);
+  expect(sheet.getCell('A7').value).toBe('Tipo de identificación');
+  const rows: unknown[][] = [];
+  sheet.eachRow(row => rows.push(row.values as unknown[]));
+  expect(rows.some(row => row.includes('Detalle de comprobantes'))).toBe(true);
+  expect(rows.some(row => row.some(value => typeof value === 'string' && value.includes('cliente 00123')))).toBe(true);
+  expect(source.query.mock.calls[0][1]).toContain('00123');
 });
 
 it('no repite los totales de una factura con varias líneas', () => {
@@ -383,6 +541,90 @@ it('reparte entre vendedores sin duplicar importes y hereda vendedores en notas 
   expect(selected.totals[0].total).toBe(59.5);
 });
 
+it.each(['summary', 'detail'])('exporta ventas por vendedor en una hoja con vista %s y respeta el reparto', async view => {
+  const sale = invoice({ prefix: 'FV', number: 'FV001' });
+  sale.source!.sellers = [{ id: 'seller-a', name: 'Ana' }, { id: 'seller-b', name: 'Bruno' }];
+  const credit = invoice({ id: 'credit', kind: 'CREDIT_NOTE', number: 'NC1', referenceSellers: sale.source!.sellers });
+  const dollar = invoice({ id: 'usd', currency: 'USD', number: 'FV2', source: { ...sale.source!, sellers: [{ id: 'seller-a', name: 'Ana' }] } });
+  const { service, source } = setup([sale, credit, dollar]);
+  const exported = await service.export('company-a', { ...query, report: 'sellers', view, page: '2', pageSize: '10' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  expect(workbook.worksheets).toHaveLength(1);
+  const sheet = workbook.getWorksheet('Ventas por vendedor')!;
+  expect(sheet.getCell('A2').value).toBe('Ventas por vendedor');
+  expect(sheet.getCell('A3').value).toBe('Empresa SAS');
+  expect(sheet.getCell('A4').value).toBe('900123456');
+  const columns = sheet.getRow(7).values as string[];
+  const count = columns.indexOf('Número de comprobantes');
+  const total = columns.indexOf('Valor total');
+  const participation = columns.indexOf('Participación en ventas netas (%)');
+  expect(columns).not.toContain('Identificación');
+  expect(sheet.getCell('A8').value).toBe('Ana');
+  expect(sheet.getRow(8).getCell(count).value).toBe(2);
+  expect(sheet.getRow(8).getCell(total).value).toBe(0);
+  expect(sheet.getCell('A9').value).toBe('Bruno');
+  expect(sheet.getRow(9).getCell(total).value).toBe(0);
+  expect(sheet.getCell('A10').value).toBe('Ana');
+  expect(sheet.getRow(10).getCell(total).value).toBe(119);
+  expect(sheet.getRow(10).getCell(participation).value).toBe(100);
+  expect(sheet.getCell('A11').value).toBe('Total · COP');
+  expect(sheet.getCell('A12').value).toBe('Total · USD');
+  const rows: unknown[][] = [];
+  sheet.eachRow(row => rows.push(row.values as unknown[]));
+  expect(rows.some(row => row.includes('Detalle de comprobantes'))).toBe(view === 'detail');
+  if (view === 'detail') {
+    expect(rows.filter(row => row.includes('FV001'))).toHaveLength(2);
+    expect(rows.filter(row => row.includes('NC1'))).toHaveLength(2);
+    expect(rows.some(row => row.includes('FV-001'))).toBe(false);
+  }
+  expect(rows.some(row => row.some(value => typeof value === 'string' && value.includes('reparten en partes iguales')))).toBe(true);
+  expect(source.query).toHaveBeenCalledWith('SELECT name, nit FROM companies WHERE id=$1', ['company-a']);
+});
+
+it('exporta la participación filtrada del vendedor y no convierte importes desconocidos en cero', async () => {
+  const sale = invoice();
+  sale.source!.sellers = [{ id: 'seller-a', name: 'Ana' }, { id: 'seller-b', name: 'Bruno' }];
+  const { service } = setup([sale]);
+  const exported = await service.export('company-a', { ...query, report: 'sellers', view: 'summary', seller: 'Ana' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  const sheet = workbook.worksheets[0];
+  const columns = sheet.getRow(7).values as string[];
+  expect(sheet.getCell('A8').value).toBe('Ana');
+  expect(sheet.getRow(8).getCell(columns.indexOf('Valor total')).value).toBe(59.5);
+  expect(sheet.getCell('A9').value).toBe('Total · COP');
+  const legacy = setup([invoice({ source: null })]);
+  const legacyExport = await legacy.service.export('company-a', { ...query, report: 'sellers', view: 'detail' });
+  const legacyWorkbook = new Workbook();
+  await legacyWorkbook.xlsx.load(legacyExport.buffer as never);
+  const legacySheet = legacyWorkbook.worksheets[0];
+  expect(legacySheet.getCell('A8').value).toBe('Sin vendedor registrado');
+  expect(legacySheet.getRow(8).getCell(columns.indexOf('Impuestos a cargo')).value).toBeNull();
+});
+
+it('exporta todas las filas por vendedor y admite resultados vacíos', async () => {
+  const documents = Array.from({ length: 25 }, (_, index) => {
+    const doc = invoice({ id: String(index), number: `FV${index}` });
+    doc.source!.sellers = [{ id: `seller-${index}`, name: `Vendedor ${index}` }];
+    return doc;
+  });
+  for (const input of [documents, []]) {
+    const { service } = setup(input);
+    const exported = await service.export('company-a', { ...query, report: 'sellers', view: 'detail', page: '2', pageSize: '10' });
+    const workbook = new Workbook();
+    await workbook.xlsx.load(exported.buffer as never);
+    const values: unknown[][] = [];
+    workbook.worksheets[0].eachRow(row => values.push(row.values as unknown[]));
+    expect(workbook.worksheets).toHaveLength(1);
+    expect(values.some(row => row.includes('Detalle de comprobantes'))).toBe(true);
+    if (input.length) {
+      expect(values.some(row => row.includes('Vendedor 24'))).toBe(true);
+      expect(values.some(row => row.includes('FV24'))).toBe(true);
+    }
+  }
+});
+
 it('mantiene visibles comprobantes sin vendedor y marca el desglose que no existe', () => {
   const legacy = invoice({ source: null });
   const result = calculateJarvisReport(
@@ -513,6 +755,20 @@ it('aplica la busqueda de ventas antes de paginar y parametriza el texto', async
   expect(sql).not.toContain(search);
   expect(params).toContain(search);
   expect(sql).toContain(`lower($${params.indexOf(search) + 1})`);
+  expect(sql).toContain("i.prefix || '-' ||");
+  expect(sql).toContain('END AS number, i.prefix');
+});
+
+it('devuelve el prefijo como metadato sin modificar el número oficial ni el Excel', async () => {
+  const { service } = setup([invoice({ prefix: 'FV', number: 'FV001' })]);
+  const selected = { ...query, report: 'sales', view: 'detail' };
+  const result = await service.query('company', selected);
+  expect(result.items[0]).toMatchObject({ number: 'FV001', prefix: 'FV' });
+  const exported = await service.export('company', selected);
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  expect(workbook.getWorksheet('Registros')!.getRow(2).values).toContain('FV001');
+  expect(workbook.getWorksheet('Registros')!.getRow(2).values).not.toContain('FV-001');
 });
 
 it('valida y recorta la busqueda general del reporte', () => {
@@ -547,7 +803,7 @@ it('valida el impuesto y elimina el filtro de producto del reporte fiscal', () =
   expect(() => filters({ report: 'sales', tax: 'iva' })).toThrow('impuesto');
 });
 
-it('exporta y pagina solo comprobantes con el impuesto consultado y registra ese filtro en Excel', async () => {
+it('exporta una sola hoja con los comprobantes filtrados, totales y datos de la empresa', async () => {
   const plain = invoice({ id: 'plain', number: 'FV2', total: '100' });
   plain.source!.items[0].taxAmount = 0;
   const { service } = setup([invoice(), plain]);
@@ -559,10 +815,71 @@ it('exporta y pagina solo comprobantes con el impuesto consultado y registra ese
   const exported = await service.export('company-a', selected);
   const workbook = new Workbook();
   await workbook.xlsx.load(exported.buffer as never);
-  expect(workbook.getWorksheet('Registros')!.rowCount).toBe(2);
-  expect(workbook.getWorksheet('Consolidado')!.rowCount).toBe(2);
-  const metadata: unknown[] = [];
-  workbook.getWorksheet('Filtros y criterios')!.eachRow(row => metadata.push(row.values));
-  expect(metadata).toContainEqual(expect.arrayContaining(['Impuesto', 'IVA']));
-  expect(metadata).not.toContainEqual(expect.arrayContaining(['Producto o servicio']));
+  expect(workbook.worksheets).toHaveLength(1);
+  const sheet = workbook.getWorksheet('Impuestos detallados')!;
+  expect(sheet.getCell('A2').value).toBe('Informe impuestos detallados');
+  expect(sheet.getCell('A3').value).toBe('Empresa SAS');
+  expect(sheet.getCell('A4').value).toBe('900123456');
+  expect(sheet.getCell('A6').value).toContain('Impuesto: IVA');
+  const columns = sheet.getRow(8).values as string[];
+  const invoiceNumberColumn = columns.indexOf('Número de comprobante');
+  const ivaColumn = columns.indexOf('IVA');
+  expect(sheet.getRow(9).getCell(ivaColumn).value).toBe(19);
+  expect(sheet.getRow(10).getCell(invoiceNumberColumn).value).toBe('FV1');
+  expect(sheet.getRow(10).getCell(ivaColumn).value).toBe(19);
+  expect(sheet.getCell('A11').value).not.toBe('FV2');
 }, 30000);
+
+it('exporta todos los registros fiscales, preserva monedas y no altera el número oficial', async () => {
+  const documents = Array.from({ length: 25 }, (_, index) =>
+    invoice({ id: String(index), prefix: 'FV', number: `FV${index}`, currency: index === 0 ? 'USD' : 'COP' }),
+  );
+  const { service, source } = setup(documents);
+  const exported = await service.export('company-a', { ...query, report: 'taxes', view: 'detail', page: '2', pageSize: '10' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  const sheet = workbook.worksheets[0];
+  expect(workbook.worksheets).toHaveLength(1);
+  expect(sheet.getCell('A9').value).toBe('Total · USD');
+  expect(sheet.getCell('A10').value).toBe('Total · COP');
+  const numberColumn = (sheet.getRow(8).values as string[]).indexOf('Número de comprobante');
+  expect(sheet.getRow(11).getCell(numberColumn).value).toBe('FV0');
+  expect(sheet.getRow(35).getCell(numberColumn).value).toBe('FV24');
+  expect(source.query).toHaveBeenCalledWith('SELECT name, nit FROM companies WHERE id=$1', ['company-a']);
+});
+
+it('indica las limitaciones fiscales en la misma hoja cuando no hay desglose', async () => {
+  const { service } = setup([invoice({ source: null })]);
+  const exported = await service.export('company-a', { ...query, report: 'taxes', view: 'detail' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  const sheet = workbook.worksheets[0];
+  const values: string[] = [];
+  sheet.eachRow(row => { if (typeof row.getCell(1).value === 'string') values.push(String(row.getCell(1).value)); });
+  expect(values.some(value => value.includes('no conservan desglose suficiente'))).toBe(true);
+  const columns = sheet.getRow(8).values as string[];
+  expect(sheet.getRow(10).getCell(columns.indexOf('IVA')).value).toBeNull();
+});
+
+it('genera una hoja válida aun cuando no existen resultados', async () => {
+  const { service } = setup();
+  const exported = await service.export('company-a', { ...query, report: 'taxes', view: 'detail' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  expect(workbook.worksheets).toHaveLength(1);
+  expect(workbook.worksheets[0].getCell('A8').value).toBe('Fecha de emisión');
+  expect(workbook.worksheets[0].getCell('A9').value).toBeNull();
+});
+
+it('rechaza el exceso de filas en vez de crear hojas adicionales o truncar datos', () => {
+  expect(() => addTaxDetailSheet(
+    new Workbook(), { name: 'Empresa', nit: '1' }, filters({ report: 'taxes', view: 'detail' }),
+    [{ key: 'number', label: 'Número', format: 'text' }], new Array(1048576), [], [],
+  )).toThrow('límite de filas');
+});
+
+it('informa si la empresa del reporte ya no existe', async () => {
+  const { service, source } = setup();
+  source.query.mockResolvedValue([]);
+  await expect(service.export('company-a', { ...query, report: 'taxes', view: 'detail' })).rejects.toThrow('No se encontró la empresa');
+});

@@ -10,6 +10,54 @@ it('allows only authenticated advisors to use the commercial endpoints', () => {
   expect(guard.canActivate(context(UserRole.ADVISOR))).toBe(true);
   expect(() => guard.canActivate(context(UserRole.USER))).toThrow(); expect(() => guard.canActivate(context(UserRole.ADMIN))).toThrow();
 });
+it('devuelve la misma empresa demo aislada a los asesores activos', async () => {
+  const profile = { registeredAt: new Date(), user: { active: true, role: UserRole.ADVISOR } };
+  const db = {
+    getRepository: jest.fn(() => ({ findOne: jest.fn().mockResolvedValue(profile) })),
+    query: jest.fn().mockResolvedValue([{ name: 'Empresa demo Jarvis', isDemo: true }]),
+  };
+  const controller = new AdvisorController(db as never, {} as never, {} as never, {} as never);
+  for (const userId of ['advisor-1', 'advisor-2']) {
+    await expect(controller.demo({ userId, role: UserRole.ADVISOR } as never))
+      .resolves.toEqual({ company: { name: 'Empresa demo Jarvis', isDemo: true } });
+  }
+  expect(db.query).toHaveBeenCalledTimes(2);
+  expect(db.query.mock.calls[0][0]).toContain('advisor_demo_company');
+});
+
+it('rechaza asesores sin perfil activo y no consulta datos demo', async () => {
+  const db = { getRepository: () => ({ findOne: jest.fn().mockResolvedValue(null) }), query: jest.fn() };
+  const controller = new AdvisorController(db as never, {} as never, {} as never, {} as never);
+  await expect(controller.demo({ userId: 'unregistered', role: UserRole.ADVISOR } as never)).rejects.toThrow('asesor');
+  expect(db.query).not.toHaveBeenCalled();
+});
+
+it.each([
+  { registeredAt: null, user: { active: true, role: UserRole.ADVISOR } },
+  { registeredAt: new Date(), user: { active: false, role: UserRole.ADVISOR } },
+  { registeredAt: new Date(), user: { active: true, role: UserRole.USER } },
+])('rechaza perfiles que no sean asesores activos registrados', async profile => {
+  const db = { getRepository: () => ({ findOne: jest.fn().mockResolvedValue(profile) }), query: jest.fn() };
+  const controller = new AdvisorController(db as never, {} as never, {} as never, {} as never);
+  await expect(controller.demo({ userId: 'advisor', role: UserRole.ADVISOR } as never)).rejects.toThrow('asesor');
+  expect(db.query).not.toHaveBeenCalled();
+});
+
+it('notifica si la empresa demo no está configurada', async () => {
+  const db = { getRepository: () => ({ findOne: jest.fn().mockResolvedValue({ registeredAt: new Date(), user: { active: true, role: UserRole.ADVISOR } }) }), query: jest.fn().mockResolvedValue([]) };
+  const controller = new AdvisorController(db as never, {} as never, {} as never, {} as never);
+  await expect(controller.demo({ userId: 'advisor', role: UserRole.ADVISOR } as never)).rejects.toThrow('no está disponible');
+});
+
+it('impide consultar o crear facturas demo sin perfil de asesor activo', async () => {
+  const db = { getRepository: () => ({ findOne: jest.fn().mockResolvedValue(null) }), query: jest.fn(), transaction: jest.fn() };
+  const controller = new AdvisorController(db as never, {} as never, {} as never, {} as never);
+  const user = { userId: 'unregistered', role: UserRole.ADVISOR } as never;
+  await expect(controller.demoInvoices(user)).rejects.toThrow('asesor');
+  await expect(controller.createDemoInvoice(user, {} as never)).rejects.toThrow('asesor');
+  expect(db.query).not.toHaveBeenCalled();
+  expect(db.transaction).not.toHaveBeenCalled();
+});
 it('uses the advisor profile from the authenticated user for clients, reports and creation', async () => {
   const profile = { id: 'advisor-id', userId: 'user', registeredAt: new Date(), user: { name: 'Laura', active: true, role: UserRole.ADVISOR } };
   const advisors = { findOne: jest.fn(async () => profile) }, companies = { find: jest.fn(async () => []) };

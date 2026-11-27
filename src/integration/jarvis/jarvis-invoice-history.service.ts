@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { JarvisSalesInvoice } from './entities/jarvis-sales-invoice.entity';
 import { JarvisResolutionKind } from './enums/jarvis-resolution-kind.enum';
 import { attachmentMetadata } from './helpers/jarvis-invoice-attachment.helper';
+import { jarvisDisplayNumberSql } from './helpers/jarvis-display-number-sql';
 export interface SalesInvoiceHistoryQuery { search?: string; number?: string; from?: string; to?: string; page?: string; }
 type InvoiceAdjustmentStatus = 'NONE' | 'CREDIT_NOTE' | 'DEBIT_NOTE' | 'CREDIT_AND_DEBIT';
 interface AdjustmentInvoice { status: 'SENT' | 'SAVED'; prefix: string; number: string; cufe: string | null; }
@@ -69,6 +70,8 @@ export class JarvisInvoiceHistoryService {
         CASE WHEN state->>'documentTotal' ~ '^-?[0-9]+([.][0-9]+)?$' THEN state->>'documentTotal' ELSE '' END,
         NULL::text, updated_at, 'SAVED'::text
       FROM jarvis_invoice_drafts WHERE company_id=$1 AND document_kind=$2
+        AND NOT (document_kind='ELECTRONIC_INVOICE' AND COALESCE(state->>'importSource','')='sales-excel-v1'
+          AND COALESCE(state->'importDelivery'->>'status','')='sent')
     )`;
     const parameters: unknown[] = [companyId.trim(), documentKind];
     const conditions: string[] = [];
@@ -78,13 +81,13 @@ export class JarvisInvoiceHistoryService {
     if (number) {
       parameters.push(number);
       const index = parameters.length;
-      conditions.push(`status='SENT' AND NULLIF(BTRIM(cufe),'') IS NOT NULL AND POSITION(LOWER($${index}) IN LOWER(CASE WHEN LEFT(number,LENGTH(prefix))=prefix THEN number ELSE CONCAT(prefix,number) END)) > 0`);
+      conditions.push(`status='SENT' AND NULLIF(BTRIM(cufe),'') IS NOT NULL AND (POSITION(LOWER($${index}) IN LOWER(CASE WHEN LEFT(number,LENGTH(prefix))=prefix THEN number ELSE CONCAT(prefix,number) END)) > 0 OR POSITION(LOWER($${index}) IN LOWER(${jarvisDisplayNumberSql('prefix', 'number')})) > 0)`);
     }
     const search = filters.search?.trim();
     if (search) {
       parameters.push('%' + search + '%');
       const index = parameters.length;
-      conditions.push(`("customerName" ILIKE $${index} OR "customerIdentification" ILIKE $${index} OR CONCAT(prefix,number) ILIKE $${index} OR cufe ILIKE $${index})`);
+      conditions.push(`("customerName" ILIKE $${index} OR "customerIdentification" ILIKE $${index} OR CONCAT(prefix,number) ILIKE $${index} OR (CASE WHEN LEFT(number,LENGTH(prefix))=prefix THEN number ELSE CONCAT(prefix,number) END) ILIKE $${index} OR ${jarvisDisplayNumberSql('prefix', 'number')} ILIKE $${index} OR cufe ILIKE $${index})`);
     }
     if (filters.from) { parameters.push(filters.from); conditions.push(`"issueDate" >= $${parameters.length}`); }
     if (filters.to) { parameters.push(filters.to); conditions.push(`"issueDate" <= $${parameters.length}`); }

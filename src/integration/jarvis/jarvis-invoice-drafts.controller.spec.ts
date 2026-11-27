@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../../auth/interfaces/jwt-payload.interface';
 import { JarvisInvoiceDraftsController } from './jarvis-invoice-drafts.controller';
 const user = { companyId: 'company-1' } as AuthenticatedUser;
@@ -58,4 +58,36 @@ it('devuelve solo los metadatos para reabrir un archivo guardado', async () => {
   query.mockResolvedValue([{ state: { notes: 'Original' }, attachment }]);
   expect(await controller.get(user, 'draft-1')).toEqual({ draft: { state: { notes: 'Original', attachment } } });
   expect(query.mock.calls[0][0]).toContain("- 'dataBase64'");
+});
+
+it('reserva atómicamente el borrador de ventas sin sobrescribir cambios ni envíos previos', async () => {
+  const { controller, query } = setup();
+  const state = { importSource: 'sales-excel-v1', importReference: 'A', lines: [] };
+  const result = await controller.claimSalesImport(user, 'draft-1', { state });
+  expect(result.token).toMatch(/^[a-f0-9-]{36}$/);
+  expect(query).toHaveBeenCalledWith(expect.stringContaining("NOT state ? 'importDelivery'"), ['draft-1', 'company-1', JSON.stringify(state), result.token]);
+  expect(query.mock.calls[0][0]).toContain("state - '__attachment'=$3::jsonb");
+  expect(query.mock.calls[0][0]).toContain('SELECT id FROM claimed');
+  expect(query.mock.calls[0][0]).toContain("document_kind='ELECTRONIC_INVOICE'");
+  query.mockResolvedValue([]);
+  await expect(controller.claimSalesImport(user, 'draft-1', { state })).rejects.toBeInstanceOf(ConflictException);
+});
+
+it('confirma solo el intento reservado en la empresa y protege su estado y eliminación', async () => {
+  const { controller, query } = setup();
+  const token = '12345678-1234-4234-8234-123456789abc';
+  await controller.completeSalesImport(user, 'draft-1', { token, invoiceId: 'history-id' });
+  expect(query).toHaveBeenLastCalledWith(expect.stringContaining("state->'importDelivery'->>'claimToken'=$3"), ['draft-1', 'company-1', token, 'history-id']);
+  expect(query.mock.calls[0][0]).toContain('SELECT id FROM completed');
+  await controller.save(user, 'draft-1', { documentKind: 'ELECTRONIC_INVOICE', state: {} });
+  expect(query.mock.calls[1][0]).toContain("jarvis_invoice_drafts.state ? 'importDelivery'");
+  await controller.remove(user, 'draft-1');
+  expect(query.mock.calls[2][0]).toContain("state ? 'importDelivery'");
+  expect(query.mock.calls[2][0]).toContain('SELECT id FROM deleted');
+  query.mockResolvedValue([]);
+  await expect(controller.completeSalesImport(user, 'draft-1', { token })).rejects.toBeInstanceOf(ConflictException);
+  query.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 'draft-1' }]);
+  await expect(controller.remove(user, 'draft-1')).rejects.toBeInstanceOf(ConflictException);
+  query.mockResolvedValue([]);
+  await expect(controller.remove(user, 'missing')).resolves.toEqual({ deleted: true });
 });

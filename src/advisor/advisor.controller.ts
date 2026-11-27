@@ -1,5 +1,5 @@
 import { AdvisorPortalService } from './advisor-portal.service';
-import { Body, Controller, ForbiddenException, Get, Post, Query, UseGuards, Injectable, CanActivate, ExecutionContext, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Post, Query, UseGuards, Injectable, CanActivate, ExecutionContext, Param, ParseUUIDPipe, ServiceUnavailableException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
@@ -10,6 +10,7 @@ import { CreateAdminCompanyRequestDto } from '../admin/dto/admin-company.dto';
 import { RegistrationInvitationService } from '../auth/services/registration-invitation.service';
 import { AdvisorSalesService } from './advisor-sales.service';
 import { AdminGuard } from '../admin/guards/admin.guard';
+import { AdvisorDemoInvoicesService, type DemoInvoiceInput } from './advisor-demo-invoices.service';
 
 @Injectable()
 export class AdvisorGuard implements CanActivate {
@@ -32,6 +33,20 @@ export class AdvisorController {
   @Get('catalog') async catalog(@CurrentUser() user: AuthenticatedUser) {
     await this.profile(user);
     return this.portal.catalog();
+  }
+  @Get('demo') async demo(@CurrentUser() user: AuthenticatedUser) {
+    await this.profile(user);
+    const [company] = await this.db.query('SELECT name, is_demo AS "isDemo" FROM advisor_demo_company WHERE singleton = true AND is_demo = true');
+    if (!company) throw new ServiceUnavailableException('La empresa de demostración no está disponible.');
+    return { company };
+  }
+  @Get('demo/invoices') async demoInvoices(@CurrentUser() user: AuthenticatedUser, @Query('page') page?: string) {
+    await this.profile(user);
+    return new AdvisorDemoInvoicesService(this.db).list(page);
+  }
+  @Post('demo/invoices') async createDemoInvoice(@CurrentUser() user: AuthenticatedUser, @Body() input: DemoInvoiceInput) {
+    await this.profile(user);
+    return new AdvisorDemoInvoicesService(this.db).create(input, user.userId);
   }
   @Get('companies/lookup-name') async lookup(@CurrentUser() user: AuthenticatedUser, @Query('nit') nit: string) {
     await this.profile(user); return this.admin.lookupCompanyName(nit ?? '');

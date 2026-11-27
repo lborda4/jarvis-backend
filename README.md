@@ -96,3 +96,15 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+# Aplicación demo para asesores
+
+La migración `CreateAdvisorDemoCompany1796200000000` crea una empresa ficticia
+compartida en la tabla aislada `advisor_demo_company` de la misma base de datos.
+No se crea una empresa operativa ni se almacenan credenciales de proveedores.
+Solo los asesores registrados y activos pueden consultar esta empresa mediante
+`GET /advisor/demo`. La demo permite crear y consultar facturas simuladas de una línea sin impuestos
+ni pagos mediante `/advisor/demo/invoices`. Los datos y consecutivos están en
+tablas exclusivas de demo, sin llamar a NextPyme ni a la DIAN. Requiere aplicar
+también la migración `CreateAdvisorDemoInvoices1796300000000`. Las demás
+funciones siguen deshabilitadas; no se debe conectar esta ruta a servicios de
+producción.

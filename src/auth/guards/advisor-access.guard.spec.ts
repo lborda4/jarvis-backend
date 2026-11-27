@@ -7,6 +7,7 @@ const context = (role: UserRole | undefined, method: string, originalUrl: string
 it('keeps advisor sessions limited to their own authenticated identity', () => {
   const guard = new AdvisorAccessGuard();
   expect(guard.canActivate(context(UserRole.ADVISOR, 'GET', '/auth/me?test=1'))).toBe(true);
+  expect(guard.canActivate(context(UserRole.ADVISOR, 'GET', '/advisor/demo'))).toBe(true);
   for (const [method, path] of [['GET', '/admin/advisors'], ['GET', '/company'], ['POST', '/auth/switch-company'], ['POST', '/auth/me'], ['POST', '/jarvis/send']]) expect(() => guard.canActivate(context(UserRole.ADVISOR, method, path))).toThrow();
   expect(guard.canActivate(context(undefined, 'POST', '/auth/advisor-registration'))).toBe(true);
   expect(guard.canActivate(context(UserRole.ADMIN, 'GET', '/admin/advisors'))).toBe(true);

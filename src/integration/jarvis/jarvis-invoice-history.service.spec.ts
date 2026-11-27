@@ -37,6 +37,7 @@ describe('listado unificado', () => {
     const [sql, params] = query.mock.calls[1];
     expect(sql).toContain('UNION ALL');
     expect(sql).toContain('jarvis_invoice_drafts WHERE company_id=$1 AND document_kind=$2');
+    expect(sql).toContain("COALESCE(state->'importDelivery'->>'status','')='sent'");
     expect(sql).toContain('jarvis_sales_invoices WHERE company_id=$1 AND document_kind=$2');
     expect(params).toEqual(['company', JarvisResolutionKind.ELECTRONIC_INVOICE, '%Cliente%', '2026-10-01', '2026-10-16', 20, 20]);
     expect(sql).not.toContain('Cliente');
@@ -98,7 +99,7 @@ describe('estado de ajustes de facturas', () => {
 
 
 describe('búsqueda de referencia por consecutivo para notas', () => {
-  it.each(['F', 'FV', 'FV12', "FV%_'"])('busca %s solo en facturas emitidas y parametriza el texto literal', async number => {
+  it.each(['F', 'FV', 'FV12', 'FV-001', 'A-B-001', "FV%_'"])('busca %s solo en facturas emitidas y parametriza el texto literal', async number => {
     const query = jest.fn().mockResolvedValueOnce([{ total: '0' }]).mockResolvedValueOnce([]);
     const service = new JarvisInvoiceHistoryService({ query } as never);
     await expect(service.list('owner', { number })).resolves.toMatchObject({ items: [], total: 0 });
@@ -107,9 +108,20 @@ describe('búsqueda de referencia por consecutivo para notas', () => {
       expect(sql).toContain("status='SENT'");
       expect(sql).toContain("NULLIF(BTRIM(cufe),'') IS NOT NULL");
       expect(sql).toContain('POSITION(LOWER($3) IN LOWER(');
+      expect(sql).toContain("RIGHT(prefix, 1) = '-'");
+      expect(sql).toContain("prefix || '-' ||");
       expect(sql).not.toContain('"customerName" ILIKE');
       if (number.length > 2) expect(sql).not.toContain(number);
     }
+  });
+  it('incluye el número visual y el oficial en la búsqueda general parametrizada', async () => {
+    const query = jest.fn().mockResolvedValueOnce([{ total: '0' }]).mockResolvedValueOnce([]);
+    await new JarvisInvoiceHistoryService({ query } as never).list('owner', { search: "FV-001' OR 1=1" });
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain("prefix || '-' ||");
+    expect(sql).toContain('CASE WHEN LEFT(number,LENGTH(prefix))=prefix THEN number');
+    expect(sql).not.toContain("FV-001' OR 1=1");
+    expect(params[2]).toBe("%FV-001' OR 1=1%");
   });
   it('rechaza consecutivos demasiado largos antes de consultar la base de datos', async () => {
     const query = jest.fn();

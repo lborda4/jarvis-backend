@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, ParseUUIDPipe, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, NotFoundException, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../auth/interfaces/jwt-payload.interface';
@@ -56,14 +57,58 @@ export class JarvisInvoiceDraftsController {
         updated_at=now()
       WHERE jarvis_invoice_drafts.company_id=EXCLUDED.company_id
         AND jarvis_invoice_drafts.document_kind=EXCLUDED.document_kind
+        AND NOT (jarvis_invoice_drafts.document_kind='ELECTRONIC_INVOICE'
+          AND COALESCE(jarvis_invoice_drafts.state->>'importSource','')='sales-excel-v1'
+          AND (jarvis_invoice_drafts.state ? 'importDelivery' OR COALESCE(EXCLUDED.state->>'importSource','')='sales-excel-v1'))
       RETURNING id`, [id, getAuthenticatedCompanyId(user), kind, state]);
     if (!draft) throw new NotFoundException('Borrador no encontrado.');
     return { draft };
   }
 
+  @Post(':id/sales-import-claim')
+  async claimSalesImport(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Body() request: { state: Record<string, unknown> }) {
+    if (!request?.state || typeof request.state !== 'object' || Array.isArray(request.state))
+      throw new BadRequestException('El borrador no es válido.');
+    const { __attachment: _attachment, attachment: _metadata, ...state } = request.state;
+    const serialized = JSON.stringify(state);
+    if (Buffer.byteLength(serialized, 'utf8') > 1024 * 1024) throw new BadRequestException('El borrador es demasiado grande.');
+    const token = randomUUID();
+    const [draft] = await this.source.query(`WITH claimed AS (UPDATE jarvis_invoice_drafts
+      SET state=jsonb_set(state,'{importDelivery}',jsonb_build_object('status','sending','claimToken',$4::text),true), updated_at=now()
+      WHERE id=$1 AND company_id=$2 AND document_kind='ELECTRONIC_INVOICE'
+        AND state->>'importSource'='sales-excel-v1' AND NOT state ? 'importDelivery'
+        AND state - '__attachment'=$3::jsonb
+      RETURNING id) SELECT id FROM claimed`, [id, getAuthenticatedCompanyId(user), serialized, token]);
+    if (!draft) throw new ConflictException('El borrador cambió o ya tiene un envío en curso. Revisa el historial antes de continuar.');
+    return { token };
+  }
+
+  @Post(':id/sales-import-complete')
+  async completeSalesImport(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Body() request: { token: string; invoiceId?: string }) {
+    if (typeof request?.token !== 'string' || !/^[0-9a-f-]{36}$/i.test(request.token) ||
+      (request.invoiceId !== undefined && (typeof request.invoiceId !== 'string' || request.invoiceId.length > 100)))
+      throw new BadRequestException('La confirmación del envío no es válida.');
+    const [draft] = await this.source.query(`WITH completed AS (UPDATE jarvis_invoice_drafts
+      SET state=jsonb_set(state,'{importDelivery}',jsonb_strip_nulls(jsonb_build_object('status','sent','invoiceId',$4::text)),true), updated_at=now()
+      WHERE id=$1 AND company_id=$2 AND document_kind='ELECTRONIC_INVOICE'
+        AND state->>'importSource'='sales-excel-v1' AND state->'importDelivery'->>'status'='sending'
+        AND state->'importDelivery'->>'claimToken'=$3
+      RETURNING id) SELECT id FROM completed`, [id, getAuthenticatedCompanyId(user), request.token, request.invoiceId ?? null]);
+    if (!draft) throw new ConflictException('No se pudo confirmar el envío del borrador. Revisa el historial.');
+    return { draft };
+  }
+
   @Delete(':id')
   async remove(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    await this.source.query('DELETE FROM jarvis_invoice_drafts WHERE id=$1 AND company_id=$2', [id, getAuthenticatedCompanyId(user)]);
+    const [deleted] = await this.source.query(`WITH deleted AS (DELETE FROM jarvis_invoice_drafts WHERE id=$1 AND company_id=$2
+      AND NOT (document_kind='ELECTRONIC_INVOICE' AND COALESCE(state->>'importSource','')='sales-excel-v1' AND state ? 'importDelivery')
+      RETURNING id) SELECT id FROM deleted`, [id, getAuthenticatedCompanyId(user)]);
+    if (!deleted) {
+      const [protectedDraft] = await this.source.query(`SELECT id FROM jarvis_invoice_drafts
+        WHERE id=$1 AND company_id=$2 AND document_kind='ELECTRONIC_INVOICE'
+          AND state->>'importSource'='sales-excel-v1' AND state ? 'importDelivery'`, [id, getAuthenticatedCompanyId(user)]);
+      if (protectedDraft) throw new ConflictException('El borrador está protegido por un envío. Revisa el historial.');
+    }
     return { deleted: true };
   }
 }
