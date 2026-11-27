@@ -233,7 +233,7 @@ it('exporta todos los productos filtrados sin limitarse a la página y advierte 
   expect(sheet.getCell('A32').value).toBe('P24');
   expect(rows.some(row => row.includes('FV24'))).toBe(true);
   expect(rows.some(row => row.some(value => typeof value === 'string' && value.includes('no conservan desglose suficiente')))).toBe(true);
-  expect(rows.some(row => row.some(value => typeof value === 'string' && value.includes('producto P')))).toBe(true);
+  expect(rows.some(row => row.some(value => typeof value === 'string' && value.startsWith('Filtros:')))).toBe(false);
 });
 
 it('genera el informe de productos sin resultados y rechaza el exceso de filas', async () => {
@@ -343,7 +343,7 @@ it('preserva el filtro de cliente y permite exportar sin resultados', async () =
   const rows: unknown[][] = [];
   sheet.eachRow(row => rows.push(row.values as unknown[]));
   expect(rows.some(row => row.includes('Detalle de comprobantes'))).toBe(true);
-  expect(rows.some(row => row.some(value => typeof value === 'string' && value.includes('cliente 00123')))).toBe(true);
+  expect(rows.some(row => row.some(value => typeof value === 'string' && value.startsWith('Filtros:')))).toBe(false);
   expect(source.query.mock.calls[0][1]).toContain('00123');
 });
 
@@ -706,6 +706,66 @@ it('pagina los registros después del filtro y conserva los totales globales', a
   expect(result.totals[0]).toMatchObject({ invoiceCount: 25, total: 2975 });
 });
 
+it.each([
+  ['sales', 'detail'], ['sales', 'summary'], ['customers', 'detail'], ['customers', 'summary'],
+  ['products', 'detail'], ['products', 'summary'], ['sellers', 'detail'], ['sellers', 'summary'],
+  ['taxes', 'detail'], ['taxes', 'summary'],
+])('omite notas fijas de la consulta y exportación de %s (%s)', async (report, view) => {
+  const { service } = setup([invoice()]);
+  const selected = { ...query, report, view };
+  const result = await service.query('company-a', selected);
+  expect(result.warnings).toEqual([]);
+  expect(result.items.length).toBeGreaterThan(0);
+  const exported = await service.export('company-a', selected);
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  expect(workbook.getWorksheet('Filtros y criterios')).toBeUndefined();
+  const values: string[] = [];
+  workbook.eachSheet(sheet => sheet.eachRow(row => row.eachCell(cell => {
+    if (typeof cell.value === 'string') values.push(cell.value);
+  })));
+  expect(values.some(value => value.startsWith('Filtros:'))).toBe(false);
+  expect(values.some(value => value.includes('Solo comprobantes del historial'))).toBe(false);
+  expect(values.some(value => value.includes('Las monedas se consolidan'))).toBe(false);
+}, 30000);
+
+it.each([
+  ['sales', 'detail'], ['sales', 'summary'], ['customers', 'detail'], ['customers', 'summary'],
+  ['products', 'detail'], ['products', 'summary'], ['sellers', 'detail'], ['sellers', 'summary'],
+  ['taxes', 'detail'], ['taxes', 'summary'],
+])('omite la columna de dirección de retenciones en %s (%s) sin omitir valores', async (report, view) => {
+  const sale = invoice();
+  sale.source!.retentions = [{ id: 6, percentage: 2.5 }];
+  const support = invoice({ id: 'support', kind: 'SUPPORT_DOCUMENT', number: 'DS1', source: sale.source });
+  const { service } = setup([sale, ...(report === 'taxes' ? [support] : [])]);
+  const selected = { ...query, report, view };
+  const result = await service.query('company-a', selected);
+  expect(result.columns.some(column => column.key === 'direction')).toBe(false);
+  expect(result.items).toHaveLength(report === 'taxes' ? 2 : 1);
+  expect(result.totals[0].retentionsSuffered).toBe(2.5);
+  const exported = await service.export('company-a', selected);
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  const values: string[] = [];
+  workbook.eachSheet(sheet => sheet.eachRow(row => row.eachCell(cell => {
+    if (typeof cell.value === 'string') values.push(cell.value);
+  })));
+  expect(values).not.toContain('Nos practicaron');
+  expect(values).not.toContain('Practicadas por nosotros');
+}, 30000);
+
+it('conserva advertencias de datos incompletos en el reporte de ventas exportado', async () => {
+  const { service } = setup([invoice({ source: null })]);
+  const exported = await service.export('company-a', { ...query, report: 'sales' });
+  const workbook = new Workbook();
+  await workbook.xlsx.load(exported.buffer as never);
+  const values: string[] = [];
+  workbook.getWorksheet('Totales')!.eachRow(row => {
+    if (typeof row.getCell(1).value === 'string') values.push(String(row.getCell(1).value));
+  });
+  expect(values.some(value => value.includes('no conservan desglose suficiente'))).toBe(true);
+});
+
 it('exporta todas las páginas, consolidados y totales con valores numéricos', async () => {
   const { service } = setup(
     Array.from({ length: 25 }, (_, index) =>
@@ -722,9 +782,7 @@ it('exporta todas las páginas, consolidados y totales con valores numéricos', 
   expect(workbook.getWorksheet('Registros')!.rowCount).toBe(26);
   expect(workbook.getWorksheet('Consolidado')!.rowCount).toBe(2);
   expect(workbook.getWorksheet('Totales')!.getRow(2).values).toContain(2975);
-  expect(
-    workbook.getWorksheet('Filtros y criterios')!.rowCount,
-  ).toBeGreaterThan(5);
+  expect(workbook.getWorksheet('Filtros y criterios')).toBeUndefined();
   expect(result.filename).toBe('JARVIS-sales-2026-10-01-2026-10-31.xlsx');
 }, 30000);
 

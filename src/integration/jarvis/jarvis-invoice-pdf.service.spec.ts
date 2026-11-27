@@ -5,6 +5,45 @@ jest.mock('./pdf/sales-invoice-pdf.renderer', () => ({
   renderJarvisInvoicePdfBase64: jest.fn().mockResolvedValue('JVBERi0x'),
 }));
 describe('sales invoice PDF data', () => {
+  it('recupera la orden guardada si el XML no la contiene y la incluye en el PDF del correo', async () => {
+    const purchaseOrder = { prefix: 'OC-', consecutive: '001', issueDate: '2024-01-10' };
+    const { service } = setup({ cufe: 'cufe-123', invoiceXml: DOWNLOAD_XML, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { purchaseOrder } });
+    expect(await service.getData('company', 'id')).toMatchObject({ orderNumber: 'OC-001', orderDate: '2024-01-10' });
+    const renderer = jest.requireMock('./pdf/sales-invoice-pdf.renderer');
+    renderer.renderJarvisInvoicePdfBase64.mockClear();
+    await service.renderGraphicBase64({ companyId: 'company', historyId: 'id' });
+    expect(renderer.renderJarvisInvoicePdfBase64).toHaveBeenCalledWith(expect.objectContaining({ orderNumber: 'OC-001', orderDate: '2024-01-10' }));
+    renderer.renderJarvisInvoicePdfBase64.mockClear();
+    await service.renderGraphicBase64({ companyId: 'company', invoiceXml: DOWNLOAD_XML, cufe: 'cufe-123', documentKind: 'ELECTRONIC_INVOICE', purchaseOrder });
+    expect(renderer.renderJarvisInvoicePdfBase64).toHaveBeenCalledWith(expect.objectContaining({ orderNumber: 'OC-001', orderDate: '2024-01-10' }));
+  });
+
+  it('prioriza el número del XML y conserva la referencia histórica sin cambiarla', async () => {
+    const xml = DOWNLOAD_XML.replace('<cbc:ID>XML1</cbc:ID>', '<cac:OrderReference><cbc:ID>OC1</cbc:ID><cbc:IssueDate>2024-01-10</cbc:IssueDate></cac:OrderReference><cbc:ID>XML1</cbc:ID>');
+    const { service } = setup({ cufe: 'cufe-123', invoiceXml: xml, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { purchaseOrder: { prefix: 'OC', consecutive: '1', issueDate: '2024-01-10' } } });
+    expect(await service.getData('company', 'id')).toMatchObject({ orderNumber: 'OC1', orderDate: '2024-01-10' });
+  });
+
+  it('recupera la orden guardada después de descargar el XML y no mezcla fechas de referencias diferentes', async () => {
+    const purchaseOrder = { prefix: 'OC-', consecutive: '1', issueDate: '2024-01-10' };
+    const invoice = { cufe: 'cufe-123', invoiceXml: null, documentKind: 'ELECTRONIC_INVOICE', sourceRequest: { purchaseOrder } };
+    const fetched = setup(invoice);
+    expect(await fetched.service.getData('company', 'id')).toMatchObject({ orderNumber: 'OC-1', orderDate: '2024-01-10' });
+    expect(fetched.client.getInvoiceXmlByCufe).toHaveBeenCalled();
+    const xml = DOWNLOAD_XML.replace('<cbc:ID>XML1</cbc:ID>', '<cac:OrderReference><cbc:ID>OTRA</cbc:ID></cac:OrderReference><cbc:ID>XML1</cbc:ID>');
+    const conflicting = setup({ ...invoice, invoiceXml: xml });
+    expect(await conflicting.service.getData('company', 'id')).toMatchObject({ orderNumber: 'OTRA', orderDate: null });
+  });
+
+  it('usa la orden histórica sin XML y no incorpora la orden guardada a notas', async () => {
+    const invoice = { id: 'id', cufe: 'cufe-123', invoiceXml: null, documentKind: 'ELECTRONIC_INVOICE', prefix: 'FV', number: '1', issueDate: '2026-09-01', customerName: 'Cliente', customerIdentification: '123', currency: 'COP', total: '100',
+      sourceRequest: { purchaseOrder: { prefix: 'OC', consecutive: '1', issueDate: '2024-01-10' }, items: [{ description: 'Servicio', quantity: 1, unitValue: 100 }] } };
+    const { service, client } = setup(invoice);
+    client.getInvoiceXmlByCufe.mockRejectedValue(new Error('XML no disponible'));
+    expect(await service.getData('company', 'id')).toMatchObject({ orderNumber: 'OC1', orderDate: '2024-01-10' });
+    const note = setup({ ...invoice, documentKind: 'CREDIT_NOTE', invoiceXml: DOWNLOAD_XML });
+    expect((await note.service.getData('company', 'id')).orderNumber).toBeFalsy();
+  });
   it('descarga el XML de la factura propia con el token y NIT de la empresa', async () => {
     const { service, repository, client, companies } = setup(null);
     repository.findOne.mockResolvedValue({ prefix: 'XML', number: 'XML1', cufe: 'cufe-123' });

@@ -13,6 +13,8 @@ describe('respuestas reales de nómina', () => {
     expect(payrollCune({ StatusDescription: `Nómina CUNE ${cune}` })).toBe(
       cune,
     ));
+  it('extrae CUNE descrito en listas de errores DIAN', () =>
+    expect(payrollCune({ ResponseDian: { ErrorMessage: { string: [`Procesado anteriormente. CUNE ${cune}`] } } })).toBe(cune));
   it('no confunde identificadores internos con CUNE', () =>
     expect(payrollCune({ id: '123' })).toBeNull());
   it('acepta referencias de archivos devueltas sin inventar nombres', () =>

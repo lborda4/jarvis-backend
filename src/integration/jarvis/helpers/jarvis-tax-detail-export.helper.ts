@@ -12,7 +12,7 @@ export function addTaxDetailSheet(
   warnings: string[],
 ): void {
   const headerRow = 8;
-  const requiredRows = headerRow + totals.length + rows.length + warnings.length + 3;
+  const requiredRows = headerRow + totals.length + rows.length + (warnings.length ? warnings.length + 1 : 0);
   if (requiredRows > 1048576)
     throw new BadRequestException('El reporte supera el límite de filas de una hoja de Excel. Reduce el rango o los filtros.');
 
@@ -52,13 +52,12 @@ export function addTaxDetailSheet(
   });
   rows.forEach(item => sheet.addRow(columns.map(column => item[column.key] ?? null)));
   sheet.views = [{ state: 'frozen', ySplit: headerRow }];
-  sheet.addRow([]);
+  if (warnings.length) sheet.addRow([]);
   const addNote = (value: string) => {
     const row = sheet.addRow([value]);
     sheet.mergeCells(row.number, 1, row.number, columns.length);
     row.alignment = { vertical: 'top', wrapText: true };
     row.height = 30;
   };
-  addNote(`Filtros: búsqueda ${filters.search || 'Todas'}; tercero ${filters.customer || 'Todos'}; vendedor ${filters.seller || 'Todos'}; tipo ${filters.kind || 'Todos'}`);
   warnings.forEach(addNote);
 }

@@ -78,12 +78,17 @@ function setup(
 }
 
 describe('JarvisInvoiceSendService token de la empresa', () => {
-  it('envía y guarda la orden de compra con ceros iniciales', async () => {
-    const { service, request, client, history } = setup();
-    const purchaseOrder = { prefix: ' OC- ', consecutive: ' 00123 ', issueDate: '2024-01-10' };
+  it.each([
+    ['OC', '00123'], [' OC- ', ' 00123 '], ['OC', '-00123'], ['OC--', '--00123'], ['OC- -', '- -00123'], ['OC-BOG', '00123'],
+  ])('envía y guarda la misma orden normalizada con prefijo %s y consecutivo %s', async (prefix, consecutive) => {
+    const { service, request, client, history, invoicePdf } = setup();
+    const purchaseOrder = { prefix, consecutive, issueDate: '2024-01-10' };
+    const normalizedPrefix = prefix.includes('BOG') ? 'OC-BOG-' : 'OC-';
     await service.createAndSendInvoice({ ...request, purchaseOrder }, 'company-1');
-    expect(client.createInvoice.mock.calls[0][0].order_reference).toEqual({ id_order: 'OC-00123', issue_date_order: '2024-01-10' });
-    expect(history.record.mock.calls[0][0].sourceRequest.purchaseOrder).toEqual(purchaseOrder);
+    expect(client.createInvoice.mock.calls[0][0].order_reference).toEqual({ id_order: `${normalizedPrefix}00123`, issue_date_order: '2024-01-10' });
+    const saved = { prefix: normalizedPrefix, consecutive: '00123', issueDate: '2024-01-10' };
+    expect(history.record.mock.calls[0][0].sourceRequest.purchaseOrder).toEqual(saved);
+    expect(invoicePdf.renderGraphicBase64).toHaveBeenCalledWith(expect.objectContaining({ purchaseOrder: saved }));
   });
 
   it('omite la orden si no se proporciona', async () => {
@@ -97,6 +102,8 @@ describe('JarvisInvoiceSendService token de la empresa', () => {
     { prefix: '', consecutive: '1', issueDate: '2024-01-10' },
     { prefix: 'OC-', consecutive: '1', issueDate: '2023-02-29' },
     { prefix: 'OC-', consecutive: 123, issueDate: '2024-01-10' },
+    { prefix: '---', consecutive: '1', issueDate: '2024-01-10' },
+    { prefix: 'OC', consecutive: '--', issueDate: '2024-01-10' },
   ])('rechaza una orden incompleta o inválida antes de reservar numeración: %j', async purchaseOrder => {
     const { service, request, client, numbering } = setup();
     await expect(service.createAndSendInvoice({ ...request, purchaseOrder } as never, 'company-1')).rejects.toThrow('orden de compra');

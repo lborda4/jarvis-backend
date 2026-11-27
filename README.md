@@ -108,3 +108,8 @@ tablas exclusivas de demo, sin llamar a NextPyme ni a la DIAN. Requiere aplicar
 también la migración `CreateAdvisorDemoInvoices1796300000000`. Las demás
 funciones siguen deshabilitadas; no se debe conectar esta ruta a servicios de
 producción.
+
+Un asesor convertido desde una cuenta de usuario puede seleccionar sus empresas
+operativas vinculadas. El acceso a ellas requiere un vínculo `UserCompany`
+validado en cada petición; la asignación comercial de un cliente no lo concede.
+El selector navega a la demo por separado, sin usarla como empresa operativa.

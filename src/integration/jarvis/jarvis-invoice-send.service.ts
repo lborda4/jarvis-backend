@@ -59,6 +59,7 @@ import { calculateJarvisRetention } from './helpers/jarvis-tax-calculation.helpe
 import { issuerTaxProfile } from './helpers/jarvis-issuer-tax-profile.helper';
 import { captureIssuedSnapshot } from './helpers/jarvis-issued-snapshot.helper';
 import { JarvisCredentials } from '../interfaces/integration-credentials.interface';
+import { normalizePurchaseOrder } from './helpers/jarvis-purchase-order.helper';
 
 const DOCUMENT_TYPE_IDENTIFICATION_FALLBACK: Record<string, number> = {
   [JarvisDocumentType.CC]: 3,
@@ -136,15 +137,10 @@ export class JarvisInvoiceSendService {
       );
     }
 
-    const order = request.purchaseOrder;
-    if (isSaleInvoice && order !== undefined) {
-      const date = typeof order?.issueDate === 'string' ? order.issueDate.trim() : '';
-      if (typeof order?.prefix !== 'string' || !order.prefix.trim() ||
-          typeof order.consecutive !== 'string' || !order.consecutive.trim() ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) ||
-          new Date(date).toISOString().slice(0, 10) !== date) {
-        throw new BadRequestException('Indique el prefijo, consecutivo y fecha válidos de la orden de compra.');
-      }
+    const order = isSaleInvoice && request.purchaseOrder !== undefined
+      ? normalizePurchaseOrder(request.purchaseOrder) : null;
+    if (isSaleInvoice && request.purchaseOrder !== undefined && !order) {
+      throw new BadRequestException('Indique el prefijo, consecutivo y fecha válidos de la orden de compra.');
     }
 
     if (isNote) {
@@ -529,8 +525,8 @@ export class JarvisInvoiceSendService {
             number: numbering.number,
             date: issueDate,
             ...(isSaleInvoice && order ? { order_reference: {
-              id_order: `${order.prefix.trim()}${order.consecutive.trim()}`,
-              issue_date_order: order.issueDate.trim(),
+              id_order: `${order.prefix}${order.consecutive}`,
+              issue_date_order: order.issueDate,
             } } : {}),
             ...(ciiu ? { actividadeconomica: ciiu } : {}),
             sendmail: false,
@@ -748,7 +744,7 @@ export class JarvisInvoiceSendService {
           try {
             historyId = await this.invoiceHistory.record({
               invoiceXml,
-              sourceRequest: JSON.parse(JSON.stringify({ ...request, emissionSnapshot, recipientCopyEmails: tercero.copyEmails ?? [], issuerTaxProfile: issuerTaxProfile(credentials, 'emission'), attachmentDraftId: undefined, attachment, paymentBreakdown, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
+              sourceRequest: JSON.parse(JSON.stringify({ ...request, ...(order ? { purchaseOrder: order } : {}), emissionSnapshot, recipientCopyEmails: tercero.copyEmails ?? [], issuerTaxProfile: issuerTaxProfile(credentials, 'emission'), attachmentDraftId: undefined, attachment, paymentBreakdown, sellers: sellers.length ? sellers : undefined })) as CreateJarvisInvoiceRequestDto,
               companyId, documentKind: kind, providerId: createdId, prefix: numbering.prefix, number: String(createdNumber),
               issueDate, customerName: request.customerName?.trim() || tercero.name,
               customerIdentification, currency, total: formatMoney(payable), cufe: createdCufe,
@@ -793,6 +789,7 @@ export class JarvisInvoiceSendService {
             invoiceXml,
             cufe: createdCufe,
             documentKind: kind,
+            purchaseOrder: order ?? undefined,
           });
 
           return {
@@ -850,6 +847,7 @@ export class JarvisInvoiceSendService {
     invoiceXml?: string | null;
     cufe?: string | null;
     documentKind?: string | null;
+    purchaseOrder?: import('./dto/create-jarvis-invoice.dto').JarvisPurchaseOrderDto;
   }): Promise<void> {
     const prefix = input.prefix?.trim();
     if (!prefix) {
@@ -869,6 +867,7 @@ export class JarvisInvoiceSendService {
       invoiceXml: input.invoiceXml,
       cufe: input.cufe,
       documentKind: input.documentKind,
+      purchaseOrder: input.purchaseOrder,
       token: input.token,
     });
     try {

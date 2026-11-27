@@ -28,15 +28,6 @@ import {
 
 const salesKinds = ['ELECTRONIC_INVOICE', 'CREDIT_NOTE', 'DEBIT_NOTE'];
 const taxKinds = [...salesKinds, 'SUPPORT_DOCUMENT', 'SUPPORT_CREDIT_NOTE'];
-const conventions = [
-  'Solo comprobantes del historial de emisión aceptada de JARVIS. Se excluyen borradores y rechazos DIAN.',
-  'Las notas crédito y de ajuste restan; las notas débito suman. Cada comprobante se atribuye a su fecha de emisión.',
-  'Ventas brutas y netas corresponden a subtotales antes de impuestos. Valor total conserva el importe registrado; valor después de retenciones lo descuenta.',
-  'En ventas las retenciones son las que nos practicaron. En documentos soporte son las practicadas por nosotros.',
-  'Las monedas se consolidan por separado y no se convierten.',
-  'Los filtros de cliente, vendedor y producto buscan en los datos conservados del comprobante, no en los catálogos actuales.',
-  'Las notas sin vendedores propios heredan los de su factura vinculada, incluso si fue emitida en otro período.',
-];
 export function validateReportQuery(query: ReportQuery): ReportFilters {
   const text = (key: keyof ReportQuery, fallback = '') => {
     const value = query[key];
@@ -200,7 +191,6 @@ export class JarvisReportsService {
     return {
       filters,
       ...result,
-      warnings: [...conventions, ...result.warnings],
     };
   }
 
@@ -355,56 +345,12 @@ export class JarvisReportsService {
       })),
     ];
     addSheet('Totales', totalColumns, data.totals);
-    const metadata = book.addWorksheet('Filtros y criterios');
-    metadata.columns = [
-      { header: 'Filtro / criterio', key: 'key', width: 35 },
-      { header: 'Valor', key: 'value', width: 120 },
-    ];
-    const reportLabels = {
-      sales: 'Ventas generales',
-      customers: 'Ventas por cliente',
-      products: 'Ventas por producto',
-      sellers: 'Ventas por vendedor',
-      taxes: 'Impuestos y retenciones',
-    };
-    const kindLabels: Record<string, string> = {
-      ELECTRONIC_INVOICE: 'Factura de venta',
-      CREDIT_NOTE: 'Nota crédito',
-      DEBIT_NOTE: 'Nota débito',
-      SUPPORT_DOCUMENT: 'Documento soporte',
-      SUPPORT_CREDIT_NOTE: 'Nota de ajuste',
-    };
-    const filterLabels = {
-      report: 'Reporte',
-      view: 'Vista consultada',
-      from: 'Desde',
-      to: 'Hasta',
-      customer: 'Cliente / proveedor',
-      seller: 'Vendedor',
-      ...(data.filters.report === 'taxes' ? { tax: 'Impuesto' } : { product: 'Producto o servicio' }),
-      kind: 'Tipo de comprobante',
-      currency: 'Moneda',
-    };
-    (
-      Object.entries(filterLabels) as Array<[keyof ReportFilters, string]>
-    ).forEach(([key, label]) => {
-      const value =
-        key === 'report'
-          ? reportLabels[data.filters.report]
-          : key === 'view'
-            ? data.filters.view === 'detail'
-              ? 'Registros individuales'
-              : 'Consolidado'
-            : key === 'tax'
-              ? REPORT_TAX_FILTERS.find(option => option.value === data.filters.tax)?.label || 'Todos'
-            : key === 'kind'
-              ? kindLabels[data.filters.kind] || 'Todos'
-              : data.filters[key] || 'Todos';
-      metadata.addRow({ key: label, value });
-    });
-    data.warnings.forEach((value) =>
-      metadata.addRow({ key: 'Criterio / observación', value }),
-    );
+    if (data.warnings.length) {
+      const sheet = book.getWorksheet('Totales')!;
+      sheet.addRow([]);
+      sheet.addRow(['Advertencias del reporte']);
+      data.warnings.forEach((value) => sheet.addRow([value]));
+    }
     return {
       buffer: Buffer.from(await book.xlsx.writeBuffer()),
       filename: `JARVIS-${data.filters.report}-${data.filters.from}-${data.filters.to}.xlsx`,

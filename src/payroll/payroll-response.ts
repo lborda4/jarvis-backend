@@ -1,7 +1,18 @@
 import { collectRecords } from '../integration/jarvis/nextpyme/nextpyme-record-scan.helper';
+export function payrollAlreadyProcessed(response: unknown): boolean {
+  return /procesado anteriormente|already processed|regla:\s*90(?:\D|$)/i.test(JSON.stringify(response) ?? '');
+}
+
 export function payrollCune(response: unknown): string | null {
   for (const record of collectRecords(response, { parseJsonStrings: true })) {
     for (const [key, value] of Object.entries(record)) {
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          if (typeof entry !== 'string') continue;
+          const match = /CUNE\s+([a-f0-9]{64,96})/i.exec(entry);
+          if (match) return match[1];
+        }
+      }
       if (typeof value !== 'string') continue;
       if (
         /^(cune|uuiddian|xmldocumentkey)$/i.test(key.replace(/_/g, '')) &&

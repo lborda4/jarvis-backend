@@ -330,7 +330,7 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
-    const companies = user.role === UserRole.ADVISOR ? [] : await this.listCompaniesForUser(user.id);
+    const companies = await this.listCompaniesForUser(user.id);
     const companyId = resolveActiveCompanyId(
       currentUser.companyId,
       user.role,
@@ -366,7 +366,7 @@ export class AuthService {
     company: Company | null,
   ): Promise<AuthTokensResponseDto> {
     const tokens = await this.generateTokens(user, company?.id ?? null);
-    const companies = user.role === UserRole.ADVISOR ? [] : await this.listCompaniesForUser(user.id);
+    const companies = await this.listCompaniesForUser(user.id);
 
     return buildAuthTokensResponse(
       tokens.accessToken,

@@ -188,8 +188,8 @@ describe('nómina: persistencia y transmisión', () => {
     api.payrollStatus.mockResolvedValue({ ResponseDian: { IsValid: 'false' } });
     await service.refreshStatus(company, actor, 'document-a');
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('SET status=$3,updated_at'),
-      [company, 'document-a', 'UNCERTAIN'],
+      expect.stringContaining('SET status=$3,cune=COALESCE(cune,$4),updated_at'),
+      [company, 'document-a', 'UNCERTAIN', 'a'.repeat(96)],
     );
   });
   it('una consulta positiva confirma la aceptación pendiente', async () => {
@@ -200,8 +200,8 @@ describe('nómina: persistencia y transmisión', () => {
     api.payrollStatus.mockResolvedValue({ ResponseDian: { IsValid: 'true' } });
     await service.refreshStatus(company, actor, 'document-a');
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('SET status=$3,updated_at'),
-      [company, 'document-a', 'ACCEPTED'],
+      expect.stringContaining('SET status=$3,cune=COALESCE(cune,$4),updated_at'),
+      [company, 'document-a', 'ACCEPTED', 'a'.repeat(96)],
     );
   });
   it('rechaza tipos de trabajador fuera del catálogo real', async () => {
@@ -232,7 +232,7 @@ describe('nómina: persistencia y transmisión', () => {
     );
     expect(query).not.toHaveBeenCalledWith(
       expect.stringContaining("status='UNCERTAIN'"),
-      [company, 'document-a'],
+      [company, 'document-a', null],
     );
   });
   it('aísla cada consulta de documento por empresa', async () => {
@@ -308,6 +308,46 @@ describe('nómina: persistencia y transmisión', () => {
       [company, 'document-a', 'REJECTED', null],
     );
   });
+  it('reserva un rechazo DIAN de documento previamente procesado y conserva su CUNE', async () => {
+    const { service, query, api } = build();
+    const cune = 'a'.repeat(96);
+    api.payrollRequest.mockResolvedValue({ success: false, ResponseDian: { IsValid: 'false', ErrorMessage: { string: [`Regla: 90, Documento procesado anteriormente. CUNE ${cune}`] } } } as never);
+    await service.send(company, actor, 'document-a');
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('status=$3,cune=$4'), [company, 'document-a', 'UNCERTAIN', cune]);
+  });
+  it('no reenvía un rechazo histórico cuyo proveedor indicó que ya fue procesado', async () => {
+    const { service, query, api } = build({ status: 'REJECTED', number: '1' });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql: string) => sql.startsWith('SELECT response,validation,error FROM jarvis_payroll_transmissions')
+      ? [{ response: { message: 'Regla: 90, Documento procesado anteriormente' } }] : original(sql));
+    await expect(service.send(company, actor, 'document-a')).rejects.toThrow('pendiente de confirmación');
+    expect(api.payrollRequest).not.toHaveBeenCalled();
+    expect(query.mock.calls.some(([sql]) => sql.startsWith('INSERT INTO jarvis_payroll_transmissions'))).toBe(false);
+  });
+  it('permite consultar el CUNE de un rechazo histórico duplicado sin marcarlo como rechazo confirmado', async () => {
+    const cune = 'b'.repeat(96);
+    const { service, query, api } = build({ status: 'REJECTED', number: '1', cune: null });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql: string) => sql.startsWith('SELECT id,request,response,validation,error,created_at FROM jarvis_payroll_transmissions')
+      ? [{ response: { ResponseDian: { ErrorMessage: { string: [`Regla: 90, Documento procesado anteriormente. CUNE ${cune}`] } } } }]
+      : original(sql));
+    expect(await service.get(company, 'document-a')).toMatchObject({ status: 'UNCERTAIN', cune });
+    api.payrollStatus.mockResolvedValue({ ResponseDian: { IsValid: 'false' } });
+    await service.refreshStatus(company, actor, 'document-a');
+    expect(api.payrollStatus).toHaveBeenCalledWith(cune, 'private-token');
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('SET status=$3,cune=COALESCE(cune,$4)'), [company, 'document-a', 'UNCERTAIN', cune]);
+  });
+  it('recupera CUNE de una transmisión antigua en estado incierto', async () => {
+    const cune = 'c'.repeat(96);
+    const { service, query, api } = build({ status: 'UNCERTAIN', cune: null });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql: string) => sql.startsWith('SELECT id,request,response,validation,error,created_at FROM jarvis_payroll_transmissions')
+      ? [{ response: { message: `Documento procesado anteriormente. CUNE ${cune}` } }] : original(sql));
+    api.payrollStatus.mockResolvedValue({ ResponseDian: { IsValid: 'true' } });
+    await service.refreshStatus(company, actor, 'document-a');
+    expect(api.payrollStatus).toHaveBeenCalledWith(cune, 'private-token');
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('SET status=$3,cune=COALESCE(cune,$4)'), [company, 'document-a', 'ACCEPTED', cune]);
+  });
   it('reserva un envío ambiguo y no reintenta automáticamente', async () => {
     const { service, query, api } = build();
     api.payrollRequest.mockRejectedValue(new Error('timeout'));
@@ -317,7 +357,7 @@ describe('nómina: persistencia y transmisión', () => {
     expect(api.payrollRequest).toHaveBeenCalledTimes(1);
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("status='UNCERTAIN'"),
-      [company, 'document-a'],
+      [company, 'document-a', null],
     );
   });
   it('impide modificar una nómina aceptada', async () => {
@@ -499,7 +539,7 @@ describe('logs de fallos de nómina', () => {
     expect(errors).toHaveBeenCalledWith(expect.stringContaining('"employee":"employee-a"'));
     expect(errors).toHaveBeenCalledWith(expect.stringContaining('"month":"2026-10"'));
     expect(api.payrollRequest).toHaveBeenCalledWith('payroll', expect.objectContaining({ worker: expect.objectContaining({ address: 'Calle 1', municipality_id: 439, type_contract_id: 1 }), accrued: expect.objectContaining({ internal_bonus: '100.00', accrued_total: '1100.00' }) }), 'private-token');
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='REJECTED'"), [company, 'document-a']);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='REJECTED'"), [company, 'document-a', null]);
   });
 
   it('registra un rechazo de DIAN aun cuando el proveedor resuelve la petición HTTP', async () => {
@@ -561,7 +601,7 @@ describe('errores visibles del envío de nómina', () => {
     const { service, api, query } = build();
     api.payrollRequest.mockRejectedValue({ isAxiosError: true, response: { status: 422, data: { errors: { worker: ['Falta código'], eps: ['Revisa EPS'] }, token: 'private-token' } } });
     await expect(service.send(company, actor, 'document-a')).rejects.toThrow('Falta código');
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='REJECTED'"), [company, 'document-a']);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='REJECTED'"), [company, 'document-a', null]);
     const stored = query.mock.calls.find(([sql]) => sql.includes('response=$3,error=$4')) as any;
     expect(stored[1][3]).toBe('Falta código | Revisa EPS');
     expect(stored[1][2]).not.toContain('private-token');
@@ -571,13 +611,13 @@ describe('errores visibles del envío de nómina', () => {
     const { service, api, query } = build();
     api.payrollRequest.mockRejectedValue({ isAxiosError: true, response: { status, data: { message: 'No confirmado' } } });
     await expect(service.send(company, actor, 'document-a')).rejects.toThrow('No se confirmó');
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='UNCERTAIN'"), [company, 'document-a']);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='UNCERTAIN'"), [company, 'document-a', null]);
   });
   it('no habilita reenvío cuando un HTTP 422 informa documento ya procesado', async () => {
     const { service, api, query } = build();
     api.payrollRequest.mockRejectedValue({ isAxiosError: true, response: { status: 422, data: { message: 'Regla: 90, Documento procesado anteriormente.' } } });
     await expect(service.send(company, actor, 'document-a')).rejects.toThrow('No se confirmó');
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='UNCERTAIN'"), [company, 'document-a']);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("status='UNCERTAIN'"), [company, 'document-a', null]);
   });
   it('trata success false como error aunque el HTTP haya sido exitoso', async () => {
     const { service, api, query } = build();

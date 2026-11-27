@@ -22,6 +22,20 @@ import { randomUUID } from 'node:crypto';
 import { IntegrationsRepository } from '../repositories/integrations.repository';
 import { normalizeJarvisCredentials } from './helpers/jarvis-credentials.helper';
 import { issuerTaxProfile } from './helpers/jarvis-issuer-tax-profile.helper';
+import { storedPurchaseOrderReference } from './helpers/jarvis-purchase-order.helper';
+import type { JarvisPurchaseOrderDto } from './dto/create-jarvis-invoice.dto';
+
+function withPurchaseOrder(data: JarvisInvoicePdfData, kind?: string | null, order?: JarvisPurchaseOrderDto | null): JarvisInvoicePdfData {
+  if (kind !== JarvisResolutionKind.ELECTRONIC_INVOICE) return data;
+  const saved = storedPurchaseOrderReference(order);
+  if (!saved) return data;
+  const number = data.orderNumber?.trim();
+  return {
+    ...data,
+    orderNumber: number || saved.orderNumber,
+    orderDate: data.orderDate?.trim() || (!number || number === saved.orderNumber ? saved.orderDate : null),
+  };
+}
 
 function uniqueCodeLabel(kind?: string | null) {
   if (
@@ -171,7 +185,7 @@ export class JarvisInvoicePdfService {
     const logo = await this.safeLogo(companyId);
     const withKind = { emailDeliveries: invoice.sourceRequest?.emailDeliveries ?? [], documentKind: invoice.documentKind, recipientCopyEmails: invoice.sourceRequest?.recipientCopyEmails ?? [], sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
     const withMetadata = (data: JarvisInvoicePdfData) => ({
-      ...data, ...withKind,
+      ...withPurchaseOrder(data, invoice.documentKind, invoice.sourceRequest?.purchaseOrder), ...withKind,
       ...presentation,
       items: data.items.map((item, index) => ({ ...item,
         name: item.name?.trim() && item.name.trim() !== item.code?.trim() ? item.name
@@ -213,6 +227,7 @@ export class JarvisInvoicePdfService {
     cufe?: string | null;
     documentKind?: string | null;
     token?: string;
+    purchaseOrder?: JarvisPurchaseOrderDto;
   }): Promise<string> {
     try {
       const data = await this.buildPdfData(input);
@@ -236,6 +251,7 @@ export class JarvisInvoicePdfService {
     cufe?: string | null;
     documentKind?: string | null;
     token?: string;
+    purchaseOrder?: JarvisPurchaseOrderDto;
   }): Promise<JarvisInvoicePdfData | null> {
     if (input.historyId) return this.getData(input.companyId, input.historyId);
     const logo = await this.safeLogo(input.companyId);
@@ -244,11 +260,11 @@ export class JarvisInvoicePdfService {
     if (input.invoiceXml && input.cufe) {
       try {
         return {
-          ...mapInvoiceXmlToPurchaseInvoiceDownload(
+          ...withPurchaseOrder(mapInvoiceXmlToPurchaseInvoiceDownload(
             input.invoiceXml,
             input.historyId || 'issued',
             input.cufe,
-          ),
+          ), input.documentKind, input.purchaseOrder),
           ...withKind,
         };
       } catch {
@@ -259,7 +275,7 @@ export class JarvisInvoicePdfService {
       try {
         const xml = await this.nextPyme.getInvoiceXmlByCufe(input.cufe, input.token);
         return {
-          ...mapInvoiceXmlToPurchaseInvoiceDownload(xml, 'issued', input.cufe),
+          ...withPurchaseOrder(mapInvoiceXmlToPurchaseInvoiceDownload(xml, 'issued', input.cufe), input.documentKind, input.purchaseOrder),
           ...withKind,
         };
       } catch {

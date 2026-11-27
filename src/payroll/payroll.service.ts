@@ -46,7 +46,7 @@ import {
 import { prorate } from './payroll-domain';
 import { payrollPeriodBounds, validatePayrollPeriod } from './payroll-period';
 import type { CreatePayrollPeriodRequest } from './payroll-period';
-import { payrollCune, payrollFiles } from './payroll-response';
+import { payrollAlreadyProcessed, payrollCune, payrollFiles } from './payroll-response';
 import { collectRecords } from '../integration/jarvis/nextpyme/nextpyme-record-scan.helper';
 
 interface PayrollSendLogContext {
@@ -471,9 +471,10 @@ export class PayrollService {
       const monthly = !row.originalId ? monthlyById.get(row.state?.monthlyDocumentId ?? (row.state?.monthlyConsolidation ? row.id : '')) : undefined;
       const sourceStatus = row.status;
       if (monthly) { row.status = monthly.status; row.canDelete = false; lastResult = monthly.lastResult; }
+      if (row.status === 'REJECTED' && payrollAlreadyProcessed(lastResult)) row.status = 'UNCERTAIN';
       const failed = ['REJECTED', 'UNCERTAIN'].includes(row.status);
       const messages = failed ? payrollSubmissionErrors(lastResult) : [];
-      return { ...row, ...(!row.originalId ? payrollAdjustmentProjection(monthly?.id ?? row.id, adjustmentNotes) : {}), sourceStatus, monthlySubmission: monthly ? { id: monthly.id, status: monthly.status, cune: monthly.cune, number: monthly.number, prefix: monthly.prefix } : undefined, submissionErrors: !failed ? [] : messages.length ? messages : [row.status === 'UNCERTAIN'
+      return { ...row, ...(!row.originalId ? payrollAdjustmentProjection(monthly?.id ?? row.id, adjustmentNotes) : {}), sourceStatus, monthlySubmission: monthly ? { id: monthly.id, status: row.status, cune: monthly.cune ?? payrollCune(lastResult), number: monthly.number, prefix: monthly.prefix } : undefined, submissionErrors: !failed ? [] : messages.length ? messages : [row.status === 'UNCERTAIN'
         ? 'No se confirmó el envío. Verifica el resultado antes de reenviar.'
         : 'El envío no fue aceptado. Revisa los datos de la nómina.'] };
     });
@@ -514,8 +515,11 @@ export class PayrollService {
       'SELECT id,request,response,validation,error,created_at FROM jarvis_payroll_transmissions WHERE company_id=$1 AND document_id=$2 ORDER BY created_at DESC',
       [company, id],
     );
+    const duplicate = document.status === 'REJECTED' && payrollAlreadyProcessed(transmissions.map(t => ({ response: t.response, validation: t.validation, error: t.error })));
     return {
       ...document,
+      ...(duplicate ? { status: 'UNCERTAIN' } : {}),
+      ...((duplicate || document.status === 'UNCERTAIN') ? { cune: document.cune ?? payrollCune(transmissions) } : {}),
       transmissions,
       files: transmissions.flatMap((t) => payrollFiles(t.response)),
     };
@@ -978,6 +982,10 @@ export class PayrollService {
       const existing = rows.find((row: any) => row.state.monthlyConsolidation);
       // Idempotent: an accepted/in-flight monthly document is never transmitted twice.
       if (existing && ['ACCEPTED', 'PROCESSING', 'UNCERTAIN'].includes(existing.status)) return existing.id;
+      if (existing?.status === 'REJECTED') {
+        const previous = await m.query('SELECT response,validation,error FROM jarvis_payroll_transmissions WHERE company_id=$1 AND document_id=$2 ORDER BY created_at DESC', [company, existing.id]);
+        if (payrollAlreadyProcessed(previous)) return existing.id;
+      }
       const sources = rows.filter((row: any) => !row.state.monthlyConsolidation?.generated);
       try { assertMonthlyRevisions(sources, expected); } catch (error) { throw new ConflictException((error as Error).message); }
       if (sources.some((row: any) => !row.state.monthlyConsolidation &&
@@ -1039,7 +1047,7 @@ export class PayrollService {
       this.logSubmissionError(error, context);
       // Preflight failures also belong to this employee. Never overwrite an in-flight/accepted document.
       try {
-        if (!started) await this.db.transaction(async m => {
+        if (!started && context.stage !== 'CHECK_PREVIOUS_RESULT') await this.db.transaction(async m => {
           await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payroll:${company}`]);
           const [document] = await m.query('SELECT * FROM jarvis_payroll_documents WHERE company_id=$1 AND id=$2 FOR UPDATE', [company, id]);
           if (!document || !['DRAFT', 'REJECTED'].includes(document.status)) return;
@@ -1099,6 +1107,11 @@ export class PayrollService {
           throw new ConflictException(
             'La nómina ya se envió o tiene un envío pendiente de confirmación.',
           );
+        if (d.status === 'REJECTED') {
+          context.stage = 'CHECK_PREVIOUS_RESULT';
+          const previous = await m.query('SELECT response,validation,error FROM jarvis_payroll_transmissions WHERE company_id=$1 AND document_id=$2 ORDER BY created_at DESC', [company, id]);
+          if (payrollAlreadyProcessed(previous)) throw new ConflictException('El resultado del envío está pendiente de confirmación.');
+        }
         context.stage = 'MONTHLY_SOURCES';
         await this.verifyMonthlySources(m, company, d);
         context.stage = 'NUMBERING';
@@ -1205,7 +1218,7 @@ export class PayrollService {
       context.httpStatus = httpStatus;
       context.providerCode = axios.isAxiosError(error) ? error.code : undefined;
       context.providerMessage = payrollSubmissionErrors(safeError).join(' | ') || (error instanceof Error ? error.message : undefined);
-      const duplicate = /procesado anteriormente|already processed|regla:\s*90/i.test(JSON.stringify(safeError));
+      const duplicate = payrollAlreadyProcessed(safeError);
       const rejected = [400, 422].includes(httpStatus ?? 0) && !payrollCune(safeError) && !duplicate;
       const messages = payrollSubmissionErrors(safeError);
       const message = messages.join(' | ') || (rejected ? 'El proveedor rechazó los datos de la nómina.' : 'No se confirmó el resultado del proveedor; verifica el envío antes de reenviar.');
@@ -1214,8 +1227,8 @@ export class PayrollService {
       context.stage = 'SAVE_PROVIDER_ERROR';
       await this.db.transaction(async (m) => {
         await m.query(
-          rejected ? "UPDATE jarvis_payroll_documents SET status='REJECTED',updated_at=now() WHERE company_id=$1 AND id=$2" : "UPDATE jarvis_payroll_documents SET status='UNCERTAIN',updated_at=now() WHERE company_id=$1 AND id=$2",
-          [company, id],
+          rejected ? "UPDATE jarvis_payroll_documents SET status='REJECTED',cune=COALESCE(cune,$3),updated_at=now() WHERE company_id=$1 AND id=$2" : "UPDATE jarvis_payroll_documents SET status='UNCERTAIN',cune=COALESCE(cune,$3),updated_at=now() WHERE company_id=$1 AND id=$2",
+          [company, id, payrollCune(safeError)],
         );
         await m.query(
           'UPDATE jarvis_payroll_transmissions SET response=$3,error=$4,completed_at=now() WHERE company_id=$1 AND id=$2',
@@ -1233,7 +1246,7 @@ export class PayrollService {
     const status =
       validation?.isValid === true
         ? 'ACCEPTED'
-        : validation?.isValid === false || ((response as any)?.success === false && !payrollCune(response) && !/procesado anteriormente|already processed|regla:\s*90/i.test(JSON.stringify(response)))
+        : !payrollAlreadyProcessed(response) && (validation?.isValid === false || ((response as any)?.success === false && !payrollCune(response)))
           ? 'REJECTED'
           : 'UNCERTAIN';
     if (status === 'ACCEPTED') {
@@ -1292,12 +1305,12 @@ export class PayrollService {
       // A negative status lookup can mean "not found yet"; it does not prove rejection.
       const status = validation.isValid
         ? 'ACCEPTED'
-        : current?.status === 'REJECTED'
+        : current?.status === 'REJECTED' && d.status !== 'UNCERTAIN'
           ? 'REJECTED'
           : 'UNCERTAIN';
       await m.query(
-        'UPDATE jarvis_payroll_documents SET status=$3,updated_at=now() WHERE company_id=$1 AND id=$2',
-        [company, id, status],
+        'UPDATE jarvis_payroll_documents SET status=$3,cune=COALESCE(cune,$4),updated_at=now() WHERE company_id=$1 AND id=$2',
+        [company, id, status, d.cune],
       );
       await m.query(
         'INSERT INTO jarvis_payroll_transmissions(id,company_id,document_id,request,response,validation,completed_at) VALUES($1,$2,$3,$4,$5,$6,now())',

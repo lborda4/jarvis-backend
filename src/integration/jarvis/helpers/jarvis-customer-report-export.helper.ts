@@ -151,8 +151,7 @@ function addGroupedReportSheet(
     summary.length +
     totals.length +
     (includeDetail ? detail.length + 3 : 0) +
-    warnings.length +
-    2;
+    (warnings.length ? warnings.length + 1 : 0);
   if (requiredRows > 1048576)
     throw new BadRequestException(
       'El reporte supera el límite de filas de una hoja de Excel. Reduce el rango o los filtros.',
@@ -192,16 +191,13 @@ function addGroupedReportSheet(
     addHeader(sheet, sheet.rowCount + 1, detailColumns);
     detail.forEach((row) => addValues(sheet, detailColumns, row));
   }
-  sheet.addRow([]);
+  if (warnings.length) sheet.addRow([]);
   const addNote = (value: string) => {
     const row = sheet.addRow([value]);
     sheet.mergeCells(row.number, 1, row.number, width);
     row.alignment = { vertical: 'top', wrapText: true };
     row.height = 30;
   };
-  addNote(
-    `Filtros: búsqueda ${filters.search || 'Todas'}; cliente ${filters.customer || 'Todos'}; vendedor ${filters.seller || 'Todos'}; producto ${filters.product || 'Todos'}; tipo ${filters.kind || 'Todos'}; moneda ${filters.currency || 'Todas'}`,
-  );
   warnings.forEach(addNote);
   sheet.views = [{ state: 'frozen', ySplit: 7 }];
 }

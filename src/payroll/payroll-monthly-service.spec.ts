@@ -97,6 +97,20 @@ describe('persistencia del envío mensual', () => {
     expect((await service.sendMonthlyEmployee(company, 'actor', '2026-10', employee, monthlyRevisions(sources))).status).toBe(status);
     expect(send).not.toHaveBeenCalled();
   });
+  it('no reconstruye ni reenvía un mensual histórico reportado como procesado', async () => {
+    const { service, sources, send, documents, query } = harness();
+    const first = await service.sendMonthlyEmployee(company, 'actor', '2026-10', employee, monthlyRevisions(sources));
+    documents.get(first.id).status = 'REJECTED';
+    const originalQuery = query.getMockImplementation()!;
+    query.mockImplementation(async (sql: string, params: any[] = []) => sql.startsWith('SELECT response,validation,error FROM jarvis_payroll_transmissions')
+      ? [{ response: { message: 'Regla: 90, documento procesado anteriormente' } }] : originalQuery(sql, params));
+    jest.mocked(service.get).mockImplementation(async (_company, id) => ({ ...documents.get(id), status: 'UNCERTAIN', transmissions: [], files: [] } as any));
+    send.mockClear();
+    const result = await service.sendMonthlyEmployee(company, 'actor', '2026-10', employee, monthlyRevisions(sources));
+    expect(result.status).toBe('UNCERTAIN');
+    expect(send).not.toHaveBeenCalled();
+    expect(documents.get(first.id).status).toBe('REJECTED');
+  });
   it('reconsolida un rechazo con valores corregidos y conserva el documento asignado', async () => {
     const { service, sources, send, documents } = harness();
     const first = await service.sendMonthlyEmployee(company, 'actor', '2026-10', employee, monthlyRevisions(sources));

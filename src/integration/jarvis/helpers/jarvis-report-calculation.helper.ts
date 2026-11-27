@@ -282,7 +282,6 @@ export function reportColumns(filters: ReportFilters): ReportColumn[] {
           ]
         : []),
       col('seller', 'Vendedor'),
-      col('direction', 'Retenciones'),
       ...common,
     ];
   const groups: Record<string, ReportColumn[]> = {
@@ -305,7 +304,6 @@ export function reportColumns(filters: ReportFilters): ReportColumn[] {
       col('participation', 'Participación en ventas netas (%)', 'percent'),
     ],
     taxes: [
-      col('direction', 'Retenciones'),
       col('kind', 'Tipo de comprobante'),
     ],
   };
@@ -500,10 +498,6 @@ export function calculateJarvisReport(
   if (missingDetail)
     warnings.add(
       `${missingDetail} comprobantes no conservan desglose suficiente. Sus totales registrados se incluyen cuando corresponde; subtotales e impuestos desconocidos se muestran sin dato. No se inventan productos ni valores.`,
-    );
-  if (filters.product)
-    warnings.add(
-      'Con filtro de producto, los importes corresponden solo a sus líneas. Los descuentos y retenciones generales se distribuyen proporcionalmente, conservando los centavos del comprobante.',
     );
   const groups = new Map<string, Detail[]>();
   for (const row of records) {

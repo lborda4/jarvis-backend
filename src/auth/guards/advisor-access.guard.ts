@@ -9,7 +9,9 @@ export class AdvisorAccessGuard implements CanActivate {
     if (request.user?.role !== UserRole.ADVISOR) return true;
     const path = (request.originalUrl ?? request.url).split('?')[0].replace(/\/+$/, '');
     if (request.method === 'GET' && path === '/auth/me') return true;
+    if (request.method === 'POST' && path === '/auth/switch-company') return true;
     if (path === '/advisor' || path.startsWith('/advisor/')) return true;
+    if (request.user.companyId && path !== '/admin' && !path.startsWith('/admin/')) return true;
     throw new ForbiddenException('El acceso de asesor no permite administrar empresas ni operar documentos.');
   }
 }

@@ -35,7 +35,7 @@ export async function resolveAuthenticatedCompany(
 /**
  * Normaliza un companyId (de un JWT o del usuario autenticado) y valida que,
  * permite sesiones de ADMIN y ADVISOR sin empresa activa.
- * Un asesor no puede seleccionar una empresa operativa.
+ * La asociación con la empresa se valida por separado.
  */
 export function resolveActiveCompanyId(
   rawCompanyId: string | null | undefined,
@@ -43,8 +43,6 @@ export function resolveActiveCompanyId(
   message: string,
 ): string {
   const companyId = rawCompanyId?.trim() ?? '';
-
-  if (companyId && role === UserRole.ADVISOR) throw new UnauthorizedException(message);
 
   if (!companyId && role !== UserRole.ADMIN && role !== UserRole.ADVISOR) {
     throw new UnauthorizedException(message);
