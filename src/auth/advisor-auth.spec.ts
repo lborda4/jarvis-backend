@@ -39,6 +39,43 @@ it('resolves the advisor role from the database, allowing the global access guar
   await expect(resolver.resolve({ sub: 'advisor', email: f.user.email, type: 'access', companyId: 'company' })).rejects.toThrow();
 });
 
+it('lists only linked companies on login and me, keeping the commercial landing company-free', async () => {
+  const f = setup();
+  const company = { id: 'owned-company', name: 'Mi empresa', nit: '900123456' };
+  f.links.findAllByUserId.mockResolvedValue([{ company }]);
+  const login = await f.service.login({ email: f.user.email, password: 'password' });
+  const me = await f.service.getMe({ userId: 'advisor', email: f.user.email, companyId: null });
+  for (const result of [login, me]) {
+    expect(result.user).toMatchObject({ role: UserRole.ADVISOR, company: null });
+    expect(result.companies).toEqual([expect.objectContaining(company)]);
+  }
+});
+it('switches into a linked company without changing the advisor role and keeps it on refresh and me', async () => {
+  const f = setup();
+  const company = { id: 'owned-company', name: 'Mi empresa', nit: '900123456' };
+  f.links.findAllByUserId.mockResolvedValue([{ company }]);
+  f.links.findByUserIdAndCompanyId.mockResolvedValue({ user: f.user, companyId: company.id, company });
+  const session = await f.service.switchCompany({ userId: 'advisor', email: f.user.email, companyId: null }, { companyId: company.id });
+  expect(session.user).toMatchObject({ role: UserRole.ADVISOR, company });
+  expect(f.links.findByUserIdAndCompanyId).toHaveBeenCalledWith('advisor', company.id);
+  const me = await f.service.getMe({ userId: 'advisor', email: f.user.email, companyId: company.id });
+  expect(me.user).toMatchObject({ role: UserRole.ADVISOR, company });
+  f.jwt.verifyAsync.mockResolvedValue({ sub: 'advisor', type: 'refresh', companyId: company.id });
+  await expect(f.service.refresh({ refreshToken: 'refresh' })).resolves.toMatchObject({ accessToken: 'signed' });
+  expect(f.jwt.signAsync).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: company.id }), expect.anything());
+});
+it('rejects a sales portfolio company with no UserCompany membership on switch, me, refresh and JWT resolution', async () => {
+  const f = setup();
+  const identity = { userId: 'advisor', email: f.user.email, companyId: 'portfolio-only' };
+  await expect(f.service.switchCompany(identity, { companyId: 'portfolio-only' })).rejects.toThrow();
+  await expect(f.service.getMe(identity)).rejects.toThrow();
+  f.jwt.verifyAsync.mockResolvedValue({ sub: 'advisor', type: 'refresh', companyId: 'portfolio-only' });
+  await expect(f.service.refresh({ refreshToken: 'refresh' })).rejects.toThrow();
+  const resolver = new AuthenticatedUserResolverService(f.users as never, f.links as never);
+  await expect(resolver.resolve({ sub: 'advisor', email: f.user.email, type: 'access', companyId: 'portfolio-only' })).rejects.toThrow();
+  expect(f.jwt.signAsync).not.toHaveBeenCalled();
+});
+
 it('lists only linked companies and validates switching, refresh and membership revocation', async () => {
   const f = setup();
   const company = { id: 'linked', name: 'Empresa', nit: '123' };
