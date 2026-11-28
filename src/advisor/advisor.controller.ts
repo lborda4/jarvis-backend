@@ -10,7 +10,7 @@ import { CreateAdminCompanyRequestDto } from '../admin/dto/admin-company.dto';
 import { RegistrationInvitationService } from '../auth/services/registration-invitation.service';
 import { AdvisorSalesService } from './advisor-sales.service';
 import { AdminGuard } from '../admin/guards/admin.guard';
-import { AdvisorDemoInvoicesService, type DemoInvoiceInput } from './advisor-demo-invoices.service';
+import { SharedDemoService } from './shared-demo.service';
 
 @Injectable()
 export class AdvisorGuard implements CanActivate {
@@ -36,17 +36,12 @@ export class AdvisorController {
   }
   @Get('demo') async demo(@CurrentUser() user: AuthenticatedUser) {
     await this.profile(user);
-    const [company] = await this.db.query('SELECT name, is_demo AS "isDemo" FROM advisor_demo_company WHERE singleton = true AND is_demo = true');
-    if (!company) throw new ServiceUnavailableException('La empresa de demostración no está disponible.');
-    return { company };
+    const company = await new SharedDemoService(this.db).company();
+    return { company: { id: company.id, name: company.name, nit: company.nit, isDemo: true, jarvisModules: company.jarvisModules } };
   }
-  @Get('demo/invoices') async demoInvoices(@CurrentUser() user: AuthenticatedUser, @Query('page') page?: string) {
+  @Post('demo/access') async demoAccess(@CurrentUser() user: AuthenticatedUser) {
     await this.profile(user);
-    return new AdvisorDemoInvoicesService(this.db).list(page);
-  }
-  @Post('demo/invoices') async createDemoInvoice(@CurrentUser() user: AuthenticatedUser, @Body() input: DemoInvoiceInput) {
-    await this.profile(user);
-    return new AdvisorDemoInvoicesService(this.db).create(input, user.userId);
+    return { company: await new SharedDemoService(this.db).grantAccess(user.userId) };
   }
   @Get('companies/lookup-name') async lookup(@CurrentUser() user: AuthenticatedUser, @Query('nit') nit: string) {
     await this.profile(user); return this.admin.lookupCompanyName(nit ?? '');

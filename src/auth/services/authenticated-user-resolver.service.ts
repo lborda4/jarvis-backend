@@ -71,7 +71,7 @@ export class AuthenticatedUserResolverService {
     resolveActiveCompanyId(requestedCompanyId, userCompany.user.role,
       'El token no contiene una empresa activa válida.');
 
-    if (!userCompany.company) {
+    if (!userCompany.company || (userCompany.company.isDemo && userCompany.user.role !== UserRole.ADVISOR)) {
       throw new UnauthorizedException(
         'La empresa activa del token no está asociada al usuario.',
       );

@@ -8,7 +8,7 @@ import { SalesInvoicePdfDocument } from './sales-invoice-pdf.document';
 export async function renderJarvisInvoicePdfBase64(
   data: JarvisInvoicePdfData,
 ): Promise<string> {
-  const qr = await QRCode.toDataURL(data.dianQrText, {
+  const qr = data.isDemo ? '' : await QRCode.toDataURL(data.dianQrText, {
     margin: 1,
     width: 240,
     errorCorrectionLevel: 'M',

@@ -43,7 +43,7 @@ const styles = StyleSheet.create({
 
 export interface PayrollPayslipProps {
   detail: PayrollDetail
-  company: { name: string; nit: string }
+  company: { name: string; nit: string; isDemo?: boolean }
   position?: string
 }
 
@@ -66,7 +66,7 @@ export function PayrollPayslipPdf({ detail, company, position }: PayrollPayslipP
         <View style={styles.header}>
           <View style={styles.company}><Text style={styles.companyName}>{company.name}</Text>{company.nit && <Text style={styles.muted}>NIT {company.nit}</Text>}</View>
           <View style={styles.document}>
-            <Text style={styles.title}>Desprendible de nómina</Text>
+            <Text style={styles.title}>Desprendible de nómina</Text>{company.isDemo && <Text style={styles.subtitle}>DEMOSTRACIÓN · SIN VALIDEZ TRIBUTARIA</Text>}
             <Text style={styles.subtitle}>{state.payrollName || 'Comprobante de pago'}</Text>
           </View>
         </View>

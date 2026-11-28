@@ -1,3 +1,4 @@
+import { SHARED_DEMO_COMPANY_ID } from '../../advisor/shared-demo.constants';
 import { normalizeInvoiceAppearance } from './pdf/invoice-appearance';
 import { BadRequestException, BadGatewayException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -183,7 +184,7 @@ export class JarvisInvoicePdfService {
     if (!invoice.cufe) throw new BadGatewayException(`El documento aún no tiene ${code} disponible. No vuelvas a emitirlo; actualiza el listado e intenta visualizarlo después.`);
     const presentation = await this.loadPdfPresentation(companyId, invoice.documentKind);
     const logo = await this.safeLogo(companyId);
-    const withKind = { emailDeliveries: invoice.sourceRequest?.emailDeliveries ?? [], documentKind: invoice.documentKind, recipientCopyEmails: invoice.sourceRequest?.recipientCopyEmails ?? [], sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
+    const withKind = { ...(companyId === SHARED_DEMO_COMPANY_ID ? { isDemo: true } : {}), emailDeliveries: invoice.sourceRequest?.emailDeliveries ?? [], documentKind: invoice.documentKind, recipientCopyEmails: invoice.sourceRequest?.recipientCopyEmails ?? [], sellers: invoice.sourceRequest?.sellers ?? [], paymentBreakdown: invoice.sourceRequest?.paymentBreakdown, attachment: attachmentMetadata(invoice.sourceRequest?.attachment), ...logo };
     const withMetadata = (data: JarvisInvoicePdfData) => ({
       ...withPurchaseOrder(data, invoice.documentKind, invoice.sourceRequest?.purchaseOrder), ...withKind,
       ...presentation,
@@ -256,7 +257,7 @@ export class JarvisInvoicePdfService {
     if (input.historyId) return this.getData(input.companyId, input.historyId);
     const logo = await this.safeLogo(input.companyId);
     const presentation = await this.loadPdfPresentation(input.companyId, input.documentKind);
-    const withKind = { documentKind: input.documentKind ?? null, ...presentation, ...logo };
+    const withKind = { ...(input.companyId === SHARED_DEMO_COMPANY_ID ? { isDemo: true } : {}), documentKind: input.documentKind ?? null, ...presentation, ...logo };
     if (input.invoiceXml && input.cufe) {
       try {
         return {

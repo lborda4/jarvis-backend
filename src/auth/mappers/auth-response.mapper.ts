@@ -14,6 +14,7 @@ export function mapCompanyToAuthCompanyDto(company: Company): AuthCompanyDto {
     id: company.id,
     name: company.name,
     nit: company.nit,
+    ...(company.isDemo ? { isDemo: true } : {}),
     jarvisModules: company.jarvisModules ?? [...DEFAULT_JARVIS_MODULES],
   };
 }

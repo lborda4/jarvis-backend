@@ -1,3 +1,4 @@
+import { SHARED_DEMO_COMPANY_ID } from '../../advisor/shared-demo.constants';
 import { JarvisInvoicePdfService } from './jarvis-invoice-pdf.service';
 import { DOWNLOAD_XML } from '../../electronic-document/mappers/invoice-xml-download.fixture';
 
@@ -192,6 +193,13 @@ describe('sales invoice PDF data', () => {
     expect(second.buyer).toEqual(first.buyer);
     expect(second.items).toEqual(first.items);
   });
+
+
+it('marks shared demo PDFs while keeping the same invoice data service',async()=>{
+  const {service}=setup({cufe:'cufe-123',invoiceXml:DOWNLOAD_XML,documentKind:'ELECTRONIC_INVOICE'});
+  expect(await service.getData(SHARED_DEMO_COMPANY_ID,'id')).toMatchObject({isDemo:true});
+  expect((await service.getData('real-company','id')).isDemo).toBeUndefined();
+});
 
   function setup(invoice: unknown) {
     const query = { addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn().mockResolvedValue(invoice) };

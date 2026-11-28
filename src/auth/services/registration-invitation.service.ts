@@ -1,3 +1,4 @@
+import { SHARED_DEMO_COMPANY_ID } from '../../advisor/shared-demo.constants';
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
@@ -43,6 +44,7 @@ export class RegistrationInvitationService {
 
   private async sendInvitation(companyId: string, emailValue: unknown, actor: string, primary: boolean): Promise<WelcomeDelivery> {
     const email = registrationEmail(emailValue);
+    if (companyId === SHARED_DEMO_COMPANY_ID) return { status: 'SENT', message: 'Invitación simulada. No se envió ningún correo desde la empresa demo.' };
     const origin = resolveAppPublicOrigin(this.config.get('passwordResetMail.appPublicUrl', { infer: true }));
     if (!origin) return { status: 'FAILED', message: 'La empresa está creada, pero falta APP_PUBLIC_URL en el servidor para enviar la bienvenida.' };
     try {

@@ -26,3 +26,12 @@ it('presenta la orden y fecha después de la generación solo para facturas', ()
   expect(textContent(SalesInvoicePdfDocument({ data: { ...data, documentKind: 'CREDIT_NOTE' }, qr: '' }))).not.toContain('Orden de compra:');
   expect(textContent(SalesInvoicePdfDocument({ data: { ...data, orderNumber: null }, qr: '' }))).not.toContain('Orden de compra:');
 });
+
+it('prints a demonstration label and no DIAN validation claim for demo documents',()=>{
+  const data={...mapInvoiceXmlToPurchaseInvoiceDownload(DOWNLOAD_XML,'id','cufe-123'),isDemo:true};
+  const document=SalesInvoicePdfDocument({data,qr:''});
+  const text=textContent(document);
+  expect(text).toContain('DEMOSTRACIÓN · SIN VALIDEZ TRIBUTARIA');
+  expect(text).not.toContain('Documento electrónico validado por la DIAN');
+  expect(text).toContain('Código de simulación:');
+});

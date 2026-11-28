@@ -1,6 +1,9 @@
+import { installSharedDemoTransport } from './nextpyme/shared-demo-http';
+import { SharedDemoTransport } from './nextpyme/shared-demo-transport';
 import {
   BadGatewayException,
   Injectable,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
@@ -39,7 +42,8 @@ export class NextPymeRutService {
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService<AppConfiguration, true>,
-  ) {}
+    @Optional() demoTransport?: SharedDemoTransport,
+  ) { installSharedDemoTransport(httpService, demoTransport); }
 
   async lookupDocument(
     documentType: JarvisDocumentType,

@@ -1,3 +1,4 @@
+import { SHARED_DEMO_COMPANY_ID } from '../advisor/shared-demo.constants';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import AdmZip from 'adm-zip';
@@ -44,7 +45,7 @@ export class PayrollPayslipsService {
     return `Desprendible-${identification}-${row.state.startDate}-${row.state.endDate}-${row.id}.pdf`;
   }
   private async render(company: string, row: any) {
-    const [employer] = await this.db.query('SELECT name,nit FROM companies WHERE id=$1', [company]);
+    const [employer] = await this.db.query('SELECT name,nit,is_demo AS "isDemo" FROM companies WHERE id=$1', [company]);
     if (!employer) throw new NotFoundException('No se encontró la empresa.');
     const { generatePayrollPayslip } = await import('./payroll-payslip-pdf.js');
     return { filename: this.filename(row), buffer: await generatePayrollPayslip({ detail: row, company: employer, position: row.positionName }) };
@@ -70,6 +71,7 @@ export class PayrollPayslipsService {
     const [row] = await this.records(company, [id]);
     const recipient = typeof row.recipientEmail === 'string' ? row.recipientEmail.trim() : '';
     if (!validEmail(recipient)) throw new BadRequestException('Configura un correo válido en el empleado antes de enviar su desprendible.');
+    if (company === SHARED_DEMO_COMPANY_ID) return { sent: true, simulated: true };
     const fingerprint = createHash('sha256').update(JSON.stringify([row.state, row.employee_snapshot, row.parameter_snapshot, recipient, row.positionName])).digest('hex');
     const key = `payroll-${company}-${id}-${requestId}-${fingerprint}`;
     for (const [key, job] of this.mailJobs) if (Date.now() - job.created > 23 * 60 * 60 * 1000) this.mailJobs.delete(key);

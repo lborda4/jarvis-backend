@@ -243,7 +243,7 @@ export class AuthService {
         companyId,
       );
 
-    if (!userCompany?.company) {
+    if (!userCompany?.company || (userCompany.company.isDemo && user.role !== UserRole.ADVISOR)) {
       throw new UnauthorizedException({
         message: AUTH_ERROR_MESSAGE.COMPANY_NOT_LINKED,
         code: AUTH_ERROR_CODE.COMPANY_NOT_LINKED,
@@ -309,7 +309,7 @@ export class AuthService {
         companyId,
       );
 
-    if (!userCompany?.company) {
+    if (!userCompany?.company || (userCompany.company.isDemo && user.role !== UserRole.ADVISOR)) {
       throw new UnauthorizedException(
         'La empresa activa del token no está asociada al usuario.',
       );
@@ -330,7 +330,7 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inactivo o no encontrado.');
     }
 
-    const companies = await this.listCompaniesForUser(user.id);
+    const companies = await this.listCompaniesForUser(user.id, user.role);
     const companyId = resolveActiveCompanyId(
       currentUser.companyId,
       user.role,
@@ -347,7 +347,7 @@ export class AuthService {
         companyId,
       );
 
-    if (!userCompany?.company) {
+    if (!userCompany?.company || (userCompany.company.isDemo && user.role !== UserRole.ADVISOR)) {
       throw new UnauthorizedException(
         'La empresa activa no está asociada al usuario.',
       );
@@ -366,7 +366,7 @@ export class AuthService {
     company: Company | null,
   ): Promise<AuthTokensResponseDto> {
     const tokens = await this.generateTokens(user, company?.id ?? null);
-    const companies = await this.listCompaniesForUser(user.id);
+    const companies = await this.listCompaniesForUser(user.id, user.role);
 
     return buildAuthTokensResponse(
       tokens.accessToken,
@@ -397,19 +397,19 @@ export class AuthService {
     }
   }
 
-  private async listCompaniesForUser(userId: string): Promise<Company[]> {
+  private async listCompaniesForUser(userId: string, role?: UserRole): Promise<Company[]> {
     const links = await this.userCompaniesRepository.findAllByUserId(userId);
 
     return links
       .map((link) => link.company)
-      .filter((company): company is Company => Boolean(company));
+      .filter((company): company is Company => Boolean(company) && (!company!.isDemo || role === UserRole.ADVISOR));
   }
 
   private async resolveActiveCompanyForUser(
     user: User,
   ): Promise<Company | null> {
     if (user.role === UserRole.ADVISOR) return null;
-    const companies = await this.listCompaniesForUser(user.id);
+    const companies = await this.listCompaniesForUser(user.id, user.role);
 
     if (companies.length === 0) {
       if (user.role === UserRole.ADMIN) {

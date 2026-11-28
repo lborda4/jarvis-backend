@@ -1,3 +1,5 @@
+import { installSharedDemoTransport } from './shared-demo-http';
+import { SharedDemoTransport } from './shared-demo-transport';
 import { radianResponseForLog } from './nextpyme-radian-response-log';
 import { radianProviderDiagnostic } from './nextpyme-radian-diagnostic';
 import { parseInvoiceRadianStatus, type InvoiceRadianStatus } from './nextpyme-radian-status';
@@ -7,6 +9,7 @@ import { extractNextPymeInvoiceXml } from './nextpyme-invoice-xml.helper';
 import {
   BadGatewayException,
   Injectable,
+  Optional,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -386,7 +389,8 @@ export class NextPymeApiClient {
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService<AppConfiguration, true>,
-  ) {}
+    @Optional() demoTransport?: SharedDemoTransport,
+  ) { installSharedDemoTransport(httpService, demoTransport); }
 
   /** Assignment only. The supplied curl uses POST with an empty body; do not log this response (contains P12 passwords). */
   async getCertificateTerm(companyNit: string, companyToken: string): Promise<JarvisCertificateTerm> {

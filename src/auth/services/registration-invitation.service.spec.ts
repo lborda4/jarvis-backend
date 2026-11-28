@@ -1,3 +1,4 @@
+import { SHARED_DEMO_COMPANY_ID } from '../../advisor/shared-demo.constants';
 import { RegistrationInvitationService } from './registration-invitation.service';
 import { newRegistrationToken, registrationTokenHash } from '../helpers/company-registration.helper';
 import { buildWelcomeEmail } from '../helpers/welcome-email.helper';
@@ -112,4 +113,10 @@ it('escapa el contenido dinámico del correo de bienvenida', () => {
   expect(email.html).not.toContain('<Empresa & socios>');
   expect(email.html).toContain('72 horas');
   expect(email.text).toContain('https://jarvis.example/registro?token=');
+});
+
+it('simulates demo invitations without creating registration tokens or sending real messages',async()=>{
+  const f=setup();
+  await expect(f.service.send(SHARED_DEMO_COMPANY_ID,'demo@example.test','advisor')).resolves.toMatchObject({status:'SENT'});
+  expect(f.db.transaction).not.toHaveBeenCalled();expect(f.mail.sendWelcome).not.toHaveBeenCalled();
 });

@@ -21,6 +21,9 @@ import type { CommercialActivity } from '../../admin/commercial-activity';
 
 @Entity('companies')
 export class Company {
+  @Column({ name: 'is_demo', type: 'boolean', default: false })
+  isDemo: boolean;
+
   @Column({ name: 'advisor_id', type: 'uuid', nullable: true })
   advisorId: string | null;
   @ManyToOne(() => Advisor, { nullable: true, onDelete: 'RESTRICT' })

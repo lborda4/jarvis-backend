@@ -1,3 +1,4 @@
+import { SharedDemoTransport } from './nextpyme/shared-demo-transport';
 import { InvoiceAppearanceService } from './invoice-appearance.service';
 import { InvoiceAppearanceController } from './invoice-appearance.controller';
 import { JarvisReportsController } from './jarvis-reports.controller';
@@ -56,6 +57,7 @@ import { JarvisTercerosRepository } from './repositories/jarvis-terceros.reposit
   ],
   controllers: [InvoiceAppearanceController, JarvisReportsController, JarvisController, JarvisSellersController, JarvisInvoiceDraftsController, JarvisInvoiceAttachmentsController, PayrollController, PayrollPayslipsController],
   providers: [
+    SharedDemoTransport,
     InvoiceAppearanceService,
     JarvisReportsService,
     PayrollService,
